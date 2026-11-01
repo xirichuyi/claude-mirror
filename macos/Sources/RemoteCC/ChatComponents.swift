@@ -11,11 +11,9 @@ struct ThinkingCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Button { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } } label: {
                 HStack(spacing: 9) {
-                    Image(systemName: "sparkles").foregroundStyle(WorkbenchTheme.accent)
-                    Text(active ? "正在思考" : "思考过程").font(.system(size: 12, weight: .medium))
                     if active { ProgressView().controlSize(.mini) }
-                    Spacer()
-                    Text(expanded ? "收起思考" : "查看思考").font(.system(size: 11)).foregroundStyle(.tertiary)
+                    else { Image(systemName: "checkmark.circle").foregroundStyle(.secondary) }
+                    Text(active ? "正在思考…" : "思考过程").font(.system(size: 12))
                     Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 9)).foregroundStyle(.secondary)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton).accessibilityLabel((active ? "正在思考" : "思考过程") + (expanded ? "，收起" : "，展开"))
@@ -25,13 +23,8 @@ struct ThinkingCard: View {
                         .font(.system(size: 13)).lineSpacing(5).foregroundStyle(.secondary)
                         .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(maxHeight: 260).fixedSize(horizontal: false, vertical: true)
-            } else if active {
-                Text(text.isEmpty ? "正在分析你的请求…" : String(text.suffix(140)).replacingOccurrences(of: "\n", with: " "))
-                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-                    .accessibilityHidden(true)
             }
-        }.padding(12)
-            .background(WorkbenchTheme.sidebar.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+        }.foregroundStyle(.secondary).padding(.vertical, 7).padding(.horizontal, 2)
     }
 }
 

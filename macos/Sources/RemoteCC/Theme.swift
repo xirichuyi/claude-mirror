@@ -20,6 +20,19 @@ enum WorkbenchTheme {
     }
 }
 
+struct ComposerActionStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(enabled ? WorkbenchTheme.onInk : Color.secondary.opacity(0.45))
+            .frame(width: 30, height: 30)
+            .background(enabled ? WorkbenchTheme.ink : Color.primary.opacity(0.05), in: Circle())
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
 struct WorkbenchButtonStyle: ButtonStyle {
     var prominent = false
     func makeBody(configuration: Configuration) -> some View {

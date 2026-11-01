@@ -32,7 +32,6 @@ struct MachineHomeView: View {
                     }
                 }
                 if model.currentConfig != nil {
-                    ComposerArea().padding(.horizontal, -22)
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Text("最近对话").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)

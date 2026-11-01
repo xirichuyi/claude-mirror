@@ -20,10 +20,10 @@ struct ChatView: View {
                 MachineHomeView()
             } else if let session = model.active, !session.messages.isEmpty || session.remoteHistoryRef != nil {
                 MessagesList(session: session).id(session.id)
-                ComposerArea()
             } else {
                 WelcomeView()
             }
+            if model.currentConfig != nil { ComposerArea() }
         }
         .background(WorkbenchTheme.canvas)
     }
@@ -41,7 +41,6 @@ struct WelcomeView: View {
                     Text("今天，想完成什么？")
                         .font(.system(size: 30, weight: .regular, design: .serif)).tracking(-0.6)
                 }
-                ComposerArea()
                 HStack(spacing: 8) {
                     suggestion("了解项目", icon: "folder", prompt: "请梳理这个项目的目录结构、技术栈和主要入口。")
                     suggestion("检查代码", icon: "text.magnifyingglass", prompt: "请检查当前项目，找出影响使用的问题并给出改进建议。")
@@ -153,11 +152,13 @@ struct MessageRow: View, Equatable {
 
     private var userBody: some View {
         VStack(alignment: .trailing, spacing: 6) {
-            Text(message.text ?? "")
+            if let text = message.text, !text.isEmpty {
+            Text(text)
                 .textSelection(.enabled)
                 .font(.system(size: 14)).lineSpacing(5)
                 .padding(.horizontal, 20).padding(.vertical, 14)
                 .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: 20))
+            }
             if let files = message.attachments {
                 ForEach(files) { file in
                     ChatAttachmentView(file: file)
@@ -169,13 +170,6 @@ struct MessageRow: View, Equatable {
 
     private var assistantBody: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if showHeader && busy {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.mini)
-                    Text(activityLabel).font(.system(size: 12)).foregroundStyle(.secondary)
-                }.padding(.bottom, 10)
-                Divider().padding(.bottom, 8)
-            }
             ForEach(Array((message.blocks ?? []).enumerated()), id: \.offset) { index, block in
                 BlockView(block: block, actions: actions, thinkingActive: busy && sessionStatus == "working" && index == (message.blocks?.count ?? 0) - 1)
             }
@@ -198,22 +192,27 @@ struct MessageRow: View, Equatable {
                 }.foregroundStyle(.red).padding(14).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.red.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
             }
-            if busy && message.error == nil {
+            if busy && message.error == nil && !hasInlineProgress {
                 HStack(spacing: 8) {
                     if sessionStatus == "permission" { Image(systemName: "hand.raised").foregroundStyle(WorkbenchTheme.accent) }
                     else { ProgressView().controlSize(.mini) }
                     Text(message.activity ?? activityLabel).font(.system(size: 12)).foregroundStyle(.secondary)
                 }.padding(.vertical, 8).accessibilityElement(children: .combine)
             }
-            if message.interrupted == true { Text("已停止生成 · 可以发送下一条消息继续").font(.caption).foregroundStyle(.secondary) }
+            if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(.secondary) }
             if !busy { footer }
         }
     }
 
+    private var hasInlineProgress: Bool {
+        guard sessionStatus == "working", let last = message.blocks?.last else { return false }
+        return last.type == "thinking" || (last.type == "tool" && last.status == "running")
+    }
+
     private var activityLabel: String {
-        if sessionStatus == "permission" { return "需要你的确认，请查看输入框上方的请求" }
-        if sessionStatus == "stopping" { return "正在停止，已生成的内容会保留…" }
-        if sessionStatus == "detached" { return "连接已中断，等待重新同步远端任务" }
+        if sessionStatus == "permission" { return "等待确认" }
+        if sessionStatus == "stopping" { return "正在停止…" }
+        if sessionStatus == "detached" { return "等待重新连接…" }
         if message.blocks?.contains(where: { $0.type == "tool" && $0.status == "running" }) == true { return "正在执行工具…" }
         if message.blocks?.last?.type == "thinking" { return "正在思考…" }
         return (message.blocks ?? []).isEmpty ? "等待 Claude 响应…" : "正在生成回复…"

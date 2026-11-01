@@ -99,35 +99,16 @@ struct ComposerArea: View {
                 }
                 return true
             }
-            if !activity.isEmpty || !model.transferStatus.isEmpty {
-                HStack {
-                    Text(activity).lineLimit(1)
-                    Spacer()
-                    Text(model.transferStatus).lineLimit(1)
-                }
+            Text(model.transferStatus).lineLimit(1)
                 .font(.caption2).foregroundStyle(.secondary)
-            }
+                .frame(height: 14, alignment: .leading)
+
         }
         .padding(.horizontal, 22).padding(.bottom, 12).padding(.top, 8)
         .frame(maxWidth: 1080)
         .frame(maxWidth: .infinity)
         .onChange(of: text.wrappedValue) { refreshMentions() }
         .onChange(of: caret) { selection = 0 }
-    }
-
-    private var activity: String {
-        guard model.isConnected else { return "" }
-        guard let session = model.active else { return "" }
-        if session.status == "detached" { return "重新连接 SSH 后同步远端任务" }
-        guard session.isBusy else { return "" }
-        let message = session.messages.last
-        if let activity = message?.activity { return activity + " · Enter 排队" }
-        if let running = message?.blocks?.last(where: { $0.type == "tool" && $0.status == "running" }) {
-            let view = ToolPresentation(name: running.name, input: running.input)
-            let subject = view.file.map { ($0 as NSString).lastPathComponent } ?? view.subject ?? ""
-            return "\(view.title) \(subject)" + (running.elapsed.map { " · \(Int($0))s" } ?? "") + " · Enter 排队"
-        }
-        return statusLabel(session.status) + " · Enter 排队"
     }
 
     @ViewBuilder private func todoStrip(_ session: ChatSession) -> some View {
@@ -239,18 +220,21 @@ struct ComposerArea: View {
                 .menuStyle(.borderlessButton).fixedSize().disabled(!model.isConnected || changingModel)
             }
             if session == nil { Spacer() }
-            if busy {
-                Button { model.stop() } label: { Image(systemName: "stop.fill").font(.system(size: 12)).foregroundStyle(.white).frame(width: 30, height: 30).background(WorkbenchTheme.accent, in: Circle()) }.buttonStyle(.plain).help("停止生成").disabled(session?.status == "stopping" || !model.isConnected)
+            HStack(spacing: 8) {
+                if busy && canSend {
+                    Button { send() } label: { Image(systemName: "text.badge.plus") }
+                        .buttonStyle(ComposerActionStyle())
+                        .help("加入队列").accessibilityLabel("加入队列")
+                }
+                Button { if busy { model.stop() } else { send() } } label: {
+                    Image(systemName: busy ? "stop.fill" : "arrow.up")
+                }
+                .buttonStyle(ComposerActionStyle())
+                .help(busy ? "停止生成" : "发送消息 · Enter 发送，Shift + Enter 换行")
+                .accessibilityLabel(busy ? "停止生成" : "发送消息")
+                .disabled(busy ? session?.status == "stopping" || !model.isConnected : !canSend)
             }
-            Button { send() } label: {
-                Image(systemName: busy ? "text.badge.plus" : "arrow.up")
-                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(canSend ? WorkbenchTheme.onInk : Color.secondary.opacity(0.45))
-                    .frame(width: 30, height: 30)
-                    .background(canSend ? WorkbenchTheme.ink : Color.primary.opacity(0.05), in: Circle())
-            }
-                .buttonStyle(.plain).foregroundStyle(canSend ? WorkbenchTheme.accent : Color.secondary.opacity(0.35)).help(busy ? "排队，当前回复完成后发送" : "发送消息 · Enter 发送，Shift + Enter 换行")
-                .accessibilityLabel(busy ? "加入队列" : "发送消息 · Enter 发送，Shift + Enter 换行")
-                .disabled(!canSend)
+
         }
     }
 
