@@ -68,7 +68,7 @@ struct ComposerArea: View {
                         Button("移除") { model.failedUploads[id]?.removeAll { $0 == url } }
                     }.font(.caption).foregroundStyle(.secondary)
                 }
-                PromptEditor(text: text, caret: $caret, placeholder: "发送消息…", handler: handleKey, onPasteImage: { model.pasteImage($0) }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
+                PromptEditor(text: text, caret: $caret, placeholder: "发送消息…", handler: handleKey, onPasteImage: { model.pasteImage($0) }, onDropFiles: { model.upload($0) }, acceptsFileDrops: model.isConnected, onFileDrag: { dropTarget = $0 }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
                     .frame(height: editorHeight)
                 toolbarRow
             }
@@ -78,10 +78,24 @@ struct ComposerArea: View {
             .shadow(color: .black.opacity(0.025), radius: 10, y: 2)
             .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in
                 guard model.isConnected else { model.show("先连接服务器，再附加文件"); return false }
-                for provider in providers {
-                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                        if let url { Task { @MainActor in model.upload([url]) } }
+                let destinationId = id
+                Task { @MainActor in
+                    var urls: [URL] = []
+                    for provider in providers {
+                        let url: URL? = await withCheckedContinuation { continuation in
+                            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                                let url: URL?
+                                if let value = item as? URL { url = value }
+                                else if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
+                                else { url = nil }
+                                continuation.resume(returning: url?.isFileURL == true ? url : nil)
+                            }
+                        }
+                        if let url { urls.append(url) }
                     }
+                    guard id == destinationId else { model.show("对话已切换，请重新拖入文件"); return }
+                    if urls.isEmpty { model.show("无法读取拖入的文件，请重试") }
+                    else { model.upload(urls) }
                 }
                 return true
             }
@@ -349,6 +363,9 @@ struct PromptEditor: NSViewRepresentable {
     let placeholder: String
     let handler: (PromptKey) -> Bool
     let onPasteImage: (Data) -> Void
+    let onDropFiles: ([URL]) -> Void
+    let acceptsFileDrops: Bool
+    let onFileDrag: (Bool) -> Void
     var focusToken: UUID? = nil
     var onHeightChange: ((CGFloat) -> Void)? = nil
 
@@ -378,6 +395,10 @@ struct PromptEditor: NSViewRepresentable {
         view.onContentHeight = onHeightChange
         view.textContainerInset = NSSize(width: 0, height: 6)
         view.onPasteImage = onPasteImage
+        view.onDropFiles = onDropFiles
+        view.acceptsFileDrops = acceptsFileDrops
+        view.onFileDrag = onFileDrag
+        view.registerForDraggedTypes([.fileURL])
         scroll.documentView = view
         DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
         return scroll
@@ -387,6 +408,10 @@ struct PromptEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let view = scroll.documentView as? PasteAwareTextView else { return }
         view.onContentHeight = onHeightChange
+        view.onPasteImage = onPasteImage
+        view.onDropFiles = onDropFiles
+        view.acceptsFileDrops = acceptsFileDrops
+        view.onFileDrag = onFileDrag
         view.placeholder = placeholder
         view.setAccessibilityLabel(placeholder)
         view.needsDisplay = true
@@ -451,6 +476,53 @@ final class PasteAwareTextView: NSTextView {
         DispatchQueue.main.async { [weak self] in self?.onContentHeight?(height) }
     }
     var onPasteImage: ((Data) -> Void)?
+    var onDropFiles: (([URL]) -> Void)?
+    var acceptsFileDrops = false
+    var onFileDrag: ((Bool) -> Void)?
+
+    func fileURLs(_ board: NSPasteboard) -> [URL] {
+        (board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !fileURLs(sender.draggingPasteboard).isEmpty else { return super.draggingEntered(sender) }
+        onFileDrag?(acceptsFileDrops)
+        return acceptsFileDrops ? .copy : []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !fileURLs(sender.draggingPasteboard).isEmpty else { return super.draggingUpdated(sender) }
+        return acceptsFileDrops ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        onFileDrag?(false)
+        super.draggingExited(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard !fileURLs(sender.draggingPasteboard).isEmpty else { return super.prepareForDragOperation(sender) }
+        return acceptsFileDrops
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = fileURLs(sender.draggingPasteboard)
+        guard !urls.isEmpty else { return super.performDragOperation(sender) }
+        return acceptFileDrop(urls)
+    }
+
+    @discardableResult
+    func acceptFileDrop(_ urls: [URL]) -> Bool {
+        onFileDrag?(false)
+        guard acceptsFileDrops, !urls.isEmpty, urls.allSatisfy(\.isFileURL), let onDropFiles else { return false }
+        onDropFiles(urls)
+        return true
+    }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        onFileDrag?(false)
+        super.concludeDragOperation(sender)
+    }
     var placeholder = ""
 
     override func keyDown(with event: NSEvent) {

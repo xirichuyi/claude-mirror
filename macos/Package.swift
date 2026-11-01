@@ -13,5 +13,6 @@ let package = Package(
         .target(name: "RemoteCCCore"),
         .executableTarget(name: "RemoteCC", dependencies: ["RemoteCCCore", .product(name: "MarkdownUI", package: "swift-markdown-ui", condition: .when(platforms: [.macOS]))]),
         .testTarget(name: "RemoteCCCoreTests", dependencies: ["RemoteCCCore"]),
+        .testTarget(name: "RemoteCCUITests", dependencies: ["RemoteCC"]),
     ]
 )
