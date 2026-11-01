@@ -3,12 +3,12 @@
 set -eu
 cd "$(dirname "$0")/.."
 node scripts/prepare-server.cjs Resources/server
-swift build -c release --product RemoteCC
+swift build -c "${BUILD_CONFIGURATION:-release}" --product RemoteCC
 STAGING=$(mktemp -d "${TMPDIR:-/tmp}/remotecc-build.XXXXXX")
 trap 'rm -rf "$STAGING"' EXIT HUP INT TERM
 APP="$STAGING/RemoteCC.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$(swift build -c release --show-bin-path)/RemoteCC" "$APP/Contents/MacOS/RemoteCC"
+cp "$(swift build -c "${BUILD_CONFIGURATION:-release}" --show-bin-path)/RemoteCC" "$APP/Contents/MacOS/RemoteCC"
 swiftc Helpers/ClaudockAskpass.swift -o "$APP/Contents/MacOS/ClaudockAskpass"
 codesign --force --sign - "$APP/Contents/MacOS/ClaudockAskpass"
 cp -R Resources/server "$APP/Contents/Resources/server"

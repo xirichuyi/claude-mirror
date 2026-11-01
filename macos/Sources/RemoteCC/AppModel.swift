@@ -71,6 +71,29 @@ final class AppModel: ObservableObject {
     private let lastConnectionKey = "last-connection"
 
     init() {
+        #if DEBUG
+        if Bundle.main.bundleIdentifier == "local.claudemirror.demo" {
+            do {
+                let folder = FileManager.default.temporaryDirectory.appendingPathComponent("mirror-demo-" + UUID().uuidString)
+                let store = try ChatStore(directory: folder)
+                let examples = DemoData.sessions()
+                store.save(examples); store.flush()
+                let resources = try ServerResources(directory: Bundle.main.resourceURL!.appendingPathComponent("server"))
+                let agents = AgentClient(launcher: DemoLauncher(), resources: resources)
+                let files = RemoteFiles(agents: agents, cacheDirectory: folder.appendingPathComponent("cache"))
+                let engine = try ChatEngine(store: store, agents: agents, files: files)
+                self.engine = engine
+                savedMachines = [DemoData.config, ConnectionConfig(host: "staging", directory: "/workspace", name: "测试服务器")]
+                selectedMachine = DemoData.config
+                activeId = examples[0].id
+                try engine.hydrate(examples[0].id)
+                engine.updateConnection(DemoData.config, ConnectionState(status: .connected))
+                historyStatus = "已同步 3 条对话"
+                engine.onChange = { [weak self] in self?.objectWillChange.send() }
+            } catch { fatalError = error.localizedDescription }
+            return
+        }
+        #endif
         do {
             let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("RemoteCC Native")
             let caches = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("RemoteCC Native")

@@ -1,12 +1,44 @@
 <p align="center"><img src="docs/assets/claude-mirror.png" width="128" alt="镜像 Claude 标志"></p>
 <h1 align="center">镜像 Claude · Claude Mirror</h1>
-<p align="center">把远端 Claude Code 工作区，接到你的 Mac。</p>
+<p align="center">把远端 Claude Code 工作区，接到你的桌面。</p>
 
-镜像 Claude 是一个通过 SSH 使用远端 Claude Code 的 macOS 原生聊天客户端。代码、依赖、运行环境和 Claude 都留在服务器上，你在 Mac 上管理机器与项目、继续历史对话、审批工具操作、上传附件，以及预览和编辑远端生成的文件。
+镜像 Claude 是一个通过 SSH 使用远端 Claude Code 的桌面聊天项目。代码、依赖、运行环境和 Claude 都留在服务器上，你在本地管理机器与项目、继续历史对话、审批工具操作、上传附件，以及预览和编辑远端生成的文件。
 
 **让远端 Claude Code 像本地客户端一样使用。** 这里的“镜像”指把远端工作区呈现在本地，并非模型镜像、容器镜像或 API 转发服务。
 
 这是独立开发的非官方客户端，与 Anthropic 没有隶属关系。项目目标是尽量复用 Claude Code 的原生能力；当前适配范围和限制见下文。
+
+## 下载与平台
+
+**[下载最新版 · GitHub Releases](https://github.com/xirichuyi/claude-mirror/releases/latest)** · [全部版本](https://github.com/xirichuyi/claude-mirror/releases)
+
+| 客户端 / 环境 | 当前状态 |
+| --- | --- |
+| macOS 原生客户端 | SwiftUI / AppKit；macOS 14+，本次提供 Apple Silicon（arm64）DMG |
+| Intel Mac | 可尝试使用对应 Mac 从源码构建；本次不提供已验证的 Intel 安装包 |
+| Electron 客户端 | 仓库保留跨平台实现，可从源码启动；与原生版功能尚未完全一致 |
+| Windows / Linux 本地客户端 | 可尝试 Electron 源码版本；本次未完成这两个系统的发行验收，不提供安装包 |
+| 远端服务器 | 通过 SSH 访问；主要验证 Linux。安装脚本支持 Linux、macOS、WSL 的 Linux 环境 |
+
+项目不限定本地操作系统；**当前可以直接下载的正式构建产物是 macOS arm64 版**，不代表其他平台已经完成打包与测试。
+
+### 安装 DMG
+
+1. 从发布页下载 `Claude-Mirror-0.16.0-macOS-arm64.dmg`。
+2. 打开 DMG，将 **Claude Mirror.app** 拖入 **Applications**。
+3. 从应用程序启动「镜像 Claude」，添加 SSH 主机。
+
+本机使用 DMG 无需安装 Node.js、Swift 或 Xcode；远端仍需要 Node.js 和 Claude Code。发布页附 SHA-256 校验文件。
+
+当前构建为 ad-hoc 签名，尚未通过 Apple Developer ID 签名和 Apple 公证。macOS 可能阻止首次启动；核对下载来源后，可在「系统设置 → 隐私与安全性」中允许本次打开。不要关闭全局 Gatekeeper。
+
+## 界面预览
+
+以下截图来自实际原生客户端的隔离文档示例，使用虚构主机与对话，不包含个人服务器信息。
+
+![项目与聊天](docs/screenshots/chat.png)
+
+![SSH 连接设置](docs/screenshots/connect.png)
 
 ## 适合什么场景
 
@@ -55,7 +87,7 @@
 
 当前没有内置私钥生成、密钥上传、SSH config 编辑或复杂企业 SSO 流程。没有启用密码认证的服务器，不能仅靠客户端选项开启密码登录。同一个地址、用户和端口视为同一台机器，显示名称不改变历史归属；更换认证方式前先断开该机器。
 
-## 快速开始
+## 从源码运行
 
 ### 环境要求
 
@@ -71,9 +103,72 @@ sh macos/scripts/build-app.sh
 open macos/dist/RemoteCC.app
 ```
 
-界面显示名为“镜像 Claude”。为兼容旧版安装、存储和构建脚本，目前内部 Swift 模块、bundle ID 和构建输出仍保留 RemoteCC 名称。构建脚本会打包远端代理、SSH 认证辅助程序和应用图标；不要用裸 `swift run` 验收密码弹窗。
+源码构建后的界面显示名为“镜像 Claude”。为兼容旧版安装、存储和构建脚本，目前内部 Swift 模块、bundle ID 和构建输出仍保留 RemoteCC 名称。构建脚本会打包远端代理、SSH 认证辅助程序和应用图标；不要用裸 `swift run` 验收密码弹窗。
 
-构建产物为本地 ad-hoc 签名，尚未提供 Apple 公证的正式发行包。
+### Electron 客户端
+
+```sh
+git clone https://github.com/xirichuyi/claude-mirror.git
+cd claude-mirror
+npm ci
+npm start
+```
+
+此入口启动跨平台 Electron 界面，不会启动 SwiftUI 客户端。需要本机 Node.js、npm 和系统 OpenSSH；Linux 还需要图形桌面及 Electron 运行依赖。Windows/Linux 尚需平台验证，旧界面也不包含所有原生版新功能。
+
+### 自行打包 DMG
+
+```sh
+sh macos/scripts/build-dmg.sh
+```
+
+脚本在当前 Mac 架构上构建、验证签名并生成压缩磁盘映像与 SHA-256 文件，产物位于 `macos/dist/`。
+
+## 远端一键准备
+
+在本地仓库目录运行，脚本先通过 SSH 连接远端，再检测和安装 Claude：
+
+```sh
+sh scripts/setup-remote.sh my-server
+# 或指定端口、私钥和用户
+sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
+```
+
+- 使用系统 OpenSSH，支持 SSH config 别名、密码和密钥；保留主机指纹检查。
+- **已有 Claude：** 只验证能否运行，不覆盖、不升级、不改认证配置。
+- **没有 Claude：** 下载 [Claude 官方安装器](https://github.com/anthropics/claude-code#installation)并安装 stable 版本，由官方安装器选择平台和架构。
+- 安装后检查远端 Node.js ≥18.14；不满足时提示并返回非零状态，不擅自修改系统包。
+- 不会自动登录、索取 API Key，也不会把本机 Claude 凭据传到服务器。
+
+如需登录，请在服务器交互式终端运行 `claude auth login`；新安装通常位于 `~/.local/bin/claude`。完成后回到客户端连接同一主机。安装器要求远端能访问官方站点；发行地区、网络或系统依赖问题会按实际错误显示。
+
+**该步骤由你运行脚本触发，不是每次客户端连接都静默安装。** DMG 内也附带这两个脚本；一起复制到本地后即可使用。
+
+## 复制给 Agent 的使用指引
+
+把下面整段交给你的编程 Agent，并补充本机平台及 SSH 主机；不要在提示词中填密码或 API Key。
+
+```text
+请帮我部署和使用「镜像 Claude / Claude Mirror」。
+项目：https://github.com/xirichuyi/claude-mirror
+我的本机系统：[填写系统与 CPU 架构]
+目标 SSH 主机：[填写 SSH config 别名或 user@host]
+远端项目目录：[填写绝对路径]
+
+请先阅读仓库 README，再按实际平台操作：
+1. 确认本机平台与架构。Apple Silicon macOS 14+ 优先使用 GitHub Releases
+   的 DMG；其他平台检查 Electron 源码入口，不要假设存在已验证的安装包。
+2. 验证 SSH 连通性和主机身份。沿用我的 SSH 配置，不关闭主机指纹验证。
+3. 检查远端 Node.js 和 Claude Code。若 Claude 缺失，运行仓库的
+   scripts/setup-remote.sh 连接目标主机并安装；保留已有安装及认证配置。
+4. 需要账户登录时让我在远端交互式终端完成，不读取或复制 auth.json、
+   API Key、私钥内容，也不要把凭据写进仓库。
+5. 启动客户端，添加有名称的主机，选择远端项目并加载历史。
+6. 用无敏感内容的临时样例确认：聊天附件进入远端临时目录；同名同内容
+   复用路径，同名不同内容产生新路径；文件面板上传则写入当前目录。
+7. 验证文件预览、模型选择和连接恢复，说明已验证内容及平台限制。
+   不删除我的项目文件，不运行与任务无关的命令，不自动发送真实工作内容。
+```
 
 ## 日常使用
 
@@ -160,3 +255,7 @@ npm test
 项目曾名 RemoteCC、Claudock，现统一为镜像 Claude（Claude Mirror），保留原有提交历史与用户数据兼容路径。使用官方 Claude Agent SDK；Markdown 渲染使用 MarkdownUI，其依赖许可随应用打包在 `Resources/ThirdParty`。AgentBox 是交互设计参考之一，本项目没有将其整个客户端直接移植。
 
 项目代码采用 MIT 许可，见 [LICENSE](LICENSE)。第三方依赖遵循各自许可。镜像 Claude 名称和标识不表示获得 Anthropic 官方授权。
+
+## 社区
+
+欢迎在 [Linux DO 社区](https://linux.do/)交流使用体验。问题反馈与功能建议请提交到 [GitHub Issues](https://github.com/xirichuyi/claude-mirror/issues)。
