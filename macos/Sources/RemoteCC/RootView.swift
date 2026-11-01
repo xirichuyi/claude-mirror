@@ -82,7 +82,7 @@ struct WorkArea: View {
         }
         .onChange(of: model.activeWorkspace?.activeTabId) { showingChat = false }
         .onChange(of: model.showFiles) { if model.showFiles { showingChat = false } }
-        .navigationTitle(model.active?.name ?? "Claudock")
+        .navigationTitle(model.active?.name ?? "镜像 Claude")
         .navigationSubtitle(model.active.map { ($0.directory as NSString).lastPathComponent + " · " + $0.host } ?? model.currentConfig?.displayName ?? "")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -360,7 +360,7 @@ struct MachineSwitcher: View {
         Button { choosing.toggle() } label: {
             HStack(spacing: 6) {
                 BrandIcon(size: 26)
-                Text("Claudock").font(.system(size: 16, weight: .semibold))
+                Text("镜像 Claude").font(.system(size: 16, weight: .semibold))
                 Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }.buttonStyle(.plain).help("当前机器：" + (model.currentConfig?.displayName ?? "未连接") + " · 切换或添加机器")

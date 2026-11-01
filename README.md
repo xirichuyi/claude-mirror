@@ -1,10 +1,12 @@
-<p align="center"><img src="docs/assets/claudock.png" width="128" alt="Claudock logo"></p>
-<h1 align="center">Claudock</h1>
+<p align="center"><img src="docs/assets/claude-mirror.png" width="128" alt="镜像 Claude 标志"></p>
+<h1 align="center">镜像 Claude · Claude Mirror</h1>
 <p align="center">把远端 Claude Code 工作区，接到你的 Mac。</p>
 
-Claudock 是一个通过 SSH 使用远端 Claude Code 的 macOS 原生聊天客户端。代码、依赖、运行环境和 Claude 都留在服务器上，你在 Mac 上管理机器与项目、继续历史对话、审批工具操作、上传附件，以及预览和编辑远端生成的文件。
+镜像 Claude 是一个通过 SSH 使用远端 Claude Code 的 macOS 原生聊天客户端。代码、依赖、运行环境和 Claude 都留在服务器上，你在 Mac 上管理机器与项目、继续历史对话、审批工具操作、上传附件，以及预览和编辑远端生成的文件。
 
-名字来自 **Claude + Dock**。这是独立开发的客户端，与 Anthropic 没有隶属关系，不是官方 Claude 桌面应用，也不承诺复刻所有终端交互。
+**让远端 Claude Code 像本地客户端一样使用。** 这里的“镜像”指把远端工作区呈现在本地，并非模型镜像、容器镜像或 API 转发服务。
+
+这是独立开发的非官方客户端，与 Anthropic 没有隶属关系。项目目标是尽量复用 Claude Code 的原生能力；当前适配范围和限制见下文。
 
 ## 适合什么场景
 
@@ -62,16 +64,39 @@ Claudock 是一个通过 SSH 使用远端 Claude Code 的 macOS 原生聊天客�
 - 远端用户必须有权限访问对应项目及 Claude 历史。客户端不能绕过服务器权限。
 
 ```sh
-git clone https://github.com/xirichuyi/claudock.git
-cd claudock
+git clone https://github.com/xirichuyi/claude-mirror.git
+cd claude-mirror
 npm ci --ignore-scripts
 sh macos/scripts/build-app.sh
 open macos/dist/RemoteCC.app
 ```
 
-界面显示名为 Claudock。为兼容旧版安装、存储和构建脚本，目前内部 Swift 模块、bundle ID 和构建输出仍保留 RemoteCC 名称。构建脚本会打包远端代理、SSH 认证辅助程序和应用图标；不要用裸 `swift run` 验收密码弹窗。
+界面显示名为“镜像 Claude”。为兼容旧版安装、存储和构建脚本，目前内部 Swift 模块、bundle ID 和构建输出仍保留 RemoteCC 名称。构建脚本会打包远端代理、SSH 认证辅助程序和应用图标；不要用裸 `swift run` 验收密码弹窗。
 
 构建产物为本地 ad-hoc 签名，尚未提供 Apple 公证的正式发行包。
+
+## 日常使用
+
+1. **连接服务器**：添加一个有名称的 SSH 主机，连接后自动发现该用户的 Claude 历史。
+2. **选择项目**：在左侧展开项目继续对话，或选择远端目录开始新对话。正文按需加载，不一次下载全部聊天。
+3. **发送任务**：输入消息；输入 `/` 搜索远端命令，使用模型菜单切换远端提供的模型。回复中可停止，也可输入下一条消息加入队列。
+4. **附加文件**：把本机文件拖入输入框，或点击 `＋`。上传完成后显示附件，发送时将远端绝对路径交给 Claude。
+5. **管理文件**：打开文件面板浏览服务器；每行 `…` 菜单提供重命名、下载、删除等操作。删除需确认，直接作用于服务器。
+6. **查看产物**：点击聊天中的文件链接预览；可编辑文本、下载副本或使用本机软件打开。
+
+### 附件与目录上传有什么区别？
+
+| 操作 | 存放位置 | 重复文件行为 |
+| --- | --- | --- |
+| 输入框拖放、`＋`、粘贴截图 | 远端当前用户专用临时目录 | 同名同内容复用已校验的路径，不再传输文件内容 |
+| 同名文件修改后再次作为附件上传 | 新的内容摘要目录 | 保留旧版，新消息引用新版路径 |
+| 文件面板的上传按钮 | 当前浏览的远端目录 | 不覆盖已有同名文件，冲突时提示 |
+
+附件通过 SHA-256 校验内容，文件名保留。远端临时副本被清理或修改后，再次附加会重新上传。临时目录不是长期存储；需要保存的产物请下载或放入项目目录。已经上传的旧项目文件不会因升级自动移动或删除。
+
+### 断开连接后会怎样？
+
+远端任务由独立 Worker 执行，关闭窗口或断开 SSH 不会主动停止它。重新连接后恢复订阅输出与待确认请求。服务器重启、远端进程被杀死或模型服务失败不属于可保证继续执行的情况。需要审批的任务仍会等待确认。
 
 ## 架构
 
@@ -103,7 +128,7 @@ scripts/                    构建与端到端验证脚本
 docs/assets/                项目标识
 ```
 
-这次新增的密码、私钥选择和主机名称属于 **macOS 原生客户端**。旧 Electron 界面尚未同步这些功能。
+密码、私钥选择和主机名称等功能属于 **macOS 原生客户端**。旧 Electron 界面尚未同步这些功能。
 
 连接、刷新历史及重连时会批量检查项目目录。已删除目录不再列为可用项目，其对话保留在“目录已移除 · 历史对话”；发送前再次检查。目录重新创建后刷新即可恢复。离线或权限不足不会直接判定为删除。
 
@@ -132,6 +157,6 @@ npm test
 
 ## 来源与许可
 
-项目从 RemoteCC 演进而来，保留原有提交历史。使用官方 Claude Agent SDK；Markdown 渲染使用 MarkdownUI，其依赖许可随应用打包在 `Resources/ThirdParty`。AgentBox 是交互设计参考之一，本项目没有将其整个客户端直接移植。
+项目曾名 RemoteCC、Claudock，现统一为镜像 Claude（Claude Mirror），保留原有提交历史与用户数据兼容路径。使用官方 Claude Agent SDK；Markdown 渲染使用 MarkdownUI，其依赖许可随应用打包在 `Resources/ThirdParty`。AgentBox 是交互设计参考之一，本项目没有将其整个客户端直接移植。
 
-项目代码采用 MIT 许可，见 [LICENSE](LICENSE)。第三方依赖遵循各自许可。Claudock 名称和标识不表示获得 Anthropic 官方授权。
+项目代码采用 MIT 许可，见 [LICENSE](LICENSE)。第三方依赖遵循各自许可。镜像 Claude 名称和标识不表示获得 Anthropic 官方授权。
