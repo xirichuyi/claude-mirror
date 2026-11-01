@@ -359,7 +359,8 @@ struct MachineSwitcher: View {
     var body: some View {
         Button { choosing.toggle() } label: {
             HStack(spacing: 6) {
-                Text("Claudock").font(.system(size: 19, weight: .semibold))
+                BrandIcon(size: 26)
+                Text("Claudock").font(.system(size: 16, weight: .semibold))
                 Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }.buttonStyle(.plain).help("当前机器：" + (model.currentConfig?.displayName ?? "未连接") + " · 切换或添加机器")

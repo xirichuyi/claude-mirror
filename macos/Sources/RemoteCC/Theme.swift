@@ -3,13 +3,13 @@ import SwiftUI
 import AppKit
 
 enum WorkbenchTheme {
-    static let canvas = adaptive(light: 0xFAF9F5, dark: 0x262624)
-    static let sidebar = adaptive(light: 0xF0EEE6, dark: 0x20201E)
-    static let surface = adaptive(light: 0xFFFFFF, dark: 0x30302E)
-    static let ink = adaptive(light: 0x30302E, dark: 0xECEBE5)
-    static let onInk = adaptive(light: 0xFFFFFF, dark: 0x262624)
-    static let accent = adaptive(light: 0xB96345, dark: 0xD58B6D)
-    static let userBubble = adaptive(light: 0xEEECE5, dark: 0x363632)
+    static let canvas = adaptive(light: 0xFCFCFC, dark: 0x242424)
+    static let sidebar = adaptive(light: 0xF3F3F3, dark: 0x1F1F1F)
+    static let surface = adaptive(light: 0xFFFFFF, dark: 0x292929)
+    static let ink = adaptive(light: 0x292929, dark: 0xECECEC)
+    static let onInk = adaptive(light: 0xFFFFFF, dark: 0x242424)
+    static let accent = adaptive(light: 0x292929, dark: 0xD6D6D6)
+    static let userBubble = adaptive(light: 0xF0F0F0, dark: 0x343434)
     static let border = Color.primary.opacity(0.09)
 
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
@@ -17,6 +17,16 @@ enum WorkbenchTheme {
             let hex = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
             return NSColor(srgbRed: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255, blue: CGFloat(hex & 255) / 255, alpha: 1)
         })
+    }
+}
+
+struct BrandIcon: View {
+    var size: CGFloat = 24
+    var body: some View {
+        if let url = Bundle.main.url(forResource: "BrandIcon", withExtension: "png"), let icon = NSImage(contentsOf: url) {
+            Image(nsImage: icon).resizable().interpolation(.high).scaledToFit()
+                .frame(width: size, height: size).accessibilityHidden(true)
+        }
     }
 }
 

@@ -37,9 +37,9 @@ struct WelcomeView: View {
             Spacer(minLength: 48)
             VStack(spacing: 28) {
                 HStack(spacing: 12) {
-                    Image(systemName: "terminal").font(.system(size: 28, weight: .medium)).foregroundStyle(WorkbenchTheme.accent)
+                    BrandIcon(size: 38)
                     Text("今天，想完成什么？")
-                        .font(.system(size: 30, weight: .regular, design: .serif)).tracking(-0.6)
+                        .font(.system(size: 25, weight: .medium))
                 }
                 HStack(spacing: 8) {
                     suggestion("了解项目", icon: "folder", prompt: "请梳理这个项目的目录结构、技术栈和主要入口。")
@@ -157,7 +157,7 @@ struct MessageRow: View, Equatable {
                 .textSelection(.enabled)
                 .font(.system(size: 14)).lineSpacing(5)
                 .padding(.horizontal, 20).padding(.vertical, 14)
-                .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: 20))
+                .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: 14))
             }
             if let files = message.attachments {
                 ForEach(files) { file in

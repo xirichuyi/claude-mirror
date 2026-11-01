@@ -13,6 +13,7 @@ swiftc Helpers/ClaudockAskpass.swift -o "$APP/Contents/MacOS/ClaudockAskpass"
 codesign --force --sign - "$APP/Contents/MacOS/ClaudockAskpass"
 cp -R Resources/server "$APP/Contents/Resources/server"
 cp -R Resources/ThirdParty "$APP/Contents/Resources/ThirdParty"
+cp Resources/BrandIcon.png "$APP/Contents/Resources/BrandIcon.png"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Sign outside synced workspaces, whose file provider can reintroduce FinderInfo.

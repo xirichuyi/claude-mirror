@@ -73,9 +73,8 @@ struct ComposerArea: View {
                 toolbarRow
             }
             .padding(16)
-            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(dropTarget ? WorkbenchTheme.accent : WorkbenchTheme.border))
-            .shadow(color: .black.opacity(0.025), radius: 10, y: 2)
+            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(dropTarget ? WorkbenchTheme.accent : WorkbenchTheme.border))
             .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in
                 guard model.isConnected else { model.show("先连接服务器，再附加文件"); return false }
                 let destinationId = id
