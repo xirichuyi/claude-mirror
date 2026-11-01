@@ -2,6 +2,7 @@
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
+const { resolveClaudeLaunch } = require('./claude-launch.cjs');
 const { ChatService } = require('./chat-service.cjs');
 const { inspectRemote, catalogue } = require('./capabilities.cjs');
 
@@ -20,11 +21,14 @@ const actions = {
 };
 (async () => {
   if (!actions[request.action]) throw new Error('未知查询');
+  const launch = resolveClaudeLaunch(request.directory);
+  request.directory = launch.cwd;
   const { query } = await import(pathToFileURL(path.join(__dirname, 'sdk.mjs')).href);
   const service = new ChatService({ load: () => [], save() {} }, async () => query);
   service.closing = true;
+  service.claudeExecutable = launch.executable;
   service.spawn = (_session, options, onError) => {
-    const child = spawn('claude', options.args, { cwd: request.directory, stdio: ['pipe', 'pipe', 'pipe'], env: options.env, signal: options.signal });
+    const child = spawn(launch.executable, options.args, { cwd: request.directory, stdio: ['pipe', 'pipe', 'pipe'], env: options.env, signal: options.signal });
     child.stderr.setEncoding('utf8'); child.stderr.on('data', onError);
     return child;
   };

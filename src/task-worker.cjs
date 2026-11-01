@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
+const { resolveClaudeLaunch, validateDirectory } = require('./claude-launch.cjs');
 const { ChatService } = require('./chat-service.cjs');
 const { Transcript } = require('./transcript.cjs');
 const { catalogue, preferencePatch } = require('./capabilities.cjs');
@@ -27,7 +28,7 @@ session.tasks = []; // Background task membership belongs to this SDK process.
 const service = new ChatService({ load: () => [session], save: snapshot });
 service.closing = true;
 service.spawn = (_session, options, onError) => {
-  const child = spawn('claude', options.args, { cwd: session.directory, stdio: ['pipe', 'pipe', 'pipe'], env: options.env, signal: options.signal });
+  const child = spawn(service.claudeExecutable, options.args, { cwd: session.directory, stdio: ['pipe', 'pipe', 'pipe'], env: options.env, signal: options.signal });
   child.stderr.setEncoding('utf8'); child.stderr.on('data', onError); return child;
 };
 const input = new SessionInput();
@@ -39,6 +40,7 @@ const rewind = require('./checkpoint-control.cjs').checkpointControl(() => query
 async function control(command) {
   if (command.kind === 'send') {
     if (run.message.id === command.message.id) return {}; // Replay after an uncertain transport ACK.
+    validateDirectory(session.directory);
     if (service.runs.has(session.id)) throw new Error('远端会话正在回复');
     session.messages = [command.message];
     Object.assign(run, { message: command.message, stopped: false, stderr: '', transcript: new Transcript(command.message) });
@@ -121,6 +123,9 @@ const timer = setInterval(runCommands, 1000);
 let commandWatcher;
 try { commandWatcher = fs.watch(path.join(folder, 'commands'), runCommands); commandWatcher.on('error', () => {}); } catch { /* Interval only. */ }
 (async () => {
+  const launch = resolveClaudeLaunch(session.directory);
+  session.directory = launch.cwd;
+  service.claudeExecutable = launch.executable;
   const { query: createQuery } = await import(pathToFileURL(path.join(__dirname, 'sdk.mjs')).href);
   query = createQuery({ prompt: input, options: service.options(session, run) }); run.query = query;
   input.push(request.prompt, run.message.id, session.remoteSessionId);

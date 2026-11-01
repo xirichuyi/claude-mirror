@@ -263,7 +263,7 @@ class ChatService extends EventEmitter {
     if (preferences.fastMode !== undefined) settings.fastMode = preferences.fastMode;
     if (preferences.outputStyle) settings.outputStyle = preferences.outputStyle;
     return {
-      pathToClaudeCodeExecutable: '/usr/local/bin/claude',
+      pathToClaudeCodeExecutable: this.claudeExecutable || 'claude',
       systemPrompt: { type: 'preset', preset: 'claude_code' },
       ...(preferences.agent ? { agent: preferences.agent } : {}),
       enableFileCheckpointing: true,
