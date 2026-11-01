@@ -201,6 +201,14 @@ test('search and quick-open find files; git status reports changes', async () =>
     await assert.rejects(call({ operation: 'rename', path: created.path, name: 'src' }), /已存在/);
     await call({ operation: 'remove', path: created.path });
     assert.equal(fs.existsSync(created.path), false);
+    const folder = path.join(project, 'delete folder');
+    fs.mkdirSync(folder);
+    fs.writeFileSync(path.join(folder, 'nested.txt'), 'temporary deletion fixture');
+    await assert.rejects(call({ operation: 'remove', path: folder }));
+    assert.equal(fs.existsSync(path.join(folder, 'nested.txt')), true);
+    await call({ operation: 'remove', path: folder, recursive: true });
+    assert.equal(fs.existsSync(folder), false);
+    assert.equal(fs.existsSync(path.join(project, 'src/renderer.js')), true);
     await assert.rejects(call({ operation: 'remove', path: f.home, recursive: true }), /不能删除/);
   } finally { f.close(); }
 });

@@ -107,6 +107,17 @@ struct FileTreeView: View {
     }
 
     private func rowView(_ row: TreeRow) -> some View {
+        HStack(spacing: 4) {
+            rowLabel(row)
+            Menu { menu(row) } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("文件操作").accessibilityLabel(row.entry.name + " 操作")
+                .padding(.trailing, 8)
+        }
+        .contextMenu { menu(row) }
+    }
+
+    private func rowLabel(_ row: TreeRow) -> some View {
         let entry = row.entry
         let color = row.entry.broken == true ? Color.secondary : gitColor(row.gitCode)
         return HStack(spacing: 5) {
@@ -128,7 +139,6 @@ struct FileTreeView: View {
         .simultaneousGesture(TapGesture().onEnded {
             if entry.directory { Task { await workspace.toggle(entry.path) } } else { model.open(entry.path) }
         })
-        .contextMenu { menu(row) }
     }
 
     @ViewBuilder private func menu(_ row: TreeRow) -> some View {
