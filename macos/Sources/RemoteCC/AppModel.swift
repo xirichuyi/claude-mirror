@@ -569,7 +569,7 @@ final class AppModel: ObservableObject {
             } catch { show(error.localizedDescription); return }
         }
         guard let session = active else { return }
-        let target = directory ?? session.directory
+        let target = directory
         guard !uploadingSessions.contains(session.id) else { show("请等待当前上传完成"); return }
         uploadingSessions.insert(session.id)
         perform {
@@ -595,7 +595,7 @@ final class AppModel: ObservableObject {
                 }
             }
             let succeeded = results.filter { $0.attachment != nil }.count
-            self.transferStatuses[session.config] = "上传完成 · \(succeeded)/\(urls.count) 个成功"
+            self.transferStatuses[session.config] = directory == nil ? "" : "上传完成 · \(succeeded)/\(urls.count) 个成功"
             await self.workspace(for: session)?.reload(force: true)
         }
     }

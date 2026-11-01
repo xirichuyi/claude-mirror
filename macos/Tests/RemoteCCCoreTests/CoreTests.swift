@@ -178,6 +178,39 @@ final class AgentTests: XCTestCase {
         agents.close(environment.config)
     }
 
+    func testAttachmentCacheReusesContentAndRecoversMissingOrEditedFiles() async throws {
+        let env = try AgentEnvironment()
+        defer { env.cleanup() }
+        let source = env.home.appendingPathComponent("attachment (中文).txt")
+        let content = Data(UUID().uuidString.utf8)
+        try content.write(to: source)
+        let first = try await env.files.upload(env.config, file: source)
+        let remote = URL(fileURLWithPath: first.path)
+        defer { try? FileManager.default.removeItem(at: remote.deletingLastPathComponent()) }
+        XCTAssertNotEqual(remote.deletingLastPathComponent().path, env.config.directory)
+        XCTAssertTrue(first.path.contains("claudock-attachments-"))
+        XCTAssertEqual(try Data(contentsOf: remote), content)
+        let before = try FileManager.default.attributesOfItem(atPath: remote.path)[.modificationDate] as? Date
+        // A cache hit must work even when every bulk-transfer channel fails.
+        let cachedAgents = AgentClient(launcher: BrokenTransferLauncher(home: env.home.path, command: "exit 81"), resources: try ServerResources(directory: env.resourcesDirectory))
+        defer { cachedAgents.close(env.config) }
+        let cachedFiles = RemoteFiles(agents: cachedAgents, cacheDirectory: env.home.appendingPathComponent("second-client"))
+        let repeated = try await cachedFiles.upload(env.config, file: source)
+        XCTAssertEqual(repeated.path, first.path)
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: remote.path)[.modificationDate] as? Date, before)
+        try Data("edited remotely".utf8).write(to: remote)
+        _ = try await env.files.upload(env.config, file: source)
+        XCTAssertEqual(try Data(contentsOf: remote), content)
+        try FileManager.default.removeItem(at: remote)
+        _ = try await env.files.upload(env.config, file: source)
+        XCTAssertEqual(try Data(contentsOf: remote), content)
+        try Data(UUID().uuidString.utf8).write(to: source)
+        let changed = try await env.files.upload(env.config, file: source)
+        defer { try? FileManager.default.removeItem(at: URL(fileURLWithPath: changed.path).deletingLastPathComponent()) }
+        XCTAssertNotEqual(changed.path, first.path)
+        XCTAssertEqual(try Data(contentsOf: remote), content)
+    }
+
     func testBatchUploadKeepsOrderAndSuccessfulFilesWhenOneFails() async throws {
         let env = try AgentEnvironment(); defer { env.cleanup() }
         let folder = env.home.appendingPathComponent("batch-target")

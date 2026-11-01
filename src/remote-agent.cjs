@@ -319,32 +319,70 @@ async function hello() {
     claude: located.code ? null : located.stdout.trim() };
 }
 
+async function attachmentLocation(request) {
+  if (!/^[a-f0-9]{64}$/.test(request.digest || '')) throw new Error('无效附件摘要');
+  const root = path.join(os.tmpdir(), 'claudock-attachments-' + (process.getuid?.() ?? os.userInfo().username));
+  await fsp.mkdir(root, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+  const info = await fsp.lstat(root);
+  if (!info.isDirectory() || info.isSymbolicLink() || (process.getuid && info.uid !== process.getuid())) throw new Error('附件目录不可用');
+  await fsp.chmod(root, 0o700);
+  const folder = path.join(root, request.digest);
+  await fsp.mkdir(folder, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+  if (!(await fsp.lstat(folder)).isDirectory()) throw new Error('附件目录不可用');
+  return path.join(folder, checkName(request.name));
+}
+
+async function matchingAttachment(destination, digest) {
+  try {
+    const info = await fsp.lstat(destination);
+    if (!info.isFile()) return null;
+    const hash = crypto.createHash('sha256');
+    for await (const chunk of fs.createReadStream(destination)) hash.update(chunk);
+    return hash.digest('hex') === digest ? await metadata(destination) : null;
+  } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
+async function attachmentLookup(request) {
+  const destination = await attachmentLocation(request);
+  return { file: await matchingAttachment(destination, request.digest) };
+}
+
 const fileOperations = {
-  hello, list: listing, preview, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
+  attachmentLookup, hello, list: listing, preview, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
   diff: gitDiffText, gitStatus, gitFileDiff, createWorktree, create: createEntry, rename: renameEntry, remove: removeEntry,
 };
 
 // ---------------------------------------------------------------- transfers (separate SSH channel)
 
 async function upload(request) {
-  const folder = resolve(request.directory);
-  const name = checkName(request.name);
+  const cached = request.attachment === true;
+  const destination = cached ? await attachmentLocation(request) : path.join(resolve(request.directory), checkName(request.name));
+  const folder = path.dirname(destination);
+  const name = path.basename(destination);
+  const hash = cached ? crypto.createHash('sha256') : null;
   if (!Number.isInteger(request.size) || request.size < 0 || request.size > 1024 ** 3) throw new Error('文件大小超出限制（1 GB）');
   const temporary = temporaryName(folder, 'upload');
   const target = await fsp.open(temporary, 'wx', 0o600);
   try {
     let received = 0;
     for await (const chunk of process.stdin) {
+      hash?.update(chunk);
       received += chunk.length;
       if (received > request.size) throw new Error('上传大小不匹配');
       await target.write(chunk);
     }
     if (received !== request.size) throw new Error('上传未完成');
+    if (hash && hash.digest('hex') !== request.digest) throw new Error('文件在上传期间发生变化，请重试');
     await target.sync();
-    await target.chmod(0o666 & ~process.umask());
+    if (!cached) await target.chmod(0o666 & ~process.umask());
     await target.close();
     // Atomic and non-overwriting: a name created while uploading still fails here.
-    const destination = path.join(folder, name);
+    if (cached) {
+      const existing = await matchingAttachment(destination, request.digest);
+      if (existing) return existing;
+      await fsp.rename(temporary, destination);
+      return await metadata(destination);
+    }
     try { await fsp.link(temporary, destination); }
     catch (error) { if (error.code === 'EEXIST') throw new Error('同名文件已存在：' + name); throw error; }
     return await metadata(destination);

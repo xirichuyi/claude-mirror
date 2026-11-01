@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CryptoKit)
+import CryptoKit
+#endif
 
 public struct TransferProgress: Sendable {
     public var config: ConnectionConfig
@@ -162,7 +165,7 @@ public final class RemoteFiles: @unchecked Sendable {
 
     /// Overlap per-file setup and ACK waits while keeping bulk concurrency bounded.
     /// Duplicate basenames stay serial so the first selected file wins deterministically.
-    public func uploadBatch(_ config: ConnectionConfig, files urls: [URL], directory: String,
+    public func uploadBatch(_ config: ConnectionConfig, files urls: [URL], directory: String? = nil,
                             onCompletion: @escaping @Sendable (Int, Int) async -> Void = { _, _ in }) async -> [UploadResult] {
         guard !urls.isEmpty else { return [] }
         let width = Set(urls.map(\.lastPathComponent)).count == urls.count ? 2 : 1
@@ -189,12 +192,24 @@ public final class RemoteFiles: @unchecked Sendable {
         return urls.indices.map { results[$0] ?? UploadResult(file: urls[$0], attachment: nil, error: "上传已取消") }
     }
 
-    public func upload(_ config: ConnectionConfig, file: URL, directory: String) async throws -> Attachment {
+    public func upload(_ config: ConnectionConfig, file: URL, directory: String? = nil) async throws -> Attachment {
         let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
         let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
         guard attributes[.type] as? FileAttributeType == .typeRegular, size <= 1024 * 1024 * 1024 else { throw RemoteError("请选择不超过 1 GB 的普通文件") }
         let name = file.lastPathComponent
-        let process = try await agents.spawnTransfer(config, request: ["operation": "upload", "directory": .string(directory), "name": .string(name), "size": .number(Double(size)), "base": .string(config.directory)])
+        var request: JSON = ["operation": "upload", "name": .string(name), "size": .number(Double(size)), "base": .string(config.directory)]
+        if let directory { request["directory"] = .string(directory) }
+        else {
+            let digest = try attachmentDigest(file)
+            let lookup = try await run(config, "attachmentLookup", ["name": .string(name), "digest": .string(digest)], timeout: 120)
+            if let value = lookup["file"], value != .null {
+                let entry = try value.decode(FileEntry.self)
+                return Attachment(name: name, path: entry.path, size: entry.size)
+            }
+            request["attachment"] = .bool(true)
+            request["digest"] = .string(digest)
+        }
+        let process = try await agents.spawnTransfer(config, request: request)
         defer { process.kill() }
         let received = Task<Data, Never> {
             await withCheckedContinuation { done in
@@ -229,4 +244,24 @@ public final class RemoteFiles: @unchecked Sendable {
         onProgress?(TransferProgress(config: config, name: name, bytes: sent, total: size, finished: true))
         return Attachment(name: entry.name, path: entry.path, size: entry.size)
     }
+}
+
+private func attachmentDigest(_ file: URL) throws -> String {
+#if canImport(CryptoKit)
+    let input = try FileHandle(forReadingFrom: file)
+    defer { try? input.close() }
+    var hash = SHA256()
+    while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty { hash.update(data: chunk) }
+    return hash.finalize().map { String(format: "%02x", $0) }.joined()
+#else
+    let process = Process(), output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["sha256sum", "--", file.path]
+    process.standardOutput = output
+    try process.run()
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0, let text = String(data: data, encoding: .utf8), text.count >= 64 else { throw RemoteError("无法计算附件摘要") }
+    return String(text.prefix(64))
+#endif
 }
