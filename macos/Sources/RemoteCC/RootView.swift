@@ -49,16 +49,39 @@ struct IdentifiedInteraction: Identifiable {
 struct WorkArea: View {
     @EnvironmentObject private var model: AppModel
 
+    @State private var showingChat = false
+
     var body: some View {
-        HSplitView {
-            ChatView().frame(minWidth: 380, maxWidth: .infinity)
-            if let workspace = model.activeWorkspace, workspace.activeTab != nil {
-                EditorPane(workspace: workspace).frame(minWidth: 400, maxWidth: .infinity)
-            }
-            if model.showFiles, model.active != nil {
-                FilePanel().frame(minWidth: 230, idealWidth: 280, maxWidth: 420)
+        GeometryReader { geometry in
+            let workspace = model.activeWorkspace
+            let hasEditor = workspace?.activeTab != nil
+            let hasFiles = model.showFiles && model.active != nil
+            let hasWorkspace = hasEditor || hasFiles
+            if geometry.size.width < 720 && hasWorkspace {
+                VStack(spacing: 0) {
+                    Picker("显示区域", selection: $showingChat) {
+                        Text("对话").tag(true)
+                        Text("工作区").tag(false)
+                    }.pickerStyle(.segmented).labelsHidden().padding(10)
+                    if showingChat { ChatView() }
+                    else { workspacePane(workspace, hasFiles: hasFiles) }
+                }
+            } else {
+                HSplitView {
+                    ChatView().frame(minWidth: 340, maxWidth: .infinity)
+                    if hasWorkspace {
+                        if geometry.size.width >= 1080 {
+                            if let workspace, hasEditor { EditorPane(workspace: workspace).frame(minWidth: 360, maxWidth: .infinity) }
+                            if hasFiles { FilePanel().frame(minWidth: 230, idealWidth: 260, maxWidth: 340) }
+                        } else {
+                            workspacePane(workspace, hasFiles: hasFiles).frame(minWidth: 320, maxWidth: .infinity)
+                        }
+                    }
+                }
             }
         }
+        .onChange(of: model.activeWorkspace?.activeTabId) { showingChat = false }
+        .onChange(of: model.showFiles) { if model.showFiles { showingChat = false } }
         .navigationTitle(model.active?.name ?? "Claudock")
         .navigationSubtitle(model.active.map { ($0.directory as NSString).lastPathComponent + " · " + $0.host } ?? model.currentConfig?.displayName ?? "")
         .toolbar {
@@ -79,6 +102,17 @@ struct WorkArea: View {
             }
         }
     }
+    @ViewBuilder private func workspacePane(_ workspace: Workspace?, hasFiles: Bool) -> some View {
+        if let workspace, workspace.activeTab != nil {
+            if hasFiles {
+                VSplitView {
+                    FilePanel().frame(minHeight: 180, idealHeight: 240, maxHeight: 320)
+                    EditorPane(workspace: workspace).frame(minHeight: 200, maxHeight: .infinity)
+                }
+            } else { EditorPane(workspace: workspace) }
+        } else if hasFiles { FilePanel() }
+    }
+
 }
 
 func statusLabel(_ status: String) -> String {

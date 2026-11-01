@@ -353,7 +353,7 @@ struct EditorPane: View {
     private func tabButton(_ tab: EditorTab) -> some View {
         HStack(spacing: 4) {
             Button { workspace.activeTabId = tab.id; model.objectWillChange.send() } label: {
-                Text((tab.isDirty ? "● " : "") + tab.title).font(.caption).lineLimit(1)
+                Text((tab.isDirty ? "● " : "") + tab.title).font(.caption).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180)
                     .foregroundStyle(tab.id == workspace.activeTabId ? Color.primary : Color.secondary)
             }.buttonStyle(.plain).help(tab.path)
             Button { model.close(tab, in: workspace) } label: { Image(systemName: "xmark").font(.system(size: 8)) }.buttonStyle(.plain).foregroundStyle(.secondary)
@@ -364,22 +364,31 @@ struct EditorPane: View {
 
     private func header(_ tab: EditorTab) -> some View {
         let preview = tab.preview
-        return HStack(spacing: 8) {
-            Text(preview?.path ?? tab.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head).textSelection(.enabled)
-            Spacer()
-            Text(tab.notice ?? tab.error.map { _ in "无法预览" } ?? info(tab)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            if !tab.isDiff, let preview {
-                if tab.draft != nil {
-                    Button("保存到远端") { Task { await workspace.save(tab) } }
-                } else if preview.kind == "text", preview.truncated != true, preview.revision != nil {
-                    Button("编辑") { workspace.beginEditing(tab) }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(preview?.path ?? tab.path).font(.caption2).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .help(preview?.path ?? tab.path)
+            HStack(spacing: 8) {
+                Text(tab.notice ?? tab.error.map { _ in "无法预览" } ?? info(tab)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                if !tab.isDiff, let preview {
+                    if tab.draft != nil {
+                        Button("保存到远端") { Task { await workspace.save(tab) } }
+                    } else if preview.kind == "text", preview.truncated != true, preview.revision != nil {
+                        Button("编辑") { workspace.beginEditing(tab) }
+                    }
+                    if isMarkdown(preview), tab.draft == nil {
+                        Button(tab.showSource ? "渲染" : "源码") { tab.showSource.toggle(); model.objectWillChange.send() }
+                    }
+                    Spacer(minLength: 0)
+                    Menu {
+                        Button("附加到对话") { model.attach(preview.path) }
+                        Button("下载…") { model.download(preview.path) }
+                        Button("本地打开") { model.openLocally(preview.path) }
+                        Button("复制路径") { copyToPasteboard(preview.path) }
+                    } label: { Image(systemName: "ellipsis") }
+                    .menuStyle(.borderlessButton).fixedSize().help("文件操作").accessibilityLabel("文件操作")
                 }
-                if isMarkdown(preview), tab.draft == nil {
-                    Button(tab.showSource ? "渲染" : "源码") { tab.showSource.toggle(); model.objectWillChange.send() }
-                }
-                Button("附加") { model.attach(preview.path) }
-                Button("下载") { model.download(preview.path) }
-                Button("本地打开") { model.openLocally(preview.path) }.help("下载副本后使用本机软件打开")
             }
         }
         .controlSize(.small).padding(.horizontal, 10).padding(.vertical, 6)
