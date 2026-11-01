@@ -2,8 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>RemoteCC</string>
-  <key>CFBundleDisplayName</key><string>RemoteCC</string>
+  <key>CFBundleName</key><string>Claudock</string>
+  <key>CFBundleDisplayName</key><string>Claudock</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>local.remotecc.native</string>
   <key>CFBundleExecutable</key><string>RemoteCC</string>
   <key>CFBundlePackageType</key><string>APPL</string>

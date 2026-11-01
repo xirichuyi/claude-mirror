@@ -76,7 +76,7 @@ final class AppModel: ObservableObject {
             let caches = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("RemoteCC Native")
             guard let resourceDirectory = Bundle.main.resourceURL?.appendingPathComponent("server") else { throw RemoteError("找不到应用资源") }
             let resources = try ServerResources(directory: resourceDirectory)
-            let connections = try SSHConnections()
+            let connections = try SSHConnections(askpassPath: Bundle.main.url(forAuxiliaryExecutable: "ClaudockAskpass")?.path)
             let agents = AgentClient(launcher: connections, resources: resources)
             let files = RemoteFiles(agents: agents, cacheDirectory: caches)
             let engine = try ChatEngine(store: try ChatStore(directory: support), agents: agents, files: files)
@@ -142,6 +142,16 @@ final class AppModel: ObservableObject {
         if engine?.connectionState(config).status != .connected {
             perform { try await self.connect(config) }
         }
+    }
+
+    func renameMachine(_ config: ConnectionConfig, name: String) {
+        var renamed = config
+        renamed.name = name
+        do {
+            renamed = try renamed.validated()
+            rememberMachine(renamed)
+            if selectedMachine?.key == renamed.key { selectedMachine = renamed; lastConnection = renamed }
+        } catch { show(error.localizedDescription) }
     }
 
     private func rememberMachine(_ config: ConnectionConfig) {

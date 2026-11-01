@@ -59,8 +59,8 @@ struct WorkArea: View {
                 FilePanel().frame(minWidth: 230, idealWidth: 280, maxWidth: 420)
             }
         }
-        .navigationTitle(model.active?.name ?? "RemoteCC")
-        .navigationSubtitle(model.active.map { ($0.directory as NSString).lastPathComponent + " · " + $0.host } ?? model.currentConfig?.host ?? "")
+        .navigationTitle(model.active?.name ?? "Claudock")
+        .navigationSubtitle(model.active.map { ($0.directory as NSString).lastPathComponent + " · " + $0.host } ?? model.currentConfig?.displayName ?? "")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 if let session = model.active {
@@ -313,10 +313,10 @@ struct MachineSwitcher: View {
     var body: some View {
         Button { choosing.toggle() } label: {
             HStack(spacing: 6) {
-                Text("RemoteCC").font(.system(size: 19, weight: .semibold))
+                Text("Claudock").font(.system(size: 19, weight: .semibold))
                 Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(.secondary)
             }
-        }.buttonStyle(.plain).help("当前机器：" + (model.currentConfig?.host ?? "未连接") + " · 切换或添加机器")
+        }.buttonStyle(.plain).help("当前机器：" + (model.currentConfig?.displayName ?? "未连接") + " · 切换或添加机器")
         .popover(isPresented: $choosing, arrowEdge: .trailing) {
             VStack(alignment: .leading, spacing: 6) {
                 Button { choosing = false; model.activeId = nil } label: { Label("返回首页", systemImage: "house") }.buttonStyle(QuietButtonStyle())
@@ -329,12 +329,27 @@ struct MachineSwitcher: View {
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "desktopcomputer")
-                            Text(machine.host + (machine.port.map { ":\($0)" } ?? ""))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(machine.displayName)
+                                Text(machine.host + (machine.port.map { ":\($0)" } ?? "")).font(.caption2).foregroundStyle(.secondary)
+                            }
                             Spacer()
                             if model.currentConfig?.key == machine.key { Image(systemName: "checkmark") }
                             Circle().fill(model.engine?.connectionState(machine).status == .connected ? Color.green : Color.secondary).frame(width: 6, height: 6)
                         }.font(.system(size: 13)).padding(4).contentShape(Rectangle())
                     }.buttonStyle(QuietButtonStyle())
+                    .contextMenu {
+                        Button("重命名…") {
+                            let alert = NSAlert()
+                            alert.messageText = "主机名称"
+                            let field = NSTextField(string: machine.displayName)
+                            field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+                            alert.accessoryView = field
+                            alert.addButton(withTitle: "保存")
+                            alert.addButton(withTitle: "取消")
+                            if alert.runModal() == .alertFirstButtonReturn { model.renameMachine(machine, name: field.stringValue) }
+                        }
+                    }
                 }
                 Divider()
                 Button { choosing = false; model.showConnect = true } label: {
@@ -376,6 +391,10 @@ struct ConnectSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var host = ""
     @State private var port = ""
+    @State private var name = ""
+    @State private var username = ""
+    @State private var identityFile = ""
+    @State private var authentication = SSHAuthentication.automatic
     @State private var error = ""
     @State private var connecting = false
 
@@ -387,12 +406,33 @@ struct ConnectSheet: View {
                     .font(.system(size: 13)).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 16) {
-                connectionField("SSH 主机", text: $host, prompt: "服务器别名或 user@host")
-                DisclosureGroup("高级选项") {
-                    connectionField("SSH 端口", text: $port, prompt: "使用 SSH 配置中的端口").padding(.top, 10)
-                }.font(.system(size: 12)).foregroundStyle(.secondary)
+                connectionField("主机名称", text: $name, prompt: "例如：开发服务器（可选）")
+                connectionField("SSH 主机", text: $host, prompt: "IP、域名、SSH 别名或 user@host")
+                HStack {
+                    connectionField("用户名", text: $username, prompt: "留空使用 SSH 配置")
+                    connectionField("端口", text: $port, prompt: "默认使用 SSH 配置")
+                }
+                Picker("认证方式", selection: $authentication) {
+                    Text("SSH 配置 / Agent").tag(SSHAuthentication.automatic)
+                    Text("密码").tag(SSHAuthentication.password)
+                    Text("私钥文件").tag(SSHAuthentication.keyFile)
+                }
+                if authentication == .keyFile {
+                    HStack {
+                        Text(identityFile.isEmpty ? "尚未选择私钥" : identityFile)
+                            .font(.caption).lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                        Button("选择私钥…") {
+                            let panel = NSOpenPanel()
+                            panel.showsHiddenFiles = true
+                            panel.canChooseDirectories = false
+                            panel.allowsMultipleSelection = false
+                            if panel.runModal() == .OK, let url = panel.url { identityFile = url.path }
+                        }
+                    }
+                }
             }
-            Text("使用系统 SSH 配置与密钥。首次连接请先在终端确认主机指纹。")
+            Text("需要密码或私钥口令时会弹出安全输入窗口，不保存密码。首次连接可在窗口中核对主机指纹。密码认证断线后，请点击重新连接以再次输入。")
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if !error.isEmpty {
                 Label(error, systemImage: "exclamationmark.circle")
@@ -426,7 +466,13 @@ struct ConnectSheet: View {
         connecting = true; error = ""
         Task {
             do {
-                try await model.connect(ConnectionConfig(host: host, port: ConnectionConfig.parsePort(port), directory: "~"))
+                let user = username.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard user.isEmpty || !host.contains("@") else { throw RemoteError("主机地址已包含用户名，请清空单独的用户名字段") }
+                guard user.isEmpty || (!user.contains("@") && !user.contains(":")) else { throw RemoteError("用户名不能包含 @ 或冒号") }
+                let destination = user.isEmpty ? host : user + "@" + host.trimmingCharacters(in: .whitespacesAndNewlines)
+                let config = ConnectionConfig(host: destination, port: try ConnectionConfig.parsePort(port), directory: "~",
+                                              name: name, identityFile: authentication == .keyFile ? identityFile : nil, authentication: authentication)
+                try await model.connect(config)
                 dismiss()
             } catch { self.error = error.localizedDescription }
             connecting = false

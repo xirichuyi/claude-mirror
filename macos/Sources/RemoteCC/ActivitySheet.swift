@@ -22,7 +22,7 @@ struct ActivitySheet: View {
                     ForEach(model.savedMachines, id: \.key) { machine in
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Label(machine.host, systemImage: "desktopcomputer").font(.headline)
+                                Label(machine.displayName, systemImage: "desktopcomputer").font(.headline)
                                 Spacer()
                                 let online = model.engine?.connectionState(machine).status == .connected
                                 Text(online ? "已连接" : "离线 · 状态可能不是最新").font(.caption).foregroundStyle(.secondary)

@@ -14,7 +14,7 @@ struct MachineHomeView: View {
                     Text(model.currentConfig == nil ? "你的机器，你的工作。" : "今天，想完成什么？")
                         .font(.system(size: 32, weight: .regular, design: .serif)).tracking(-0.8)
                         .foregroundStyle(WorkbenchTheme.ink)
-                    Text(model.currentConfig == nil ? "连接一台机器，找回已有对话。\n在不同机器之间切换，工作始终各归其位。" : "在 \(model.currentConfig!.host) 上开始，或继续最近的对话。")
+                    Text(model.currentConfig == nil ? "连接一台机器，找回已有对话。\n在不同机器之间切换，工作始终各归其位。" : "在 \(model.currentConfig!.displayName) 上开始，或继续最近的对话。")
                         .font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(6)
                     if model.currentConfig == nil || !model.isConnected {
                     HStack(spacing: 12) {

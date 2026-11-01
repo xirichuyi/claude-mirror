@@ -11,7 +11,7 @@ struct RemoteCCApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        WindowGroup("RemoteCC") {
+        WindowGroup("Claudock") {
             RootView()
                 .environmentObject(model)
                 .tint(WorkbenchTheme.accent)

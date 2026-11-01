@@ -1,11 +1,18 @@
 import Foundation
 
+public enum SSHAuthentication: String, Codable, Sendable, CaseIterable { case automatic, password, keyFile }
+
 public struct ConnectionConfig: Codable, Hashable, Sendable {
     public var host: String
     public var port: Int?
     public var directory: String
-    public init(host: String, port: Int? = nil, directory: String = "~") {
+    public var name: String?
+    public var identityFile: String?
+    public var authentication: SSHAuthentication?
+    public var displayName: String { name.flatMap { $0.isEmpty ? nil : $0 } ?? host }
+    public init(host: String, port: Int? = nil, directory: String = "~", name: String? = nil, identityFile: String? = nil, authentication: SSHAuthentication? = nil) {
         self.host = host; self.port = port; self.directory = directory
+        self.name = name; self.identityFile = identityFile; self.authentication = authentication
     }
     /// Same server regardless of working directory.
     public var key: String { host + ":" + (port.map(String.init) ?? "") }
@@ -28,9 +35,20 @@ public struct ConnectionConfig: Codable, Hashable, Sendable {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_.@:-"))
         guard let first = name.unicodeScalars.first, first != "-", first != ".", first != "@", first != ":",
               name.count <= 200, name.unicodeScalars.allSatisfy({ $0.isASCII && allowed.contains($0) }) else {
-            throw RemoteError("请输入 SSH 别名或 user@host，端口和密钥请在 SSH config 中配置")
+            throw RemoteError("请输入 SSH 别名或 user@host，或填写服务器地址和用户名")
         }
         result.host = name
+        if let label = self.name {
+            let label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard label.count <= 80, !label.unicodeScalars.contains(where: { $0.value < 0x20 }) else { throw RemoteError("主机名称最多 80 个字符，不能包含控制字符") }
+            result.name = label.isEmpty ? nil : label
+        }
+        if let identityFile, !identityFile.isEmpty {
+            let path = (identityFile as NSString).expandingTildeInPath
+            guard path.hasPrefix("/"), !path.unicodeScalars.contains(where: { $0.value < 0x20 }) else { throw RemoteError("请选择有效的私钥文件路径") }
+            result.identityFile = path
+        }
+        if authentication == .keyFile, result.identityFile?.isEmpty != false { throw RemoteError("请选择私钥文件") }
         let folder = directory.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !folder.isEmpty, folder.count <= 2048, !folder.unicodeScalars.contains(where: { $0.value < 0x20 }) else {
             throw RemoteError("项目目录不能包含控制字符")

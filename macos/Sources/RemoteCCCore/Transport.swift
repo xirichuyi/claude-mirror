@@ -154,13 +154,15 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
     private var monitor: Task<Void, Never>?
     private let directory: String
     private let executable: String
+    private let askpassPath: String?
     /// Called on an arbitrary thread whenever a connection changes state.
     public var onState: (@Sendable (ConnectionConfig, ConnectionState) -> Void)?
     /// Called after an automatic reconnection, when subscriptions must be re-established.
     public var onRecovered: (@Sendable (ConnectionConfig) -> Void)?
 
-    public init(executable: String = "/usr/bin/ssh") throws {
+    public init(executable: String = "/usr/bin/ssh", askpassPath: String? = nil) throws {
         self.executable = executable
+        self.askpassPath = askpassPath
         // Unix socket paths are limited to about 100 bytes, so avoid the long macOS temp directory.
         directory = "/tmp/rcc-\(getuid())-\(UUID().uuidString.prefix(8).lowercased())"
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -173,6 +175,16 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
     }
 
     deinit { monitor?.cancel() }
+
+    public static func authenticationArguments(_ config: ConnectionConfig) -> [String] {
+        switch config.authentication ?? .automatic {
+        case .automatic: return []
+        case .password: return ["-o", "PreferredAuthentications=keyboard-interactive,password", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1"]
+        case .keyFile:
+            guard let file = config.identityFile else { return [] }
+            return ["-i", file, "-o", "IdentitiesOnly=yes", "-o", "PreferredAuthentications=publickey"]
+        }
+    }
 
     private func portArguments(_ config: ConnectionConfig) -> [String] { config.port.map { ["-p", String($0)] } ?? [] }
     private func withLock<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
@@ -202,8 +214,14 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         var didExpire: Bool { lock.lock(); defer { lock.unlock() }; return expired }
     }
 
-    private func runSSH(_ arguments: [String], timeout: UInt64) async throws {
-        let child = try RemoteProcess(executable: executable, arguments: arguments)
+    private func runSSH(_ arguments: [String], timeout: UInt64, interactive: Bool = false) async throws {
+        var environment = ProcessInfo.processInfo.environment
+        if interactive, let askpassPath {
+            environment["SSH_ASKPASS"] = askpassPath
+            environment["SSH_ASKPASS_REQUIRE"] = "force"
+            environment["DISPLAY"] = environment["DISPLAY"] ?? ":0"
+        }
+        let child = try RemoteProcess(executable: executable, arguments: arguments, environment: environment)
         child.closeInput()
         let deadline = DeadlineState()
         let timer = Task {
@@ -244,8 +262,12 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         defer { _ = withLock { inFlight.remove(key) } }
         onState?(config, state(config))
         do {
-            try await runSSH(["-M", "-N", "-f", "-S", socket, "-o", "ControlPersist=no", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
-                              "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "Compression=yes"] + portArguments(config) + [config.host], timeout: 20)
+            let interactive = !requiringDesired && askpassPath != nil
+            try await runSSH(["-M", "-N", "-f", "-S", socket, "-o", "ControlPersist=no",
+                              "-o", "BatchMode=\(interactive ? "no" : "yes")", "-o", "StrictHostKeyChecking=ask", "-o", "ConnectTimeout=15",
+                              "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "Compression=yes"]
+                             + Self.authenticationArguments(config) + portArguments(config) + [config.host],
+                             timeout: interactive ? 180 : 20, interactive: interactive)
             guard setState(config, ConnectionState(status: .connected), socket: socket) else {
                 try? await runSSH(["-S", socket, "-O", "exit"] + portArguments(config) + [config.host], timeout: 5)
                 throw CancellationError()
@@ -257,7 +279,7 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
             }
         } catch {
             if setState(config, ConnectionState(status: .error, error: error.localizedDescription), socket: socket) {
-                scheduleReconnect(config)
+                if requiringDesired { scheduleReconnect(config) }
             }
             throw error
         }

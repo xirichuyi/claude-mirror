@@ -9,8 +9,11 @@ trap 'rm -rf "$STAGING"' EXIT HUP INT TERM
 APP="$STAGING/RemoteCC.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --show-bin-path)/RemoteCC" "$APP/Contents/MacOS/RemoteCC"
+swiftc Helpers/ClaudockAskpass.swift -o "$APP/Contents/MacOS/ClaudockAskpass"
+codesign --force --sign - "$APP/Contents/MacOS/ClaudockAskpass"
 cp -R Resources/server "$APP/Contents/Resources/server"
 cp -R Resources/ThirdParty "$APP/Contents/Resources/ThirdParty"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Sign outside synced workspaces, whose file provider can reintroduce FinderInfo.
 xattr -dr com.apple.FinderInfo "$APP" 2>/dev/null || true

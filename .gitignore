@@ -14,3 +14,10 @@ __pycache__/
 macos/.build/
 macos/dist/
 macos/Resources/server/
+
+# Local design experiments and credential exports
+macos/design-preview/
+macos/Resources/AppIcon.iconset/
+auth.json
+*.pem
+*.key
