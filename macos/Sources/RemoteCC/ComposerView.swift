@@ -68,7 +68,7 @@ struct ComposerArea: View {
                         Button("移除") { model.failedUploads[id]?.removeAll { $0 == url } }
                     }.font(.caption).foregroundStyle(.secondary)
                 }
-                PromptEditor(text: text, caret: $caret, placeholder: model.isConnected ? "你想一起完成什么？" : "可以先写下任务，连接 SSH 后发送…", handler: handleKey, onPasteImage: { model.pasteImage($0) }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
+                PromptEditor(text: text, caret: $caret, placeholder: "发送消息…", handler: handleKey, onPasteImage: { model.pasteImage($0) }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
                     .frame(height: editorHeight)
                 toolbarRow
             }
@@ -85,12 +85,14 @@ struct ComposerArea: View {
                 }
                 return true
             }
-            HStack {
-                Text(activity).lineLimit(1)
-                Spacer()
-                Text(model.transferStatus).lineLimit(1)
+            if !activity.isEmpty || !model.transferStatus.isEmpty {
+                HStack {
+                    Text(activity).lineLimit(1)
+                    Spacer()
+                    Text(model.transferStatus).lineLimit(1)
+                }
+                .font(.caption2).foregroundStyle(.secondary)
             }
-            .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 22).padding(.bottom, 12).padding(.top, 8)
         .frame(maxWidth: 1080)
@@ -100,10 +102,10 @@ struct ComposerArea: View {
     }
 
     private var activity: String {
-        guard model.isConnected else { return "选择服务器并连接后即可发送，草稿会保留。" }
-        guard let session = model.active else { return "Enter 发送 · Shift + Enter 换行" }
+        guard model.isConnected else { return "" }
+        guard let session = model.active else { return "" }
         if session.status == "detached" { return "重新连接 SSH 后同步远端任务" }
-        guard session.isBusy else { return "Enter 发送 · Shift + Enter 换行" }
+        guard session.isBusy else { return "" }
         let message = session.messages.last
         if let activity = message?.activity { return activity + " · Enter 排队" }
         if let running = message?.blocks?.last(where: { $0.type == "tool" && $0.status == "running" }) {
@@ -219,7 +221,7 @@ struct ComposerArea: View {
                     Divider()
                     Button("刷新模型列表") { model.refreshCapabilities(force: true) }
                     Button("自定义模型与更多设置…") { model.showPreferences = true }
-                } label: { Text(changingModel ? "切换中…" : displayed).font(.caption).lineLimit(1) }
+                } label: { Text(changingModel ? "切换中…" : displayed == "Default (recommended)" ? "默认" : displayed).font(.caption).lineLimit(1) }
                 .menuStyle(.borderlessButton).fixedSize().disabled(!model.isConnected || changingModel)
             }
             if session == nil { Spacer() }
@@ -232,8 +234,8 @@ struct ComposerArea: View {
                     .frame(width: 30, height: 30)
                     .background(canSend ? WorkbenchTheme.ink : Color.primary.opacity(0.05), in: Circle())
             }
-                .buttonStyle(.plain).foregroundStyle(canSend ? WorkbenchTheme.accent : Color.secondary.opacity(0.35)).help(busy ? "排队，当前回复完成后发送" : "发送消息")
-                .accessibilityLabel(busy ? "加入队列" : "发送消息")
+                .buttonStyle(.plain).foregroundStyle(canSend ? WorkbenchTheme.accent : Color.secondary.opacity(0.35)).help(busy ? "排队，当前回复完成后发送" : "发送消息 · Enter 发送，Shift + Enter 换行")
+                .accessibilityLabel(busy ? "加入队列" : "发送消息 · Enter 发送，Shift + Enter 换行")
                 .disabled(!canSend)
         }
     }

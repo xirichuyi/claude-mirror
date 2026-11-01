@@ -76,7 +76,10 @@ struct MessagesList: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
-                    if session.remoteHistoryRef != nil { HistoryNotice(session: session) }
+                    if session.remoteHistoryRef != nil,
+                       session.historyLoaded == false || session.historyBefore != nil || model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil {
+                        HistoryNotice(session: session)
+                    }
                     ForEach(Array(session.messages.enumerated()), id: \.element.id) { index, message in
                         // Equatable lets unchanged messages skip rendering while the last one streams.
                         MessageRow(message: message, busy: index == session.messages.count - 1 && session.isBusy, sessionStatus: session.status, showHeader: index == 0 || session.messages[index - 1].role != "assistant", actions: FileActions(open: { model.open($0, line: $1) }))
@@ -114,7 +117,6 @@ struct HistoryNotice: View {
         HStack {
             if let error = model.historyRefreshErrors[session.id] { Text(error).foregroundStyle(.orange) }
             if model.refreshingHistory.contains(session.id) { ProgressView().controlSize(.mini) }
-            Text(session.historyLoaded == false ? "正在加载远端消息…" : "远端历史 · 图片原始数据和超长内容未下载")
             if session.historyLoaded == false {
                 Button("加载消息") { model.perform { try await model.engine?.loadHistory(session.id) } }
             } else if session.historyBefore != nil {
@@ -237,7 +239,7 @@ struct MessageRow: View, Equatable {
                 if !text.isEmpty {
                     Button { copyToPasteboard(text); copied = true } label: {
                         Label(copied ? "已复制" : "复制回复", systemImage: copied ? "checkmark" : "doc.on.doc")
-                    }.buttonStyle(QuietButtonStyle()).task(id: copied) {
+                    }.labelStyle(.iconOnly).help(copied ? "已复制" : "复制回复").buttonStyle(QuietButtonStyle()).task(id: copied) {
                         if copied { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
                     }
                 }
@@ -298,7 +300,8 @@ struct ToolCard: View {
     }
     private var statusText: String {
         if block.status == "running" { return block.elapsed.map { "\(Int($0))s" } ?? "执行中" }
-        return ["error": "失败", "stopped": "已停止", "history": "历史记录", "done": "已完成"][block.status ?? ""] ?? "待执行"
+        if ["history", "done"].contains(block.status ?? "") { return "" }
+        return ["error": "失败", "stopped": "已停止"][block.status ?? ""] ?? "待执行"
     }
 
     var body: some View {
@@ -341,7 +344,7 @@ struct ToolCard: View {
                 else { Image(systemName: block.status == "error" ? "xmark.circle" : block.status == "done" ? "checkmark.circle" : "terminal").foregroundStyle(dotColor) }
                 Text(view.title).fontWeight(.medium)
                 if let file = view.file {
-                    Button(file) { actions.open(file, view.line) }.buttonStyle(.link).lineLimit(1).truncationMode(.head)
+                    Button((file as NSString).lastPathComponent) { actions.open(file, view.line) }.buttonStyle(.link).lineLimit(1).truncationMode(.middle).help(file)
                 }
                 if let subject = view.subject { Text(subject).foregroundStyle(.secondary).lineLimit(1) }
                 Spacer(minLength: 4)

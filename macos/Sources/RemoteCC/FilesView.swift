@@ -38,7 +38,7 @@ struct FilePanel: View {
             Divider()
             if let workspace = model.activeWorkspace {
                 if !model.isConnected {
-                    Label("连接已断开 · 保留上次加载的内容", systemImage: "network.slash")
+                    Label("连接已断开", systemImage: "network.slash")
                         .font(.caption).foregroundStyle(.secondary).padding(8)
                 }
                 Group {
@@ -76,15 +76,17 @@ struct FileTreeView: View {
                 TextField("远端目录", text: $path).textFieldStyle(.roundedBorder).font(.system(size: 11, design: .monospaced))
                     .onSubmit { Task { await workspace.browse(path) } }
                 Button { Task { await workspace.reload(force: true) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.plain).help("刷新")
-            }
-            .padding(.horizontal, 8).padding(.top, 8)
-            HStack(spacing: 6) {
-                Button("设为工作目录") { useFolder() }.disabled(workspace.root == nil)
-                Button("上传") { model.pickAndUpload(to: workspace.root) }
-                Button { if let root = workspace.root { prompt = NamePrompt(title: "新文件名称", initial: "", action: .newFile(root)) } } label: { Image(systemName: "doc.badge.plus") }.help("新建文件")
-                Button { if let root = workspace.root { prompt = NamePrompt(title: "新文件夹名称", initial: "", action: .newFolder(root)) } } label: { Image(systemName: "folder.badge.plus") }.help("新建文件夹")
-                Spacer()
-                Toggle("隐藏文件", isOn: Binding(get: { workspace.showHidden }, set: { workspace.showHidden = $0 })).toggleStyle(.checkbox).font(.caption2)
+                Button { model.pickAndUpload(to: workspace.root) } label: { Image(systemName: "square.and.arrow.up") }
+                    .buttonStyle(.plain).help("上传文件").accessibilityLabel("上传文件")
+                Menu {
+                    Button("新建文件…") { if let root = workspace.root { prompt = NamePrompt(title: "新文件名称", initial: "", action: .newFile(root)) } }
+                    Button("新建文件夹…") { if let root = workspace.root { prompt = NamePrompt(title: "新文件夹名称", initial: "", action: .newFolder(root)) } }
+                    Divider()
+                    Button("设为工作目录") { useFolder() }.disabled(workspace.root == nil)
+                    Toggle("显示隐藏文件", isOn: Binding(get: { workspace.showHidden }, set: { workspace.showHidden = $0 }))
+                } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("目录操作").accessibilityLabel("目录操作")
             }
             .controlSize(.small).padding(8)
             if let error = workspace.error { Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 10).textSelection(.enabled) }
@@ -365,12 +367,10 @@ struct EditorPane: View {
     private func header(_ tab: EditorTab) -> some View {
         let preview = tab.preview
         return VStack(alignment: .leading, spacing: 6) {
-            Text(preview?.path ?? tab.path).font(.caption2).foregroundStyle(.secondary)
-                .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                .help(preview?.path ?? tab.path)
             HStack(spacing: 8) {
-                Text(tab.notice ?? tab.error.map { _ in "无法预览" } ?? info(tab)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                if tab.notice != nil || tab.error != nil || preview == nil || preview?.truncated == true {
+                    Text(tab.notice ?? tab.error.map { _ in "无法预览" } ?? info(tab)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
                 if !tab.isDiff, let preview {
                     if tab.draft != nil {
                         Button("保存到远端") { Task { await workspace.save(tab) } }
