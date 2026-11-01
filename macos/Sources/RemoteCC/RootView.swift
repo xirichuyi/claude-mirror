@@ -101,7 +101,14 @@ struct SidebarView: View {
             if grouped[session.projectKey] == nil { order.append(session.projectKey) }
             grouped[session.projectKey, default: []].append(session)
         }
-        return order.map { ($0, grouped[$0]!) }
+        return order.map { ($0, grouped[$0]!) }.filter { !model.projectMissing($0.1[0]) }
+    }
+
+    private var unavailableSessions: [ChatSession] {
+        model.machineSessions.filter {
+            model.projectMissing($0) && ($0.archived ?? false) == model.showArchived &&
+            (model.searchText.isEmpty || ($0.name + " " + $0.directory).localizedCaseInsensitiveContains(model.searchText))
+        }
     }
 
     private var visibleGroups: [(key: String, sessions: [ChatSession])] {
@@ -170,8 +177,13 @@ struct SidebarView: View {
                     }
                     if model.searchText.isEmpty && !model.showArchived {
                         Section("最近对话") {
-                            ProjectGroup(sessions: Array(model.machineSessions.filter { $0.archived != true }.sorted { $0.updatedAt > $1.updatedAt }.prefix(8)), searching: false, flat: true)
+                            ProjectGroup(sessions: Array(model.machineSessions.filter { $0.archived != true && !model.projectMissing($0) }.sorted { $0.updatedAt > $1.updatedAt }.prefix(8)), searching: false, flat: true)
                         }
+                    }
+                }
+                if !unavailableSessions.isEmpty {
+                    Section("目录已移除 · 历史对话") {
+                        ProjectGroup(sessions: unavailableSessions, searching: !model.searchText.isEmpty, flat: true)
                     }
                 }
             }
@@ -179,7 +191,7 @@ struct SidebarView: View {
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
             .overlay(alignment: .topLeading) {
-                if groups.isEmpty {
+                if groups.isEmpty && unavailableSessions.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(model.searchText.isEmpty ? (model.showArchived ? "还没有归档的对话" : "暂无历史对话") : "没有找到匹配的对话")
                         Text(model.searchText.isEmpty ? "连接后自动同步这台机器的对话" : "试试其他关键词")
@@ -255,7 +267,7 @@ struct ProjectGroup: View {
 
     @ViewBuilder private func projectActions(_ first: ChatSession) -> some View {
         Text(first.host + " · " + first.directory)
-        Button("在项目中新建对话") { model.newConversation(in: first) }
+        Button("在项目中新建对话") { model.newConversation(in: first) }.disabled(model.projectMissing(first))
         Button("浏览远端文件夹") {
             model.select(first.id); model.panel = .files; model.showFiles = true
             Task { await model.activeWorkspace?.browse(first.directory) }

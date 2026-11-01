@@ -647,7 +647,25 @@ async function historyMessages(request) {
   } finally { await source.close(); }
 }
 
-const historyOperations = { list: historyList, messages: historyMessages };
+async function projectDirectories(request) {
+  if (!Array.isArray(request.directories) || request.directories.length > 200) throw new Error('一次最多检查 200 个项目目录');
+  const directories = [...new Set(request.directories)];
+  const result = {};
+  await mapLimit(directories, 16, async directory => {
+    if (typeof directory !== 'string' || !directory) throw new Error('无效项目目录');
+    try {
+      const target = expand(directory);
+      const stat = await fsp.stat(target);
+      if (!stat.isDirectory()) { result[directory] = 'missing'; return; }
+      await fsp.access(target, fs.constants.X_OK);
+      result[directory] = 'available';
+    } catch (error) {
+      result[directory] = ['ENOENT', 'ENOTDIR'].includes(error.code) ? 'missing' : 'unknown';
+    }
+  });
+  return { directories: result };
+}
+const historyOperations = { list: historyList, messages: historyMessages, projects: projectDirectories };
 
 // ---------------------------------------------------------------- persistent tasks
 

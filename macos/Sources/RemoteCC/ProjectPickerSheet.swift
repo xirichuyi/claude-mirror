@@ -10,7 +10,7 @@ struct ProjectPickerSheet: View {
     @State private var error = ""
 
     private var recent: [String] {
-        Array(Set(model.sessions.filter { $0.config.key == model.active?.config.key }.map(\.directory))).sorted()
+        Array(Set(model.sessions.filter { $0.config.key == model.active?.config.key && !model.projectMissing($0) }.map(\.directory))).sorted()
     }
 
     var body: some View {

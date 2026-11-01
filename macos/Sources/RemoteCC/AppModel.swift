@@ -131,6 +131,8 @@ final class AppModel: ObservableObject {
         set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: lastConnectionKey) }
     }
     var currentConfig: ConnectionConfig? { selectedMachine ?? active?.config ?? lastConnection }
+    func projectMissing(_ session: ChatSession) -> Bool { engine?.projectMissing(session.config) == true }
+
     var machineSessions: [ChatSession] { sortedSessions.filter { $0.config.key == currentConfig?.key } }
 
     func selectMachine(_ config: ConnectionConfig) {
@@ -280,6 +282,7 @@ final class AppModel: ObservableObject {
         guard let engine else { return }
         engine.files.invalidate(config)
         await engine.restore(config)
+        try? await engine.refreshProjects(config)
         if active?.config.key == config.key { await activeWorkspace?.reload(force: true) }
     }
 
@@ -313,6 +316,7 @@ final class AppModel: ObservableObject {
         if engine.connectionState(session.config).status == .connected {
             let workspace = workspace(for: session)
             if workspace?.root == nil { Task { await workspace?.browse(session.directory) } }
+            Task { try? await engine.refreshProjects(session.config, directories: [session.directory]) }
             refreshCapabilities()
             Task { await refreshVisibleHistory(id, report: false) }
         }
@@ -323,7 +327,11 @@ final class AppModel: ObservableObject {
               engine.connectionState(session.config).status == .connected else { return }
         refreshingHistory.insert(id)
         defer { refreshingHistory.remove(id) }
-        do { try await engine.refreshHistory(id); historyRefreshErrors[id] = nil }
+        do {
+            try await engine.refreshHistory(id)
+            try await engine.refreshProjects(session.config, directories: [session.directory])
+            historyRefreshErrors[id] = nil
+        }
         catch {
             historyRefreshErrors[id] = error.localizedDescription
             if report { show(error.localizedDescription) }
@@ -355,6 +363,7 @@ final class AppModel: ObservableObject {
         guard let engine else { return }
         searchText = ""; showArchived = false
         perform {
+            try await engine.requireProject(source.config)
             self.select(try engine.create(source.config, preferences: source.preferences).id)
             self.composerFocus = UUID()
         }
@@ -413,6 +422,7 @@ final class AppModel: ObservableObject {
                 try await self.run(interaction, id: id)
                 return
             }
+            if let session = engine.session(id) { try await engine.requireProject(session.config) }
             try engine.submit(id, text: value, attachments: files)
             self.attachments[id] = nil
             self.drafts[id] = ""

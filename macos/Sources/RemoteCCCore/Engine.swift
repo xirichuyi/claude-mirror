@@ -5,6 +5,27 @@ import Foundation
 public final class ChatEngine {
     public private(set) var sessions: [ChatSession]
     public private(set) var connectionStates: [String: ConnectionState] = [:]
+    private var projectStates: [String: [String: String]] = [:]
+
+    public func projectMissing(_ config: ConnectionConfig) -> Bool {
+        projectStates[config.key]?[config.directory] == "missing"
+    }
+
+    public func refreshProjects(_ config: ConnectionConfig, directories: [String]? = nil) async throws {
+        let paths = Array(Set(directories ?? sessions.filter { $0.config.key == config.key }.map(\.directory)))
+        for start in stride(from: 0, to: paths.count, by: 200) {
+            let batch = Array(paths[start..<min(start + 200, paths.count)])
+            let result = try await agents.call(config, "history", ["operation": "projects", "directories": .array(batch.map(JSON.string))])
+            for path in batch { projectStates[config.key, default: [:]][path] = result["directories"]?[path]?.string ?? "unknown" }
+            notify()
+        }
+    }
+
+    public func requireProject(_ config: ConnectionConfig) async throws {
+        try await refreshProjects(config, directories: [config.directory])
+        if projectMissing(config) { throw RemoteError("远端项目目录已不存在：" + config.directory + "。请选择其他项目；历史对话仍可查看。") }
+    }
+
     public let agents: AgentClient
     public let files: RemoteFiles
     /// Fires at most once per frame; the UI reads current state afterwards.
@@ -162,6 +183,7 @@ public final class ChatEngine {
     // MARK: Sending
 
     public func submit(_ id: String, text: String, attachments: [Attachment] = []) throws {
+        if let session = session(id), projectMissing(session.config) { throw RemoteError("远端项目目录已不存在，请选择其他项目。") }
         if running.contains(id) { try enqueue(id, text: text, attachments: attachments) }
         else { try send(id, text: text, attachments: attachments) }
     }
@@ -696,6 +718,7 @@ public final class ChatEngine {
             guard let next = result["nextOffset"]?.string else { break }
             offset = .string(next)
         }
+        try await refreshProjects(config)
         store.save(sessions, changed: [])
         return (count, total, unreadable)
     }

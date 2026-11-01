@@ -17,6 +17,7 @@ struct ComposerArea: View {
 
     private var id: String { model.activeId ?? "welcome-" + (model.currentConfig?.key ?? "local") }
     private var canSend: Bool {
+        model.active.map { !model.projectMissing($0) } != false &&
         !model.uploadingSessions.contains(id) && model.currentConfig != nil && model.isConnected && model.active?.historyLoaded != false &&
         (!text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(model.attachments[id] ?? []).isEmpty)
     }

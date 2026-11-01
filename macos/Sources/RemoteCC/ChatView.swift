@@ -9,6 +9,13 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let session = model.active, model.projectMissing(session) {
+                HStack {
+                    Label("远端目录已不存在，历史对话仍可查看", systemImage: "folder.badge.questionmark")
+                    Spacer()
+                    Button("选择项目") { model.showProjectPicker = true }
+                }.font(.callout).padding(12).background(Color.orange.opacity(0.08))
+            }
             if model.active == nil {
                 MachineHomeView()
             } else if let session = model.active, !session.messages.isEmpty || session.remoteHistoryRef != nil {

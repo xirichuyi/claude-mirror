@@ -115,3 +115,21 @@ test('history preserves real API failure markers through agent and transcript co
     assert.equal(historyMessages(page.records)[0].error, 'Usage limit reached');
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
+
+test('project availability follows deletion and recreation without deleting history', async () => {
+  const f = fixture();
+  try {
+    const folder = path.join(f.root, 'workspace'); fs.mkdirSync(folder);
+    const row = { type: 'user', uuid: randomUUID(), cwd: folder, timestamp: new Date().toISOString(), message: { content: 'keep this history' } };
+    fs.writeFileSync(f.file, JSON.stringify(row) + '\n');
+    const check = () => f.call({ operation: 'projects', directories: [folder, folder] });
+    assert.equal((await check()).directories[folder], 'available');
+    fs.rmdirSync(folder);
+    assert.equal((await check()).directories[folder], 'missing');
+    assert.equal((await f.call({ operation: 'list' })).sessions.length, 1);
+    fs.mkdirSync(folder);
+    assert.equal((await check()).directories[folder], 'available');
+    assert.equal((await f.call({ operation: 'projects', directories: [f.file] })).directories[f.file], 'missing');
+    await assert.rejects(f.call({ operation: 'projects', directories: Array(201).fill(folder) }), /200/);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});

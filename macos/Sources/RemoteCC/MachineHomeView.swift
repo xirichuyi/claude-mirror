@@ -4,7 +4,7 @@ import RemoteCCCore
 
 struct MachineHomeView: View {
     @EnvironmentObject private var model: AppModel
-    private var recent: [ChatSession] { Array(model.machineSessions.filter { $0.archived != true }.prefix(6)) }
+    private var recent: [ChatSession] { Array(model.machineSessions.filter { $0.archived != true && !model.projectMissing($0) }.prefix(6)) }
     private var syncing: Bool { model.currentConfig.map { model.syncingMachines.contains($0.key) } ?? false }
 
     var body: some View {
