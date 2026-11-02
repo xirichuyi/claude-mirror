@@ -148,7 +148,7 @@ sh macos/scripts/build-dmg.sh
 
 ### GitHub Actions 构建与发布
 
-- **CI**（`.github/workflows/ci.yml`）：推送到 main 或提交 PR 时，在 Linux 上运行 Node 测试，在 macOS（Apple Silicon）上运行 Swift 测试并打包 DMG。DMG 作为构建产物保留 14 天，可在对应运行记录中下载。
+- **CI**（`.github/workflows/ci.yml`）：推送到 main 或提交 PR 时，在 Linux 上运行 Node 测试，在 macOS 26（Apple Silicon，Xcode 26）上运行 Swift 测试并打包 DMG。DMG 作为构建产物保留 14 天，可在对应运行记录中下载。
 - **Release**（`.github/workflows/release.yml`）：推送 `v*` 标签时，先核对标签与 `Info.plist` 中的版本号一致，再测试、打包，并把 DMG、校验文件和远端脚本上传到同名 Release。Release 不存在时自动创建，说明取自 `docs/releases/<标签>.md`。也可以在 Actions 页面手动运行，为已有标签重新构建并上传。
 
 发布新版本：
