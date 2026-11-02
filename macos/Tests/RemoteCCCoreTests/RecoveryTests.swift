@@ -92,7 +92,13 @@ sys.exit(0)
         XCTAssertEqual(received.bytes, 400)
         XCTAssertTrue(ssh.state(config).error.contains("响应较慢"))
         try FileManager.default.removeItem(at: root.appendingPathComponent("stall-probe"))
-        await ssh.checkConnections()
+        // The 15-second background monitor may still be probing with the stall in place, and
+        // checkConnections skips a machine that is already being checked; so retry until it settles.
+        for _ in 0..<40 where !ssh.state(config).error.isEmpty {
+            await ssh.checkConnections()
+            if ssh.state(config).error.isEmpty { break }
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
         XCTAssertTrue(ssh.state(config).error.isEmpty)
         await ssh.closeAll()
     }

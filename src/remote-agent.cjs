@@ -234,7 +234,7 @@ async function search(request, token) {
   const useRipgrep = await hasCommand('rg');
   const args = useRipgrep ?
     ['--no-heading', '--color', 'never', '-n', '-F', '-S', '--null', '--max-count', '50', '--max-columns', '400', ...excludes.flatMap(name => ['-g', '!' + name]), '--', query, '.'] :
-    ['-rnIFi', '-Z', '-m', '50', ...excludes.map(name => '--exclude-dir=' + name), '-e', query, '--', '.'];
+    ['-rnIFi', '--null', '-m', '50', ...excludes.map(name => '--exclude-dir=' + name), '-e', query, '--', '.'];
   const result = await run(useRipgrep ? 'rg' : 'grep', args, { cwd: base, token });
   if (token?.cancelled) throw new Error('请求已取消');
   if (result.code > 1) throw new Error(result.stderr.trim() || '搜索失败');
