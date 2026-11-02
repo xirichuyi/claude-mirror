@@ -64,16 +64,16 @@ struct ActivitySheet: View {
                                             }
                                         }.foregroundStyle(.secondary)
                                     }
-                                }.padding(12).background(WorkbenchTheme.canvas, in: RoundedRectangle(cornerRadius: 9))
+                                }.padding(12).background(WorkbenchTheme.canvas, in: RoundedRectangle(cornerRadius: 8))
                             }
-                        }.padding(16).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                        }.padding(16).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
                     }
                     if model.attentionSessions.isEmpty {
                         VStack(spacing: 12) {
-                            Image(systemName: "checkmark.circle").font(.system(size: 30, weight: .light)).foregroundStyle(WorkbenchTheme.accent.opacity(0.7))
-                            Text("暂时没有需要处理的任务").font(.system(size: 14, weight: .medium))
+                            Image(systemName: "checkmark.circle").font(.largeTitle.weight(.light)).foregroundStyle(WorkbenchTheme.accent.opacity(0.7))
+                            Text("暂时没有需要处理的任务").font(.body.weight(.medium))
                             Text(model.savedMachines.isEmpty ? "连接机器后，任务会汇总在这里。" : "正在运行、等待确认和未读的结果都会出现在这里。")
-                                .font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         }.frame(maxWidth: .infinity).padding(.vertical, 40)
                     }
                 }

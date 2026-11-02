@@ -12,7 +12,7 @@ struct RootView: View {
                 ContentUnavailableView("无法启动", systemImage: "exclamationmark.triangle", description: Text(failure))
             } else {
                 NavigationSplitView {
-                    SidebarView().navigationSplitViewColumnWidth(min: 250, ideal: 290, max: 350)
+                    SidebarView().navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
                 } detail: {
                     WorkArea()
                 }
@@ -154,8 +154,8 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 18) {
-                HStack(spacing: 9) {
+            VStack(spacing: 6) {
+                HStack(spacing: 4) {
                     MachineSwitcher()
                     Spacer()
                     Button { model.showActivity = true } label: {
@@ -175,7 +175,7 @@ struct SidebarView: View {
                     HStack {
                         Label("新建对话", systemImage: "square.and.pencil")
                         Spacer()
-                        Text("⌘ N").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        Text("⌘ N").font(.subheadline).foregroundStyle(.tertiary)
                     }
                 }
                 .buttonStyle(QuietButtonStyle()).help("新对话（⌘N）").disabled(model.currentConfig == nil)
@@ -189,11 +189,11 @@ struct SidebarView: View {
                         Button { closeSearch() } label: { Image(systemName: "xmark") }
                             .buttonStyle(.plain).help("关闭搜索").accessibilityLabel("关闭搜索")
                     }
-                    .font(.system(size: 12)).padding(9)
+                    .font(.callout).padding(9)
                     .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 24)
+            .padding(.horizontal, 10).padding(.top, 4).padding(.bottom, 4)
             List(selection: Binding(get: { model.activeId }, set: { if let id = $0 {
                 let sessionID = id.hasPrefix("recent:") ? String(id.dropFirst(7)) : id
                 if model.machineSessions.contains(where: { $0.id == sessionID }) { model.select(sessionID) }
@@ -205,7 +205,7 @@ struct SidebarView: View {
                         }
                         if model.searchText.isEmpty && (showAllProjects || groups.count > visibleGroups.count) {
                             Button(showAllProjects ? "收起项目" : "更多项目（\(groups.count - visibleGroups.count)）") { showAllProjects.toggle() }
-                                .buttonStyle(.borderless).foregroundStyle(.secondary).font(.system(size: 12))
+                                .buttonStyle(.borderless).foregroundStyle(.secondary).font(.callout)
                                 .padding(.vertical, 6).selectionDisabled()
                         }
                     }
@@ -223,7 +223,6 @@ struct SidebarView: View {
             }
             .id(model.currentConfig?.key ?? "no-machine")
             .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
             .overlay(alignment: .topLeading) {
                 if groups.isEmpty && unavailableSessions.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -231,13 +230,12 @@ struct SidebarView: View {
                         Text(model.searchText.isEmpty ? "连接后自动同步这台机器的对话" : "试试其他关键词")
                             .foregroundStyle(.tertiary)
                     }
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.secondary)
                     .padding(.horizontal, 20).padding(.top, 20).allowsHitTesting(false)
                 }
             }
             ServerFooter()
         }
-        .background(WorkbenchTheme.sidebar)
     }
 
     private func closeSearch() {
@@ -276,16 +274,15 @@ struct ProjectGroup: View {
             ForEach(visibleSessions) { session in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        if session.pinned == true { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.secondary) }
-                        Text(historyDisplayTitle(session.name)).font(.system(size: 14)).lineLimit(1)
+                        if session.pinned == true { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
+                        Text(historyDisplayTitle(session.name)).font(.body).lineLimit(1)
                         Spacer(minLength: 0)
                         if model.unreadSessions.contains(session.id) { Circle().fill(WorkbenchTheme.accent).frame(width: 6, height: 6) }
                     }
                     if session.isBusy {
-                        Text(statusLabel(session.status)).font(.system(size: 10)).foregroundStyle(WorkbenchTheme.accent)
+                        Text(statusLabel(session.status)).font(.caption2).foregroundStyle(WorkbenchTheme.accent)
                     }
                 }
-                .padding(.vertical, 7)
                 .help(session.directory + " · " + session.name)
                 .tag(flat ? "recent:" + session.id : session.id)
                 .contextMenu {
@@ -319,13 +316,13 @@ struct ProjectGroup: View {
                     rows
                     if !searching && (showAll || sessions.count > visibleSessions.count) {
                         Button(showAll ? "收起" : "显示更多（\(sessions.count - visibleSessions.count)）") { showAll.toggle() }
-                            .buttonStyle(.borderless).font(.system(size: 12)).foregroundStyle(.secondary)
+                            .buttonStyle(.borderless).font(.callout).foregroundStyle(.secondary)
                             .padding(.vertical, 6).selectionDisabled()
                     }
                 } label: {
                     HStack {
                         Image(systemName: "folder").foregroundStyle(.secondary)
-                        Text(first.directory == "/" ? "/" : (first.directory as NSString).lastPathComponent).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        Text(first.directory == "/" ? "/" : (first.directory as NSString).lastPathComponent).font(.body.weight(.medium)).lineLimit(1)
                         Spacer()
                         Button { model.newConversation(in: first) } label: { Image(systemName: "plus") }
                             .buttonStyle(.borderless).help("在项目中新建对话").accessibilityLabel("在项目中新建对话")
@@ -358,17 +355,19 @@ struct MachineSwitcher: View {
     @State private var choosing = false
     var body: some View {
         Button { choosing.toggle() } label: {
-            HStack(spacing: 6) {
-                BrandIcon(size: 26)
-                Text("镜像 Claude").font(.system(size: 16, weight: .semibold))
-                Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(.secondary)
+            // The window title already names the app; the sidebar says which machine you are on.
+            HStack(spacing: 7) {
+                Circle().fill(model.isConnected ? Color.green : Color.secondary.opacity(0.5)).frame(width: 7, height: 7)
+                Text(model.currentConfig?.displayName ?? "选择机器").font(.headline).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 6).padding(.vertical, 4).contentShape(Rectangle())
         }.buttonStyle(.plain).help("当前机器：" + (model.currentConfig?.displayName ?? "未连接") + " · 切换或添加机器")
         .popover(isPresented: $choosing, arrowEdge: .trailing) {
             VStack(alignment: .leading, spacing: 6) {
                 Button { choosing = false; model.activeId = nil } label: { Label("返回首页", systemImage: "house") }.buttonStyle(QuietButtonStyle())
                 Divider()
-                Text("我的机器").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(8)
+                Text("我的机器").font(.subheadline.weight(.medium)).foregroundStyle(.secondary).padding(8)
                 ForEach(model.savedMachines, id: \.key) { machine in
                     Button {
                         choosing = false
@@ -383,7 +382,7 @@ struct MachineSwitcher: View {
                             Spacer()
                             if model.currentConfig?.key == machine.key { Image(systemName: "checkmark") }
                             Circle().fill(model.engine?.connectionState(machine).status == .connected ? Color.green : Color.secondary).frame(width: 6, height: 6)
-                        }.font(.system(size: 13)).padding(4).contentShape(Rectangle())
+                        }.font(.body).padding(4).contentShape(Rectangle())
                     }.buttonStyle(QuietButtonStyle())
                     .contextMenu {
                         Button("重命名…") {
@@ -409,7 +408,7 @@ struct MachineSwitcher: View {
                 }
                 Divider()
                 Button { choosing = false; model.showConnect = true } label: {
-                    Label("添加机器…", systemImage: "plus").font(.system(size: 13)).padding(10)
+                    Label("添加机器…", systemImage: "plus").font(.body).padding(10)
                 }.buttonStyle(.plain)
             }.padding(8).frame(width: 260)
         }
@@ -424,7 +423,7 @@ struct ServerFooter: View {
                 ProgressView().controlSize(.mini)
             } else { Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary) }
             Text(model.connectionState.error.isEmpty ? (model.historyStatus.isEmpty ? "历史对话自动同步" : model.historyStatus) : model.connectionState.error)
-                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 .help(model.connectionState.error.isEmpty ? model.historyStatus : model.connectionState.error)
             Spacer(minLength: 0)
             Menu {
@@ -438,7 +437,7 @@ struct ServerFooter: View {
                 }
             } label: { Image(systemName: "ellipsis") }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        }.padding(16)
+        }.padding(.horizontal, 14).padding(.vertical, 10)
     }
 }
 
@@ -458,9 +457,9 @@ struct ConnectSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("添加机器").font(.system(size: 22, weight: .semibold))
+                Text("添加机器").font(.title2.weight(.semibold))
                 Text("连接 SSH，即可找回这台机器上的 Claude Code 对话。")
-                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                    .font(.body).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 16) {
                 connectionField("主机名称", text: $name, prompt: "例如：开发服务器（可选）")
@@ -490,13 +489,13 @@ struct ConnectSheet: View {
                 }
             }
             Toggle("允许此服务器反向连接本机", isOn: $reverseAccess)
-                .font(.system(size: 12))
+                .font(.callout)
                 .help("复用本应用的 SSH 连接，让服务器通过私有 socket 连到本机的远程登录服务。服务器会获得一把只能经此通道使用的专用密钥，关闭后立即撤销；开启期间服务器上的程序能以你的身份登录这台 Mac。")
             Text("需要密码或私钥口令时会弹出安全输入窗口，不保存密码。首次连接可在窗口中核对主机指纹。密码认证断线后，请点击重新连接以再次输入。")
-                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if !error.isEmpty {
                 Label(error, systemImage: "exclamationmark.circle")
-                    .font(.system(size: 12)).foregroundStyle(.red).textSelection(.enabled)
+                    .font(.callout).foregroundStyle(.red).textSelection(.enabled)
             }
             HStack {
                 if connecting { ProgressView().controlSize(.small) }
@@ -514,9 +513,9 @@ struct ConnectSheet: View {
 
     private func connectionField(_ label: String, text: Binding<String>, prompt: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(label).font(.system(size: 12, weight: .medium))
+            Text(label).font(.callout.weight(.medium))
             TextField(label, text: text, prompt: Text(prompt)).labelsHidden().textFieldStyle(.plain)
-                .font(.system(size: 13)).padding(12)
+                .font(.body).padding(12)
                 .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(WorkbenchTheme.border))
         }

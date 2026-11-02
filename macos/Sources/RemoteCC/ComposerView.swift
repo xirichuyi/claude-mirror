@@ -6,7 +6,7 @@ import RemoteCCCore
 
 struct ComposerArea: View {
     @EnvironmentObject private var model: AppModel
-    @State private var editorHeight: CGFloat = 76
+    @State private var editorHeight: CGFloat = 40
     @State private var caret = 0
     @State private var selection = 0
     @State private var dismissedText: String?
@@ -46,7 +46,7 @@ struct ComposerArea: View {
         VStack(alignment: .leading, spacing: 8) {
             if !model.isConnected {
                 Label(model.connectionState.status == .connecting ? "正在连接…" : "未连接", systemImage: "network.slash")
-                    .font(.system(size: 12)).foregroundStyle(.secondary).padding(.horizontal, 4)
+                    .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 4)
             }
             if let session = model.active {
                 todoStrip(session)
@@ -72,9 +72,10 @@ struct ComposerArea: View {
                     .frame(height: editorHeight)
                 toolbarRow
             }
-            .padding(16)
-            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(dropTarget ? WorkbenchTheme.accent : WorkbenchTheme.border))
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
+            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
+            .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large).strokeBorder(dropTarget ? WorkbenchTheme.accent : WorkbenchTheme.border))
+            .shadow(color: .black.opacity(0.04), radius: 10, y: 2)
             .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in
                 guard model.isConnected else { model.show("先连接服务器，再附加文件"); return false }
                 let destinationId = id
@@ -98,13 +99,14 @@ struct ComposerArea: View {
                 }
                 return true
             }
-            Text(model.transferStatus).lineLimit(1)
-                .font(.caption2).foregroundStyle(.secondary)
-                .frame(height: 14, alignment: .leading)
+            if !model.transferStatus.isEmpty {
+                Text(model.transferStatus).lineLimit(1)
+                    .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 4)
+            }
 
         }
-        .padding(.horizontal, 22).padding(.bottom, 12).padding(.top, 8)
-        .frame(maxWidth: 1080)
+        .padding(.horizontal, 28).padding(.bottom, 14).padding(.top, 6)
+        .frame(maxWidth: 820)
         .frame(maxWidth: .infinity)
         .onChange(of: text.wrappedValue) { refreshMentions() }
         .onChange(of: caret) { selection = 0 }
@@ -175,7 +177,7 @@ struct ComposerArea: View {
                             Button { model.attachments[id]?.removeAll { $0.path == file.path } } label: { Image(systemName: "xmark") }.buttonStyle(.plain).help("移除附件")
                         }
                         .font(.caption).padding(.horizontal, 7).padding(.vertical, 4)
-                        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
+                        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
                     }
                 }
             }
@@ -193,7 +195,8 @@ struct ComposerArea: View {
             Button { model.pickAndUpload() } label: { Image(systemName: "plus").frame(width: 18, height: 18) }.buttonStyle(QuietButtonStyle()).help("上传文件并附加").disabled(!model.isConnected)
             if session != nil {
                 Button { model.openProjectPicker() } label: { Image(systemName: "folder") }.buttonStyle(QuietButtonStyle()).help("切换项目").disabled(!model.isConnected)
-                Button(modes[preferences?.permissionMode ?? "default"] ?? "默认权限") { model.showPreferences = true }.buttonStyle(.plain).font(.caption2).foregroundStyle(.secondary).disabled(!model.isConnected)
+                Button { model.showPreferences = true } label: { Label(modes[preferences?.permissionMode ?? "default"] ?? "默认权限", systemImage: "checkmark.shield") }
+                    .buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).disabled(!model.isConnected)
                 Spacer(minLength: 12)
                 Menu {
                     if let session {
@@ -321,7 +324,7 @@ struct MenuList: View {
                     ForEach(0..<count, id: \.self) { index in
                         row(index)
                             .padding(.horizontal, 8).padding(.vertical, 6)
-                            .background(index == selection ? Color.secondary.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                            .background(index == selection ? Color.secondary.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
                             .id(index)
                     }
                 }
@@ -329,8 +332,8 @@ struct MenuList: View {
             }
             .frame(maxHeight: 260)
             .fixedSize(horizontal: false, vertical: true)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.secondary.opacity(0.25)))
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
             .onChange(of: selection) { proxy.scrollTo(selection) }
         }
     }
@@ -453,7 +456,7 @@ final class PasteAwareTextView: NSTextView {
     func measureContentHeight() {
         guard let layoutManager, let textContainer else { return }
         layoutManager.ensureLayout(for: textContainer)
-        let height = min(200, max(76, ceil(layoutManager.usedRect(for: textContainer).height + textContainerInset.height * 2)))
+        let height = min(200, max(40, ceil(layoutManager.usedRect(for: textContainer).height + textContainerInset.height * 2)))
         guard abs(height - lastContentHeight) > 0.5 else { return }
         lastContentHeight = height
         DispatchQueue.main.async { [weak self] in self?.onContentHeight?(height) }
@@ -558,15 +561,15 @@ struct PermissionCard: View {
                 Label("等待你的确认", systemImage: "hand.raised.fill").foregroundStyle(WorkbenchTheme.accent)
                 Spacer()
                 if sending { ProgressView().controlSize(.mini); Text("正在提交…").foregroundStyle(.secondary) }
-            }.font(.system(size: 11, weight: .medium)).padding(.bottom, 4)
+            }.font(.subheadline.weight(.medium)).padding(.bottom, 4)
             if permission.kind == "elicitation" { elicitation } else { approval }
             if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
         }
         .padding(16)
         .disabled(sending || (onAnswer == nil && !model.isConnected))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(WorkbenchTheme.accent.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(WorkbenchTheme.accent.opacity(0.25)))
+        .background(WorkbenchTheme.accent.opacity(0.045), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).stroke(WorkbenchTheme.accent.opacity(0.25)))
         .font(.callout)
     }
 

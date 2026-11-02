@@ -196,3 +196,5 @@ cd macos && swift test
 `sh macos/scripts/build-dmg.sh` 构建当前 Mac 架构的 release 应用，验证签名，生成包含 Applications 快捷入口的 DMG 以及 SHA-256 校验文件。发布说明在 `docs/releases/`。
 
 文档截图使用 DEBUG 构建及 bundle ID `local.claudemirror.demo`：此模式只读写独立临时示例目录，使用虚构对话，远端启动器会拒绝所有连接。不要把该 DEBUG 应用作为发行包；DMG 脚本强制使用 release 构建，示例代码不会编入发行版。
+
+重新生成截图：`sh scripts/build-demo.sh`，然后运行 `sh scripts/snapshot.sh /tmp/shot chat light`（场景可选 `chat`、`home`、`connect`、`files`，外观可选 `light`、`dark`）。示例应用在进程内渲染自己的窗口，不需要“屏幕录制”权限，也能通过 SSH 运行；截图完成后会自动退出。

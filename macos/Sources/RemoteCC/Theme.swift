@@ -8,9 +8,14 @@ enum WorkbenchTheme {
     static let surface = adaptive(light: 0xFFFFFF, dark: 0x292929)
     static let ink = adaptive(light: 0x292929, dark: 0xECECEC)
     static let onInk = adaptive(light: 0xFFFFFF, dark: 0x242424)
-    static let accent = adaptive(light: 0x292929, dark: 0xD6D6D6)
+    /// Follows the accent colour chosen in System Settings, as Mac apps are expected to.
+    static let accent = Color.accentColor
     static let userBubble = adaptive(light: 0xF0F0F0, dark: 0x343434)
     static let border = Color.primary.opacity(0.09)
+
+    /// One spacing and corner scale for the whole app instead of per-view numbers.
+    enum Space { static let xs: CGFloat = 4, s: CGFloat = 8, m: CGFloat = 12, l: CGFloat = 16, xl: CGFloat = 24 }
+    enum Radius { static let small: CGFloat = 6, medium: CGFloat = 10, large: CGFloat = 14 }
 
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
@@ -35,10 +40,10 @@ struct ComposerActionStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(enabled ? WorkbenchTheme.onInk : Color.secondary.opacity(0.45))
-            .frame(width: 30, height: 30)
-            .background(enabled ? WorkbenchTheme.ink : Color.primary.opacity(0.05), in: Circle())
+            .font(.body.weight(.semibold))
+            .foregroundStyle(enabled ? Color.white : Color.secondary.opacity(0.45))
+            .frame(width: 28, height: 28)
+            .background(enabled ? Color.accentColor : Color.primary.opacity(0.06), in: Circle())
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
@@ -58,11 +63,11 @@ private struct WorkbenchButtonBody: View {
     @State private var hovered = false
     var body: some View {
         configuration.label
-            .font(.system(size: 12, weight: .medium))
-            .padding(.horizontal, 13).padding(.vertical, 9)
-            .foregroundStyle(prominent ? WorkbenchTheme.onInk : WorkbenchTheme.ink)
-            .background(prominent ? WorkbenchTheme.ink : hovered && enabled ? WorkbenchTheme.sidebar : WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(prominent ? .clear : WorkbenchTheme.border))
+            .font(.callout.weight(.medium))
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .foregroundStyle(prominent ? Color.white : WorkbenchTheme.ink)
+            .background(prominent ? Color.accentColor : hovered && enabled ? WorkbenchTheme.sidebar : WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small + 2))
+            .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small + 2).strokeBorder(prominent ? .clear : WorkbenchTheme.border))
             .opacity(!enabled ? 0.4 : configuration.isPressed ? 0.72 : 1)
             .onHover { hovered = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
@@ -79,10 +84,10 @@ private struct QuietButtonBody: View {
     @State private var hovered = false
     var body: some View {
         configuration.label
-            .font(.system(size: 12, weight: .medium))
+            .font(.callout.weight(.medium))
             .padding(7)
-            .contentShape(RoundedRectangle(cornerRadius: 7))
-            .background(hovered && enabled ? Color.primary.opacity(0.055) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .contentShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+            .background(hovered && enabled ? Color.primary.opacity(0.055) : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
             .opacity(enabled ? (configuration.isPressed ? 0.6 : 1) : 0.35)
             .onHover { hovered = $0 }
     }
@@ -95,8 +100,8 @@ struct SheetHeading: View {
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 7) {
-                Text(title).font(.system(size: 21, weight: .semibold)).tracking(-0.4)
-                if !subtitle.isEmpty { Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                Text(title).font(.title2.weight(.semibold)).tracking(-0.4)
+                if !subtitle.isEmpty { Text(subtitle).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer(minLength: 8)
             Button(action: close) { Image(systemName: "xmark").frame(width: 16, height: 16) }

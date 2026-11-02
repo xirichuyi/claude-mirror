@@ -39,7 +39,7 @@ struct WelcomeView: View {
                 HStack(spacing: 12) {
                     BrandIcon(size: 38)
                     Text("今天，想完成什么？")
-                        .font(.system(size: 25, weight: .medium))
+                        .font(.title.weight(.medium))
                 }
                 HStack(spacing: 8) {
                     suggestion("了解项目", icon: "folder", prompt: "请梳理这个项目的目录结构、技术栈和主要入口。")
@@ -58,7 +58,7 @@ struct WelcomeView: View {
 
     private func suggestion(_ title: String, icon: String, prompt: String) -> some View {
         Button { model.drafts[model.activeId ?? "welcome"] = prompt; model.composerFocus = UUID() } label: {
-            Label(title, systemImage: icon).font(.system(size: 12))
+            Label(title, systemImage: icon).font(.callout)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(WorkbenchTheme.surface.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(WorkbenchTheme.border))
@@ -74,7 +74,7 @@ struct MessagesList: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if session.remoteHistoryRef != nil,
                        session.historyLoaded == false || session.historyBefore != nil || model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil {
                         HistoryNotice(session: session)
@@ -87,8 +87,8 @@ struct MessagesList: View {
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .padding(.horizontal, 32).padding(.vertical, 32)
-                .frame(maxWidth: 1080, alignment: .leading)
+                .padding(.horizontal, 28).padding(.vertical, 24)
+                .frame(maxWidth: 820, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
             .background(ScrollReadingDetector { followsReply = false })
@@ -155,9 +155,9 @@ struct MessageRow: View, Equatable {
             if let text = message.text, !text.isEmpty {
             Text(text)
                 .textSelection(.enabled)
-                .font(.system(size: 14)).lineSpacing(5)
-                .padding(.horizontal, 20).padding(.vertical, 14)
-                .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: 14))
+                .font(.body).lineSpacing(3)
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
             }
             if let files = message.attachments {
                 ForEach(files) { file in
@@ -169,34 +169,34 @@ struct MessageRow: View, Equatable {
     }
 
     private var assistantBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach(Array((message.blocks ?? []).enumerated()), id: \.offset) { index, block in
                 BlockView(block: block, actions: actions, thinkingActive: busy && sessionStatus == "working" && index == (message.blocks?.count ?? 0) - 1)
             }
             if let issue = message.serviceIssue {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label(issue["title"]?.string ?? "服务暂不可用", systemImage: "exclamationmark.circle").font(.system(size: 13, weight: .medium))
-                    Text(issue["detail"]?.string ?? "").font(.system(size: 12)).textSelection(.enabled)
+                    Label(issue["title"]?.string ?? "服务暂不可用", systemImage: "exclamationmark.circle").font(.body.weight(.medium))
+                    Text(issue["detail"]?.string ?? "").font(.callout).textSelection(.enabled)
                     if let reset = issue["resetsAt"]?.double {
                         Text("预计恢复：" + Date(timeIntervalSince1970: reset).formatted(date: .abbreviated, time: .shortened)).font(.caption)
                     }
                 }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             }
             if let error = message.error {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("本次回复未完成", systemImage: "exclamationmark.circle").font(.system(size: 13, weight: .medium))
-                    Text(error).font(.system(size: 12)).textSelection(.enabled)
+                    Label("本次回复未完成", systemImage: "exclamationmark.circle").font(.body.weight(.medium))
+                    Text(error).font(.callout).textSelection(.enabled)
                     Button("重新编辑上一条请求") { restoreRequest() }
                         .buttonStyle(WorkbenchButtonStyle()).disabled(model.active?.isBusy == true)
                 }.foregroundStyle(.red).padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                    .background(Color.red.opacity(0.05), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             }
             if busy && message.error == nil && !hasInlineProgress {
                 HStack(spacing: 8) {
                     if sessionStatus == "permission" { Image(systemName: "hand.raised").foregroundStyle(WorkbenchTheme.accent) }
                     else { ProgressView().controlSize(.mini) }
-                    Text(message.activity ?? activityLabel).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(message.activity ?? activityLabel).font(.callout).foregroundStyle(.secondary)
                 }.padding(.vertical, 8).accessibilityElement(children: .combine)
             }
             if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(.secondary) }
@@ -351,7 +351,7 @@ struct ToolCard: View {
             }
             .font(.caption)
         }
-        .padding(.vertical, 7).padding(.horizontal, 2)
+        .padding(.vertical, 2).padding(.horizontal, 2)
         .foregroundStyle(.secondary)
     }
 }
@@ -403,7 +403,7 @@ struct CodeBlock: View {
         .defaultScrollAnchor(.topLeading)
         .frame(maxHeight: 320)
         .fixedSize(horizontal: false, vertical: true)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 5))
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
     }
 }
 

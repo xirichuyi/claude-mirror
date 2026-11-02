@@ -38,8 +38,8 @@ struct UsageSheet: View {
     private func metric(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 6) { Text(label).font(.caption).foregroundStyle(.secondary); Text(value).font(.system(size: 22, weight: .medium, design: .rounded)).monospacedDigit() }
             .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(WorkbenchTheme.border))
+            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+            .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
     }
     private func load() {
         guard let session = model.active, let engine = model.engine else { return }

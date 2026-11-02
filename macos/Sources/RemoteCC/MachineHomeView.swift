@@ -12,10 +12,10 @@ struct MachineHomeView: View {
             VStack(alignment: .leading, spacing: 32) {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(model.currentConfig == nil ? "你的机器，你的工作。" : "今天，想完成什么？")
-                        .font(.system(size: 25, weight: .medium))
+                        .font(.title.weight(.medium))
                         .foregroundStyle(WorkbenchTheme.ink)
                     Text(model.currentConfig == nil ? "连接一台机器，找回已有对话。\n在不同机器之间切换，工作始终各归其位。" : "在 \(model.currentConfig!.displayName) 上开始，或继续最近的对话。")
-                        .font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(6)
+                        .font(.body).foregroundStyle(.secondary).lineSpacing(6)
                     if model.currentConfig == nil || !model.isConnected {
                     HStack(spacing: 12) {
                         if let config = model.currentConfig {
@@ -26,7 +26,7 @@ struct MachineHomeView: View {
                         } else {
                             Button { model.showConnect = true } label: { Label("连接第一台机器", systemImage: "plus") }
                                 .buttonStyle(WorkbenchButtonStyle(prominent: true))
-                            Text("支持 SSH 别名与 user@host").font(.system(size: 11)).foregroundStyle(.tertiary)
+                            Text("支持 SSH 别名与 user@host").font(.subheadline).foregroundStyle(.tertiary)
                         }
                     }.padding(.top, 4)
                     }
@@ -34,7 +34,7 @@ struct MachineHomeView: View {
                 if model.currentConfig != nil {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("最近对话").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                            Text("最近对话").font(.callout.weight(.medium)).foregroundStyle(.secondary)
                             Spacer()
                             if syncing { ProgressView().controlSize(.small) }
                             else {
@@ -44,31 +44,31 @@ struct MachineHomeView: View {
                         }
                         if recent.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(syncing ? "正在读取远端历史…" : "还没有对话").font(.system(size: 14, weight: .medium))
+                                Text(syncing ? "正在读取远端历史…" : "还没有对话").font(.body.weight(.medium))
                                 Text(syncing ? "已有项目和对话会自动出现在这里。" : (model.historyStatus.isEmpty ? "连接后会自动同步历史，无需选择目录。" : model.historyStatus))
-                                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                                    .font(.callout).foregroundStyle(.secondary)
                             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(WorkbenchTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+                                .background(WorkbenchTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
                         } else {
                             VStack(spacing: 0) {
                                 ForEach(recent) { session in
                                     Button { model.select(session.id) } label: {
                                         HStack(spacing: 14) {
-                                            Image(systemName: "bubble.left").font(.system(size: 15)).foregroundStyle(.secondary)
+                                            Image(systemName: "bubble.left").font(.title3).foregroundStyle(.secondary)
                                             VStack(alignment: .leading, spacing: 5) {
-                                                Text(historyDisplayTitle(session.name)).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                                                Text(session.directory).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                                Text(historyDisplayTitle(session.name)).font(.body.weight(.medium)).lineLimit(1)
+                                                Text(session.directory).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                                             }
                                             Spacer()
                                             Text(Date(timeIntervalSince1970: session.updatedAt / 1000), format: .dateTime.month().day())
-                                                .font(.system(size: 10)).foregroundStyle(.tertiary)
-                                            Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(.tertiary)
+                                                .font(.caption2).foregroundStyle(.tertiary)
+                                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                                         }.padding(16).contentShape(Rectangle())
                                     }.buttonStyle(.plain)
                                     if session.id != recent.last?.id { Divider().padding(.leading, 45) }
                                 }
-                            }.background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(WorkbenchTheme.border))
+                            }.background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+                                .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
                         }
                     }
                 } else {
@@ -86,9 +86,9 @@ struct MachineHomeView: View {
 
     private func feature(_ title: String, detail: String, icon: String) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            Image(systemName: icon).font(.system(size: 16)).foregroundStyle(.secondary)
-            Text(title).font(.system(size: 12, weight: .medium))
-            Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Image(systemName: icon).font(.title3).foregroundStyle(.secondary)
+            Text(title).font(.callout.weight(.medium))
+            Text(detail).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }

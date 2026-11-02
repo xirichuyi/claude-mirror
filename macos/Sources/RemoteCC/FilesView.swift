@@ -23,7 +23,7 @@ struct FilePanel: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Label("工作区", systemImage: "folder").font(.system(size: 12, weight: .semibold))
+                Label("工作区", systemImage: "folder").font(.callout.weight(.semibold))
                 Spacer()
                 Button { model.showFiles = false } label: { Image(systemName: "xmark") }
                     .buttonStyle(QuietButtonStyle()).help("关闭文件面板")
@@ -122,7 +122,7 @@ struct FileTreeView: View {
         let color = row.entry.broken == true ? Color.secondary : gitColor(row.gitCode)
         return HStack(spacing: 5) {
             Image(systemName: entry.directory ? (row.expanded ? "chevron.down" : "chevron.right") : "doc")
-                .font(.system(size: 9)).foregroundStyle(.secondary).frame(width: 12)
+                .font(.caption2).foregroundStyle(.secondary).frame(width: 12)
             Text(entry.name + (entry.symlink == true ? " ↗" : ""))
                 .font(.system(size: 12, weight: row.touched ? .semibold : .regular))
                 .foregroundStyle(color)
@@ -130,7 +130,7 @@ struct FileTreeView: View {
                 .lineLimit(1)
             Spacer(minLength: 4)
             Text(row.gitCode.map { $0 == "?" ? "U" : $0 } ?? (entry.directory ? "" : byteText(entry.size)))
-                .font(.system(size: 10)).foregroundStyle(row.gitCode == nil ? Color.secondary : color)
+                .font(.caption2).foregroundStyle(row.gitCode == nil ? Color.secondary : color)
         }
         .padding(.leading, CGFloat(row.depth) * 13 + 4).padding(.trailing, 6).padding(.vertical, 3)
         .contentShape(Rectangle())
@@ -230,7 +230,7 @@ struct ChangesView: View {
                                 Spacer()
                                 Text(file.status.trimmingCharacters(in: .whitespaces)).foregroundStyle(.secondary)
                             }
-                            .font(.system(size: 12)).padding(.horizontal, 10).padding(.vertical, 4).contentShape(Rectangle())
+                            .font(.callout).padding(.horizontal, 10).padding(.vertical, 4).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain).help(file.path)
                     }
@@ -368,7 +368,7 @@ struct EditorPane: View {
                 Text((tab.isDirty ? "● " : "") + tab.title).font(.caption).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180)
                     .foregroundStyle(tab.id == workspace.activeTabId ? Color.primary : Color.secondary)
             }.buttonStyle(.plain).help(tab.path)
-            Button { model.close(tab, in: workspace) } label: { Image(systemName: "xmark").font(.system(size: 8)) }.buttonStyle(.plain).foregroundStyle(.secondary)
+            Button { model.close(tab, in: workspace) } label: { Image(systemName: "xmark").font(.caption2) }.buttonStyle(.plain).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(tab.id == workspace.activeTabId ? Color(nsColor: .textBackgroundColor) : Color.clear)

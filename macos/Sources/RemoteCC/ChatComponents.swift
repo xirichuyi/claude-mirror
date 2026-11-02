@@ -13,14 +13,14 @@ struct ThinkingCard: View {
                 HStack(spacing: 9) {
                     if active { ProgressView().controlSize(.mini) }
                     else { Image(systemName: "checkmark.circle").foregroundStyle(.secondary) }
-                    Text(active ? "正在思考…" : "思考过程").font(.system(size: 12))
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Text(active ? "正在思考…" : "思考过程").font(.callout)
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.secondary)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton).accessibilityLabel((active ? "正在思考" : "思考过程") + (expanded ? "，收起" : "，展开"))
             if expanded {
                 ScrollView {
                     Text(text.isEmpty ? "等待远端返回思考内容…" : text)
-                        .font(.system(size: 13)).lineSpacing(5).foregroundStyle(.secondary)
+                        .font(.body).lineSpacing(5).foregroundStyle(.secondary)
                         .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(maxHeight: 260).fixedSize(horizontal: false, vertical: true)
             }
@@ -39,16 +39,16 @@ struct FencedCodeView: View {
                 Spacer()
                 Button { copyToPasteboard(text); copied = true } label: {
                     Label(copied ? "已复制" : "复制代码", systemImage: copied ? "checkmark" : "doc.on.doc")
-                }.buttonStyle(QuietButtonStyle()).font(.system(size: 11))
+                }.buttonStyle(QuietButtonStyle()).font(.subheadline)
             }.foregroundStyle(.secondary).padding(.horizontal, 14).padding(.vertical, 3)
             Divider()
             ScrollView([.horizontal, .vertical]) {
                 Text(highlightedCode(text, language: language)).font(.system(size: 12, design: .monospaced)).lineSpacing(4)
                     .textSelection(.enabled).padding(14).frame(maxWidth: .infinity, alignment: .leading)
             }.defaultScrollAnchor(.topLeading).frame(maxHeight: 380).fixedSize(horizontal: false, vertical: true)
-        }.background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(WorkbenchTheme.border))
+        }.background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+            .clipShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+            .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
             .task(id: copied) {
                 if copied { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
             }

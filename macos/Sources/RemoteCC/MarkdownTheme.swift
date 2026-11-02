@@ -7,7 +7,7 @@ import MarkdownUI
 extension Theme {
     static let remoteCC = Theme()
         .text {
-            FontSize(14)
+            FontSize(13)
             ForegroundColor(WorkbenchTheme.ink)
             BackgroundColor(nil)
         }
@@ -50,7 +50,7 @@ extension Theme {
         .taskListMarker { configuration in
             Image(systemName: configuration.isCompleted ? "checkmark.square.fill" : "square")
                 .foregroundStyle(configuration.isCompleted ? WorkbenchTheme.accent : Color.secondary)
-                .font(.system(size: 13))
+                .font(.body)
                 .relativeFrame(minWidth: .em(1.5), alignment: .trailing)
         }
         .table { configuration in

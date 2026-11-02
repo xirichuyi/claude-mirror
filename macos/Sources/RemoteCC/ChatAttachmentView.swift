@@ -12,11 +12,11 @@ struct ChatAttachmentView: View {
     private var imageFile: Bool { ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains((file.name as NSString).pathExtension.lowercased()) }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let thumbnail { Image(nsImage: thumbnail).resizable().scaledToFit().frame(maxWidth: 280, maxHeight: 180).clipShape(RoundedRectangle(cornerRadius: 7)) }
+            if let thumbnail { Image(nsImage: thumbnail).resizable().scaledToFit().frame(maxWidth: 280, maxHeight: 180).clipShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small)) }
             HStack(spacing: 8) {
                 Image(systemName: imageFile ? "photo" : "doc.text")
                     .font(.system(size: 18)).foregroundStyle(WorkbenchTheme.accent)
-                    .frame(width: 36, height: 36).background(WorkbenchTheme.sidebar, in: RoundedRectangle(cornerRadius: 9))
+                    .frame(width: 36, height: 36).background(WorkbenchTheme.sidebar, in: RoundedRectangle(cornerRadius: 8))
                 Text(file.name).lineLimit(1)
                 Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file)).foregroundStyle(.secondary)
             }.font(.caption)
@@ -27,8 +27,8 @@ struct ChatAttachmentView: View {
                 if loading { ProgressView().controlSize(.mini) }
             }.font(.caption).buttonStyle(QuietButtonStyle()).disabled(!model.isConnected)
             if !error.isEmpty { Text(error).font(.caption2).foregroundStyle(.secondary).lineLimit(2) }
-        }.padding(12).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(WorkbenchTheme.border))
+        }.padding(12).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+            .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
     }
     private func load() {
         guard let session = model.active, let engine = model.engine else { return }
