@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Node tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - run: npm test
+
+  macos:
+    name: macOS tests and DMG
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # The Swift tests and the app bundle both use the Node remote agent.
+      - run: npm ci --ignore-scripts
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - run: swift --version
+      - run: swift test --package-path macos
+      - run: sh macos/scripts/build-dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Claude-Mirror-macOS-arm64-${{ github.sha }}
+          path: |
+            macos/dist/*.dmg
+            macos/dist/*.dmg.sha256
+          retention-days: 14
+          if-no-files-found: error

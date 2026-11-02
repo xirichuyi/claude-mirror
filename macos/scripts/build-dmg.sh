@@ -23,7 +23,12 @@ cat > "$STAGE/安装说明.txt" <<'TEXT'
 项目与帮助：https://github.com/xirichuyi/claude-mirror
 TEXT
 OUTPUT="dist/Claude-Mirror-${VERSION}-macOS-${ARCH}.dmg"
-hdiutil create -volname 'Claude Mirror' -srcfolder "$STAGE" -format UDZO -ov "$OUTPUT"
+# hdiutil occasionally reports "Resource busy" on CI machines; retry before failing.
+for attempt in 1 2 3; do
+  hdiutil create -volname 'Claude Mirror' -srcfolder "$STAGE" -format UDZO -ov "$OUTPUT" && break
+  [ "$attempt" = 3 ] && exit 1
+  sleep 5
+done
 hdiutil verify "$OUTPUT"
 (cd dist && shasum -a 256 "$(basename "$OUTPUT")" > "$(basename "$OUTPUT").sha256")
 echo "$OUTPUT"

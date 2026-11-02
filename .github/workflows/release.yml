@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to rebuild and upload, for example v0.17.0
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  dmg:
+    name: Build and publish DMG
+    runs-on: macos-15
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - name: Tag must match the app version
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' macos/Resources/Info.plist)
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Info.plist version $version does not match tag $TAG"
+            exit 1
+          fi
+      - run: swift test --package-path macos
+      - run: sh macos/scripts/build-dmg.sh
+      - name: Upload to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg="macos/dist/Claude-Mirror-${TAG#v}-macOS-arm64.dmg"
+          files=("$dmg" "$dmg.sha256" scripts/setup-remote.sh scripts/install-claude-remote.sh)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            notes="docs/releases/$TAG.md"
+            if [ -f "$notes" ]; then source=(--notes-file "$notes"); else source=(--generate-notes); fi
+            gh release create "$TAG" --title "镜像 Claude $TAG" "${source[@]}" --verify-tag "${files[@]}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Claude-Mirror-${{ env.TAG }}-macOS-arm64
+          path: |
+            macos/dist/*.dmg
+            macos/dist/*.dmg.sha256
+          if-no-files-found: error
