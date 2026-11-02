@@ -16,11 +16,14 @@ struct RemoteCCApp: App {
                 .environmentObject(model)
                 .tint(WorkbenchTheme.accent)
                 .frame(minWidth: 1000, minHeight: 620)
-                .onAppear { delegate.model = model }
+                .onAppear { delegate.model = model; model.startUpdateChecks() }
         }
         .defaultSize(width: 1160, height: 760)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("检查更新…") { Task { await model.checkForUpdates(manual: true) } }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("新对话") { model.newConversation() }.keyboardShortcut("n")
                 Button("快速打开文件…") { model.showQuickOpen = true }.keyboardShortcut("p")

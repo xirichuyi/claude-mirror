@@ -9,10 +9,13 @@ public struct ConnectionConfig: Codable, Hashable, Sendable {
     public var name: String?
     public var identityFile: String?
     public var authentication: SSHAuthentication?
+    /// Lets this server reach the Mac's own SSH service through the app's connection.
+    public var reverseAccess: Bool?
     public var displayName: String { name.flatMap { $0.isEmpty ? nil : $0 } ?? host }
-    public init(host: String, port: Int? = nil, directory: String = "~", name: String? = nil, identityFile: String? = nil, authentication: SSHAuthentication? = nil) {
+    public init(host: String, port: Int? = nil, directory: String = "~", name: String? = nil, identityFile: String? = nil, authentication: SSHAuthentication? = nil, reverseAccess: Bool? = nil) {
         self.host = host; self.port = port; self.directory = directory
         self.name = name; self.identityFile = identityFile; self.authentication = authentication
+        self.reverseAccess = reverseAccess
     }
     /// Same server regardless of working directory.
     public var key: String { host + ":" + (port.map(String.init) ?? "") }

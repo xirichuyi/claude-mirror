@@ -396,6 +396,15 @@ struct MachineSwitcher: View {
                             alert.addButton(withTitle: "取消")
                             if alert.runModal() == .alertFirstButtonReturn { model.renameMachine(machine, name: field.stringValue) }
                         }
+                        Divider()
+                        Toggle("允许此服务器反向连接本机", isOn: Binding(
+                            get: { machine.reverseAccess == true },
+                            set: { model.setReverseAccess(machine, enabled: $0) }))
+                        if machine.reverseAccess == true {
+                            Text(model.reverseStatus(machine))
+                            Button("复制反向连接命令") { model.copyReverseCommand(machine) }
+                                .disabled(model.reverseStates[machine.key]?.command == nil)
+                        }
                     }
                 }
                 Divider()
@@ -442,6 +451,7 @@ struct ConnectSheet: View {
     @State private var username = ""
     @State private var identityFile = ""
     @State private var authentication = SSHAuthentication.automatic
+    @State private var reverseAccess = false
     @State private var error = ""
     @State private var connecting = false
 
@@ -479,6 +489,9 @@ struct ConnectSheet: View {
                     }
                 }
             }
+            Toggle("允许此服务器反向连接本机", isOn: $reverseAccess)
+                .font(.system(size: 12))
+                .help("复用本应用的 SSH 连接，让服务器通过私有 socket 连到本机的远程登录服务。服务器会获得一把只能经此通道使用的专用密钥，关闭后立即撤销；开启期间服务器上的程序能以你的身份登录这台 Mac。")
             Text("需要密码或私钥口令时会弹出安全输入窗口，不保存密码。首次连接可在窗口中核对主机指纹。密码认证断线后，请点击重新连接以再次输入。")
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if !error.isEmpty {
@@ -518,7 +531,8 @@ struct ConnectSheet: View {
                 guard user.isEmpty || (!user.contains("@") && !user.contains(":")) else { throw RemoteError("用户名不能包含 @ 或冒号") }
                 let destination = user.isEmpty ? host : user + "@" + host.trimmingCharacters(in: .whitespacesAndNewlines)
                 let config = ConnectionConfig(host: destination, port: try ConnectionConfig.parsePort(port), directory: "~",
-                                              name: name, identityFile: authentication == .keyFile ? identityFile : nil, authentication: authentication)
+                                              name: name, identityFile: authentication == .keyFile ? identityFile : nil, authentication: authentication,
+                                              reverseAccess: reverseAccess ? true : nil)
                 try await model.connect(config)
                 dismiss()
             } catch { self.error = error.localizedDescription }

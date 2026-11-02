@@ -142,9 +142,16 @@ public struct Tunnel: Hashable, Sendable, Identifiable {
     public init(localPort: Int, remotePort: Int) { self.localPort = localPort; self.remotePort = remotePort }
 }
 
+private final class OutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    func append(_ chunk: Data) { lock.lock(); if data.count < 65536 { data.append(chunk) }; lock.unlock() }
+    var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: data, as: UTF8.self) }
+}
+
 /// System OpenSSH with one ControlMaster per server: reuses ~/.ssh/config, keys, agent and jump hosts.
 public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
-    private struct Entry { var config: ConnectionConfig; var socket: String; var state = ConnectionState(); var tunnels: [Tunnel] = [] }
+    private struct Entry { var config: ConnectionConfig; var socket: String; var state = ConnectionState(); var tunnels: [Tunnel] = []; var reverse = ReverseAccess() }
     private let lock = NSLock()
     private var entries: [String: Entry] = [:]
     private var desired: [String: ConnectionConfig] = [:]
@@ -159,6 +166,14 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
     public var onState: (@Sendable (ConnectionConfig, ConnectionState) -> Void)?
     /// Called after an automatic reconnection, when subscriptions must be re-established.
     public var onRecovered: (@Sendable (ConnectionConfig) -> Void)?
+    /// Called whenever the reverse connection to this Mac is opened, closed or fails.
+    public var onReverse: (@Sendable (ConnectionConfig, ReverseAccess) -> Void)?
+    /// Whether this Mac accepts SSH; replaceable in tests.
+    public var localSSHAvailable: @Sendable () -> Bool = { SSHConnections.localPortOpen(22) }
+    /// Where the server's dedicated key is authorized; replaceable in tests.
+    public var authorizedKeysPath = NSHomeDirectory() + "/.ssh/authorized_keys"
+    /// This Mac's host key, pinned on the server; replaceable in tests.
+    public var localHostKey: @Sendable () -> String? = { ReverseSetup.localHostKey() }
 
     public init(executable: String = "/usr/bin/ssh", askpassPath: String? = nil) throws {
         self.executable = executable
@@ -188,6 +203,22 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
 
     private func portArguments(_ config: ConnectionConfig) -> [String] { config.port.map { ["-p", String($0)] } ?? [] }
     private func withLock<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
+
+    public func reverseAccess(_ config: ConnectionConfig) -> ReverseAccess { withLock { entries[config.key]?.reverse ?? ReverseAccess() } }
+
+    public static func localPortOpen(_ port: UInt16) -> Bool {
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { Darwin.close(fd) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        return withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0 }
+        }
+    }
 
     public func state(_ config: ConnectionConfig) -> ConnectionState { withLock { entries[config.key]?.state ?? ConnectionState() } }
     public func tunnels(_ config: ConnectionConfig) -> [Tunnel] { withLock { entries[config.key]?.tunnels ?? [] } }
@@ -272,6 +303,7 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
                 try? await runSSH(["-S", socket, "-O", "exit"] + portArguments(config) + [config.host], timeout: 5)
                 throw CancellationError()
             }
+            await applyReverse(config, socket: socket)
             let recovered = withLock { attempts.removeValue(forKey: key) != nil && desired[key] != nil }
             if recovered {
                 for tunnel in tunnels(config) { try? await forward(config, tunnel) }
@@ -296,8 +328,9 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         let delay = min(30.0, pow(2.0, Double(min(attempt, 5)))) * Double.random(in: 0.8...1.2)
         Task.detached { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard let self, self.withLock({ self.desired[config.key] != nil }) else { return }
-            try? await self.connect(config, requiringDesired: true)
+            // The latest settings win: a toggle made while offline must survive the reconnect.
+            guard let self, let current = self.withLock({ self.desired[config.key] }) else { return }
+            try? await self.connect(current, requiringDesired: true)
         }
     }
 
@@ -354,6 +387,84 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         await withTaskGroup(of: Void.self) { group in
             for config in configs { group.addTask { try? await self.connect(config, requiringDesired: true) } }
         }
+    }
+
+    private func runRemote(_ config: ConnectionConfig, socket: String, command: String, timeout: UInt64) async throws -> String {
+        let child = try RemoteProcess(executable: executable, arguments: ["-T", "-S", socket, "-o", "BatchMode=yes", "-o", "ProxyCommand=false"] + portArguments(config) + [config.host, command])
+        child.closeInput()
+        let output = OutputBuffer()
+        let reading = Task { await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in child.readOutput(chunk: { output.append($0) }, done: { done.resume() }) } }
+        let deadline = DeadlineState()
+        let timer = Task {
+            try await Task.sleep(nanoseconds: timeout * 1_000_000_000)
+            deadline.expire(); child.kill()
+        }
+        let code = await child.waitForExit()
+        timer.cancel()
+        await reading.value
+        if deadline.didExpire { throw SSHCommandTimeout(seconds: timeout) }
+        if code != 0 { throw RemoteError(child.stderrText.isEmpty ? "远端命令失败（\(code)）" : child.stderrText) }
+        return output.text
+    }
+
+    /// Binds a private Unix socket on the server to this Mac's sshd, over the existing master,
+    /// and authorizes a key that only works through that socket. A stale socket from a dropped
+    /// connection is removed first, so reconnects always rebind.
+    private func applyReverse(_ config: ConnectionConfig, socket: String) async {
+        guard config.reverseAccess == true else { return }
+        let name = ReverseSetup.socketName()
+        var result = ReverseAccess(name: name)
+        if !localSSHAvailable() {
+            result.error = "本机未开启远程登录（系统设置 → 通用 → 共享 → 远程登录）"
+        } else {
+            do {
+                let user = NSUserName()
+                guard !user.isEmpty, user.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "._-".unicodeScalars.contains($0)) }) else {
+                    throw RemoteError("本机用户名包含不支持的字符")
+                }
+                let output = try await runRemote(config, socket: socket, command: ReverseSetup.remoteScript(name: name, user: user, hostKey: localHostKey()), timeout: 30)
+                if output.contains("__RCC_NO_SOCAT__") { throw RemoteError("服务器缺少 socat，请先安装（例如 apt install socat）") }
+                guard let info = ReverseSetup.parse(output) else { throw RemoteError("服务器返回的信息不完整") }
+                let marker = ReverseSetup.marker(config)
+                try ReverseSetup.writeAuthorizedKeys(path: authorizedKeysPath, marker: marker, line: ReverseSetup.authorizedLine(publicKey: info.publicKey, marker: marker))
+                let path = ReverseSetup.socketPath(home: info.home, name: name)
+                try await runSSH(["-S", socket, "-O", "forward", "-R", path + ":127.0.0.1:22", "-o", "ExitOnForwardFailure=yes"] + portArguments(config) + [config.host], timeout: 10)
+                result.socketPath = path
+                result.configPath = ReverseSetup.configPath(home: info.home, name: name)
+            } catch { result.error = "反向连接未开启：" + error.localizedDescription }
+        }
+        let current = withLock {
+            guard entries[config.key]?.socket == socket, entries[config.key]?.config.reverseAccess == true else { return false }
+            entries[config.key]?.reverse = result
+            return true
+        }
+        if current { onReverse?(config, result) }
+    }
+
+    /// Turns reverse access on or off now, and for every later reconnect.
+    /// Turning it off revokes the key locally first, so it takes effect even while offline.
+    public func setReverseAccess(_ input: ConnectionConfig, enabled: Bool) async {
+        let value: Bool? = enabled ? true : nil
+        let entry: Entry? = withLock {
+            desired[input.key]?.reverseAccess = value
+            entries[input.key]?.config.reverseAccess = value
+            return entries[input.key]
+        }
+        if !enabled {
+            do { try ReverseSetup.writeAuthorizedKeys(path: authorizedKeysPath, marker: ReverseSetup.marker(input), line: nil) }
+            catch { onReverse?(input, ReverseAccess(error: "撤销授权失败：" + error.localizedDescription)); return }
+        }
+        guard let entry, entry.state.status == .connected else {
+            if !enabled { onReverse?(input, ReverseAccess()) }
+            return
+        }
+        if enabled { await applyReverse(entry.config, socket: entry.socket); return }
+        if let path = entry.reverse.socketPath {
+            try? await runSSH(["-S", entry.socket, "-O", "cancel", "-R", path + ":127.0.0.1:22"] + portArguments(entry.config) + [entry.config.host], timeout: 10)
+        }
+        _ = try? await runRemote(entry.config, socket: entry.socket, command: ReverseSetup.remoteRevokeScript(name: entry.reverse.name.isEmpty ? ReverseSetup.socketName() : entry.reverse.name), timeout: 10)
+        withLock { if entries[input.key]?.socket == entry.socket { entries[input.key]?.reverse = ReverseAccess() } }
+        onReverse?(entry.config, ReverseAccess())
     }
 
     public func forward(_ config: ConnectionConfig, _ tunnel: Tunnel, remove: Bool = false) async throws {

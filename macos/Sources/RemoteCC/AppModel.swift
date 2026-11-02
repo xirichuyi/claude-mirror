@@ -4,6 +4,7 @@ import AppKit
 import UniformTypeIdentifiers
 import RemoteCCCore
 import UserNotifications
+import IOKit.pwr_mgt
 
 enum SidePanel: String, CaseIterable, Identifiable {
     case files = "文件", changes = "变更", search = "搜索"
@@ -21,6 +22,12 @@ final class AppModel: ObservableObject {
     @Published var savedMachines: [ConnectionConfig] = []
     @Published var syncingMachines = Set<String>()
     @Published var machineHistoryStatus: [String: String] = [:]
+    @Published var reverseStates: [String: ReverseAccess] = [:]
+    /// Held while any server can reach this Mac, so idle sleep does not cut it off. Lid close still sleeps.
+    private var sleepAssertion: IOPMAssertionID = 0
+    @Published var availableUpdate: AppUpdate?
+    private var updateChecksStarted = false
+    private var checkingForUpdates = false
     @Published var activeId: String?
     @Published var showArchived = false
     @Published var searchText = ""
@@ -109,6 +116,14 @@ final class AppModel: ObservableObject {
             connections.onState = { [weak self] config, state in
                 Task { @MainActor in self?.connectionChanged(config, state) }
             }
+            connections.onReverse = { [weak self] config, access in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.reverseStates[config.key] = access
+                    self.updateSleepAssertion()
+                    if !access.error.isEmpty { self.show("\(config.displayName)：\(access.error)") }
+                }
+            }
             connections.onRecovered = { [weak self] config in
                 Task { @MainActor in await self?.recovered(config) }
             }
@@ -177,6 +192,98 @@ final class AppModel: ObservableObject {
             rememberMachine(renamed)
             if selectedMachine?.key == renamed.key { selectedMachine = renamed; lastConnection = renamed }
         } catch { show(error.localizedDescription) }
+    }
+
+    func setReverseAccess(_ machine: ConnectionConfig, enabled: Bool) {
+        var updated = savedMachines.first { $0.key == machine.key } ?? machine
+        updated.reverseAccess = enabled ? true : nil
+        rememberMachine(updated)
+        if selectedMachine?.key == updated.key { selectedMachine = updated; lastConnection = updated }
+        if !enabled { reverseStates[updated.key] = nil; updateSleepAssertion() }
+        Task { await connections?.setReverseAccess(updated, enabled: enabled) }
+    }
+
+    func copyReverseCommand(_ machine: ConnectionConfig) {
+        guard let command = reverseStates[machine.key]?.command else { show("反向连接尚未建立"); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        show("已复制，在 \(machine.displayName) 上运行即可连接本机")
+    }
+
+    var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
+
+    /// Checks once shortly after launch, then at most once a day while the app keeps running.
+    func startUpdateChecks() {
+        guard !updateChecksStarted else { return }
+        updateChecksStarted = true
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            while !Task.isCancelled {
+                guard let self else { return }
+                let last = UserDefaults.standard.object(forKey: "last-update-check") as? Date ?? .distantPast
+                if Date().timeIntervalSince(last) >= 24 * 3600 { await self.checkForUpdates(manual: false) }
+                try? await Task.sleep(nanoseconds: 6 * 3600 * 1_000_000_000)
+            }
+        }
+    }
+
+    func checkForUpdates(manual: Bool) async {
+        guard !checkingForUpdates else { return }
+        checkingForUpdates = true
+        defer { checkingForUpdates = false }
+        do {
+            let latest = try await UpdateChecker.fetchLatest()
+            UserDefaults.standard.set(Date(), forKey: "last-update-check")
+            guard let latest, UpdateChecker.isNewer(latest.version, than: currentVersion) else {
+                availableUpdate = nil
+                if manual { show("已是最新版本（\(currentVersion)）") }
+                return
+            }
+            availableUpdate = latest
+            // A skipped version is only offered again when asked for explicitly.
+            if manual || UserDefaults.standard.string(forKey: "skipped-update-version") != latest.version { presentUpdate(latest) }
+        } catch {
+            if manual { show(error.localizedDescription) }
+        }
+    }
+
+    func presentUpdate(_ update: AppUpdate) {
+        let alert = NSAlert()
+        alert.messageText = "镜像 Claude \(update.version) 已发布"
+        let notes = update.notes.count > 700 ? String(update.notes.prefix(700)) + "…" : update.notes
+        alert.informativeText = "当前版本 \(currentVersion)。" + (notes.isEmpty ? "" : "\n\n" + notes)
+            + "\n\n下载后打开 DMG，用新版替换“应用程序”中的 Claude Mirror；聊天记录和机器配置会保留。"
+        alert.addButton(withTitle: update.downloadURL == nil ? "前往下载" : "下载 DMG")
+        alert.addButton(withTitle: "查看更新内容")
+        alert.addButton(withTitle: "稍后")
+        alert.addButton(withTitle: "跳过此版本")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: NSWorkspace.shared.open(update.downloadURL ?? update.pageURL)
+        case .alertSecondButtonReturn: NSWorkspace.shared.open(update.pageURL)
+        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
+            UserDefaults.standard.set(update.version, forKey: "skipped-update-version")
+        default: break
+        }
+    }
+
+    func reverseStatus(_ machine: ConnectionConfig) -> String {
+        if let access = reverseStates[machine.key] {
+            if access.socketPath != nil { return "反向连接已建立" }
+            if !access.error.isEmpty { return access.error }
+        }
+        return engine?.connectionState(machine).status == .connected ? "正在建立反向连接…" : "连接这台机器后自动建立"
+    }
+
+    private func updateSleepAssertion() {
+        let active = reverseStates.values.contains { $0.socketPath != nil }
+        if active, sleepAssertion == 0 {
+            var id: IOPMAssertionID = 0
+            if IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                           "镜像 Claude：服务器正在使用反向连接" as CFString, &id) == kIOReturnSuccess { sleepAssertion = id }
+        } else if !active, sleepAssertion != 0 {
+            IOPMAssertionRelease(sleepAssertion)
+            sleepAssertion = 0
+        }
     }
 
     private func rememberMachine(_ config: ConnectionConfig) {
@@ -296,6 +403,8 @@ final class AppModel: ObservableObject {
     private func connectionChanged(_ config: ConnectionConfig, _ state: ConnectionState) {
         guard let engine else { return }
         let wasConnected = engine.connectionState(config).status == .connected
+        // The forward dies with the master; the next connection re-establishes and reports it.
+        if state.status != .connected, reverseStates[config.key] != nil { reverseStates[config.key] = nil; updateSleepAssertion() }
         engine.updateConnection(config, state)
         if wasConnected, state.status != .connected { engine.detach(config) }
     }
