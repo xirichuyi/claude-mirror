@@ -63,7 +63,7 @@ public enum UpdateChecker {
     }
 
     public static func fetchLatest(session: URLSession = .shared) async throws -> AppUpdate? {
-        var request = URLRequest(url: latestURL, timeoutInterval: 15)
+        var request = URLRequest(url: latestURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("ClaudeMirror-UpdateCheck", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)

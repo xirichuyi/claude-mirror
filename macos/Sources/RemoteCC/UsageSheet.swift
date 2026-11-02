@@ -10,7 +10,7 @@ struct UsageSheet: View {
     @State private var loading = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            SheetHeading(title: "上下文与用量", subtitle: "当前对话的使用情况") { dismiss() }
+            SheetHeading(title: "对话用量与上下文") { dismiss() }
             Text(model.active?.model ?? "远端默认模型").foregroundStyle(.secondary)
             if let usage = model.active?.usage {
                 HStack(spacing: 10) {
@@ -20,6 +20,8 @@ struct UsageSheet: View {
                 }
                 Text("费用为 SDK 报告值，不等同于订阅账单。").font(.caption).foregroundStyle(.secondary)
             }
+            Button("查看订阅用量 /usage") { dismiss(); model.runRemoteCommand("usage") }
+                .buttonStyle(WorkbenchButtonStyle()).disabled(!model.isConnected || model.active?.isBusy == true)
             Divider()
             if loading { ProgressView("读取实时上下文…") }
             if let context {

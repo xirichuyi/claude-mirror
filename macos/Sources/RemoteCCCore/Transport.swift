@@ -245,12 +245,25 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         var didExpire: Bool { lock.lock(); defer { lock.unlock() }; return expired }
     }
 
-    private func runSSH(_ arguments: [String], timeout: UInt64, interactive: Bool = false) async throws {
+    private func runSSH(_ arguments: [String], timeout: UInt64, interactive: Bool = false, password: String? = nil) async throws {
         var environment = ProcessInfo.processInfo.environment
         if interactive, let askpassPath {
             environment["SSH_ASKPASS"] = askpassPath
             environment["SSH_ASKPASS_REQUIRE"] = "force"
             environment["DISPLAY"] = environment["DISPLAY"] ?? ":0"
+        }
+        // Only the one-shot askpass helper receives this protected credential path.
+        // Never persist credentials in ConnectionConfig or put them in process arguments.
+        var credentialPath: String?
+        defer { if let credentialPath { try? FileManager.default.removeItem(atPath: credentialPath) } }
+        if interactive, let password {
+            let path = directory + "/credential-" + UUID().uuidString
+            guard FileManager.default.createFile(atPath: path, contents: Data(password.utf8),
+                                                 attributes: [.posixPermissions: 0o600]) else {
+                throw RemoteError("无法准备 SSH 身份验证")
+            }
+            credentialPath = path
+            environment["MIRROR_SSH_CREDENTIAL_FILE"] = path
         }
         let child = try RemoteProcess(executable: executable, arguments: arguments, environment: environment)
         child.closeInput()
@@ -265,11 +278,11 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         if code != 0 { throw RemoteError(child.stderrText.isEmpty ? "SSH 连接失败（\(code)）" : child.stderrText) }
     }
 
-    public func connect(_ input: ConnectionConfig) async throws {
-        try await connect(input, requiringDesired: false)
+    public func connect(_ input: ConnectionConfig, password: String? = nil) async throws {
+        try await connect(input, requiringDesired: false, password: password)
     }
 
-    private func connect(_ input: ConnectionConfig, requiringDesired: Bool) async throws {
+    private func connect(_ input: ConnectionConfig, requiringDesired: Bool, password: String? = nil) async throws {
         let config = try input.validated()
         let key = config.key
         let proceed: Bool = withLock {
@@ -298,7 +311,8 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
                               "-o", "BatchMode=\(interactive ? "no" : "yes")", "-o", "StrictHostKeyChecking=ask", "-o", "ConnectTimeout=15",
                               "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "Compression=yes"]
                              + Self.authenticationArguments(config) + portArguments(config) + [config.host],
-                             timeout: interactive ? 180 : 20, interactive: interactive)
+                             timeout: interactive ? 180 : 20, interactive: interactive,
+                             password: config.authentication == .password ? password : nil)
             guard setState(config, ConnectionState(status: .connected), socket: socket) else {
                 try? await runSSH(["-S", socket, "-O", "exit"] + portArguments(config) + [config.host], timeout: 5)
                 throw CancellationError()

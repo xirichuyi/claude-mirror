@@ -148,6 +148,27 @@ public final class ChatEngine {
         changed(nil)
     }
 
+    public func trashProjectHistory(_ id: String) async throws -> String? {
+        let project = sessions[try index(id)]
+        let affected = sessions.filter { $0.projectKey == project.projectKey }
+        guard !affected.contains(where: { running.contains($0.id) || $0.isBusy || $0.queue?.isEmpty == false }) else {
+            throw RemoteError("请先停止此项目的任务")
+        }
+        for session in affected where session.remoteOwner != nil { try await release(session.id) }
+        let result = try await agents.call(project.config, "history", [
+            "operation": "trashProject", "directory": .string(project.directory)
+        ])
+        let references = Set((result["references"]?.array ?? []).compactMap(\.string))
+        // Keep rows whose remote record could not be matched, instead of hiding data.
+        let removed = Set(affected.filter {
+            $0.remoteSessionId == nil || $0.remoteHistoryRef.map { references.contains($0) } == true
+                || $0.remoteSessionId.map { remoteID in references.contains(where: { $0.hasSuffix("/" + remoteID + ".jsonl") }) } == true
+        }.map(\.id))
+        sessions.removeAll { removed.contains($0.id) }
+        changed(nil)
+        return result["trash"]?.string
+    }
+
     public func setPinned(_ id: String, _ value: Bool) throws {
         sessions[try index(id)].pinned = value
         changed(id)

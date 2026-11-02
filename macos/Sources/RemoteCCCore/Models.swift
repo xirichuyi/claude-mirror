@@ -79,6 +79,7 @@ public struct ChildTool: Codable, Hashable, Sendable, Identifiable {
 }
 
 public struct Block: Codable, Hashable, Sendable {
+    public var format: String?
     public var type: String
     public var text: String?
     public var id: String?

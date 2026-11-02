@@ -27,7 +27,7 @@ final class AppModel: ObservableObject {
     private var sleepAssertion: IOPMAssertionID = 0
     @Published var availableUpdate: AppUpdate?
     private var updateChecksStarted = false
-    private var checkingForUpdates = false
+    @Published private(set) var checkingForUpdates = false
     @Published var activeId: String?
     @Published var showArchived = false
     @Published var searchText = ""
@@ -39,6 +39,7 @@ final class AppModel: ObservableObject {
     @Published var composerFocus = UUID()
     @Published var showConnect = false
     @Published var showPreferences = false
+    @Published var showSettings = false
     @Published var showQuickOpen = false
     @Published var showSessionTools = false
     @Published var historyStatus = ""
@@ -217,12 +218,13 @@ final class AppModel: ObservableObject {
         guard !updateChecksStarted else { return }
         updateChecksStarted = true
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            await self?.checkForUpdates(manual: false)
             while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 6 * 3600 * 1_000_000_000) }
+                catch { return }
                 guard let self else { return }
                 let last = UserDefaults.standard.object(forKey: "last-update-check") as? Date ?? .distantPast
                 if Date().timeIntervalSince(last) >= 24 * 3600 { await self.checkForUpdates(manual: false) }
-                try? await Task.sleep(nanoseconds: 6 * 3600 * 1_000_000_000)
             }
         }
     }
@@ -364,7 +366,7 @@ final class AppModel: ObservableObject {
         perform { try await self.connect(config) }
     }
 
-    func connect(_ input: ConnectionConfig) async throws {
+    func connect(_ input: ConnectionConfig, password: String? = nil) async throws {
         guard let engine, let connections else { return }
         var config = try input.validated()
         // Connecting a machine never depends on a remembered project's existence.
@@ -375,7 +377,7 @@ final class AppModel: ObservableObject {
         selectedMachine = config
         activeId = nil
         searchText = ""; showArchived = false
-        try await connections.connect(config)
+        try await connections.connect(config, password: password)
         rememberMachine(config)
         if selectedMachine?.key == config.key { lastConnection = config }
         do {
@@ -561,6 +563,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Quick actions use the server catalogue and the normal Claude command path.
+    /// They do not consume or clear the user's pending draft/attachments.
+    func runRemoteCommand(_ name: String) {
+        guard let engine, let session = active, isConnected else { show("请先连接并打开对话"); return }
+        guard !session.isBusy else { show("请等待当前回复结束"); return }
+        perform {
+            let catalogue = try await engine.capabilities(session.id)
+            guard let command = catalogue.commands.first(where: { $0.name == name && $0.builtin == true }) else {
+                throw RemoteError("远端 Claude 不支持 /" + name)
+            }
+            try engine.submit(session.id, text: "/" + command.name)
+        }
+    }
+
     private func run(_ interaction: CommandInteraction, id: String) async throws {
         guard let engine else { return }
         switch interaction.kind {
@@ -617,6 +633,23 @@ final class AppModel: ObservableObject {
         perform {
             for session in sessions { try engine.setArchived(session.id, archived) }
             if sessions.contains(where: { $0.id == self.activeId }) { self.activeId = nil }
+        }
+    }
+
+    func deleteProjectHistory(_ project: ChatSession) {
+        guard let engine else { return }
+        let alert = NSAlert()
+        alert.messageText = "删除此项目的远端聊天记录？"
+        alert.informativeText = project.directory + "\n所有匹配此目录的聊天记录将移入远端回收目录，本地列表同步移除。项目文件不受影响。请先关闭其他客户端中此目录的 Claude 会话。"
+        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: "移入远端回收目录")
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        perform {
+            let trash = try await engine.trashProjectHistory(project.id)
+            if let active = self.activeId, engine.session(active) == nil { self.activeId = nil }
+            self.workspaces = self.workspaces.filter { engine.session($0.key) != nil }
+            if let trash { copyToPasteboard(trash); self.show("已移入远端回收目录，恢复路径已复制") }
+            else { self.show("此目录没有可删除的远端聊天记录") }
         }
     }
 

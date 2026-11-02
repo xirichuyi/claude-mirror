@@ -14,6 +14,8 @@ struct ComposerArea: View {
     @State private var mentionTask: Task<Void, Never>?
     @State private var dropTarget = false
     @State private var changingModel = false
+    @State private var showingCommands = false
+    @State private var showingModels = false
 
     private var id: String { model.activeId ?? "welcome-" + (model.currentConfig?.key ?? "local") }
     private var canSend: Bool {
@@ -68,14 +70,14 @@ struct ComposerArea: View {
                         Button("移除") { model.failedUploads[id]?.removeAll { $0 == url } }
                     }.font(.caption).foregroundStyle(.secondary)
                 }
-                PromptEditor(text: text, caret: $caret, placeholder: "发送消息…", handler: handleKey, onPasteImage: { model.pasteImage($0) }, onDropFiles: { model.upload($0) }, acceptsFileDrops: model.isConnected, onFileDrag: { dropTarget = $0 }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
+                PromptEditor(text: text, caret: $caret, placeholder: "发送消息，或输入 / 使用命令", handler: handleKey, onPasteImage: { model.pasteImage($0) }, onDropFiles: { model.upload($0) }, acceptsFileDrops: model.isConnected, onFileDrag: { dropTarget = $0 }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
                     .frame(height: editorHeight)
                 toolbarRow
             }
             .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
             .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
             .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large).strokeBorder(dropTarget ? WorkbenchTheme.accent : WorkbenchTheme.border))
-            .shadow(color: .black.opacity(0.04), radius: 10, y: 2)
+            .shadow(color: WorkbenchTheme.ink.opacity(0.025), radius: 6, y: 2)
             .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in
                 guard model.isConnected else { model.show("先连接服务器，再附加文件"); return false }
                 let destinationId = id
@@ -106,7 +108,7 @@ struct ComposerArea: View {
 
         }
         .padding(.horizontal, 28).padding(.bottom, 14).padding(.top, 6)
-        .frame(maxWidth: 820)
+        .frame(maxWidth: WorkbenchTheme.conversationWidth)
         .frame(maxWidth: .infinity)
         .onChange(of: text.wrappedValue) { refreshMentions() }
         .onChange(of: caret) { selection = 0 }
@@ -185,41 +187,64 @@ struct ComposerArea: View {
     }
 
     private var toolbarRow: some View {
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { composerTools; sessionControls }
+            VStack(alignment: .leading, spacing: 4) { composerTools; sessionControls }
+        }
+    }
+
+    private var composerTools: some View {
+        HStack(spacing: 4) {
+            Button { model.pickAndUpload() } label: { Label("附件", systemImage: "paperclip") }.buttonStyle(QuietButtonStyle()).help("上传文件并附加").disabled(!model.isConnected)
+            if model.active != nil {
+                Button { showingCommands.toggle() } label: { Label("命令", systemImage: "terminal") }
+                    .buttonStyle(QuietButtonStyle()).disabled(!model.isConnected)
+                    .popover(isPresented: $showingCommands, arrowEdge: .top) {
+                        let commands = CommandCompletion.candidates(model.active?.capabilities?.commands ?? [])
+                        SearchPicker(title: "命令", items: commands.map {
+                            SearchPickerItem(id: $0.name, title: "/" + $0.name, detail: $0.description ?? "")
+                        }, refresh: { model.refreshCapabilities(force: true) }) { name in
+                            if let command = commands.first(where: { $0.name == name }) { insertCommand(command) }
+                            showingCommands = false
+                            model.composerFocus = UUID()
+                        }
+                    }
+            }
+        }
+    }
+
+    private var sessionControls: some View {
         let session = model.active
         let preferences = session?.preferences
         let modelName = preferences?.selectedModel.flatMap { $0.isEmpty ? nil : $0 }
         let displayed = session?.capabilities?.models.first { $0.value == (modelName ?? "default") }?.displayName ?? modelName ?? session?.model ?? "模型"
         let modes = ["default": "默认权限", "plan": "计划", "acceptEdits": "自动编辑", "dontAsk": "拒绝未授权", "auto": "自动权限"]
         let busy = session?.isBusy ?? false
-        return HStack(spacing: 10) {
-            Button { model.pickAndUpload() } label: { Image(systemName: "plus").frame(width: 18, height: 18) }.buttonStyle(QuietButtonStyle()).help("上传文件并附加").disabled(!model.isConnected)
+        return HStack(spacing: 8) {
             if session != nil {
-                Button { model.openProjectPicker() } label: { Image(systemName: "folder") }.buttonStyle(QuietButtonStyle()).help("切换项目").disabled(!model.isConnected)
                 Button { model.showPreferences = true } label: { Label(modes[preferences?.permissionMode ?? "default"] ?? "默认权限", systemImage: "checkmark.shield") }
                     .buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).disabled(!model.isConnected)
                 Spacer(minLength: 12)
-                Menu {
-                    if let session {
-                        ForEach(session.capabilities?.models ?? []) { option in
-                            Button {
-                                changingModel = true
-                                Task { @MainActor in
-                                    defer { changingModel = false }
-                                    do { try await model.engine?.selectModel(session.id, option.value == "default" ? "" : option.value) }
-                                    catch { model.show(error.localizedDescription) }
-                                }
-                            } label: {
-                                if option.value == (modelName ?? "default") {
-                                    Label(option.displayName ?? option.value, systemImage: "checkmark")
-                                } else { Text(option.displayName ?? option.value) }
+                Button { showingModels.toggle() } label: {
+                    HStack(spacing: 4) {
+                        Text(changingModel ? "切换中…" : (displayed == "Default (recommended)" || displayed == "默认" || displayed == "default") ? "模型：默认" : displayed).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.caption2)
+                    }
+                }.buttonStyle(QuietButtonStyle()).disabled(!model.isConnected || changingModel)
+                    .popover(isPresented: $showingModels, arrowEdge: .top) {
+                        SearchPicker(title: "模型", items: (session?.capabilities?.models ?? []).map {
+                            SearchPickerItem(id: $0.value, title: $0.displayName ?? $0.value, detail: $0.value)
+                        }, selected: modelName ?? "default", refresh: { model.refreshCapabilities(force: true) }) { value in
+                            guard let session else { return }
+                            showingModels = false
+                            changingModel = true
+                            Task { @MainActor in
+                                defer { changingModel = false }
+                                do { try await model.engine?.selectModel(session.id, value == "default" ? "" : value) }
+                                catch { model.show(error.localizedDescription) }
                             }
                         }
                     }
-                    Divider()
-                    Button("刷新模型列表") { model.refreshCapabilities(force: true) }
-                    Button("自定义模型与更多设置…") { model.showPreferences = true }
-                } label: { Text(changingModel ? "切换中…" : displayed == "Default (recommended)" ? "默认" : displayed).font(.caption).lineLimit(1) }
-                .menuStyle(.borderlessButton).fixedSize().disabled(!model.isConnected || changingModel)
             }
             if session == nil { Spacer() }
             HStack(spacing: 8) {
@@ -284,6 +309,17 @@ struct ComposerArea: View {
         }
     }
 
+    private func insertCommand(_ command: RemoteCommand) {
+        if CommandCompletion.token(text.wrappedValue, caret: caret) != nil {
+            choose(command, execute: false)
+        } else {
+            let completed = "/" + command.name + " " + text.wrappedValue
+            text.wrappedValue = completed
+            dismissedText = completed
+            caret = (completed as NSString).length
+        }
+    }
+
     private func choose(_ command: RemoteCommand, execute: Bool) {
         guard let token = CommandCompletion.token(text.wrappedValue, caret: caret) else { return }
         let completed = CommandCompletion.complete(text.wrappedValue, stop: token.stop, command: command)
@@ -332,7 +368,7 @@ struct MenuList: View {
             }
             .frame(maxHeight: 260)
             .fixedSize(horizontal: false, vertical: true)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
             .onChange(of: selection) { proxy.scrollTo(selection) }
         }
@@ -606,7 +642,7 @@ struct PermissionCard: View {
             DisclosureGroup("远端建议的权限规则") { CodeBlock(text: permission.suggestions?.text(pretty: true) ?? "") }.font(.caption)
             Toggle("应用以上权限规则 · " + scope(suggestions), isOn: $useRules).font(.caption)
         }
-        TextField(permission.name == "ExitPlanMode" ? "对计划的修改意见" : "拒绝时给 Claude 的说明（可选）", text: $reason).textFieldStyle(.roundedBorder).font(.caption)
+        TextField(permission.name == "ExitPlanMode" ? "对计划的修改意见" : "拒绝时给 Claude 的说明（可选）", text: $reason).textFieldStyle(WorkbenchTextFieldStyle()).font(.caption)
         HStack {
             Spacer()
             if permission.name == "ExitPlanMode" {
@@ -644,7 +680,7 @@ struct PermissionCard: View {
             if let question = item["question"]?.string {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(question)
-                    TextField("输入你的回答，也可选择下方建议", text: Binding(get: { answers[question] ?? "" }, set: { answers[question] = $0 })).textFieldStyle(.roundedBorder)
+                    TextField("输入你的回答，也可选择下方建议", text: Binding(get: { answers[question] ?? "" }, set: { answers[question] = $0 })).textFieldStyle(WorkbenchTextFieldStyle())
                     FlowOptions(options: (item["options"]?.array ?? []).compactMap { option in option["label"]?.string.map { ($0, option["description"]?.string ?? "") } }, selected: selectedOptions(question), toggle: { toggle($0, question: question, multiple: item["multiSelect"]?.isTruthy == true) })
                 }
             }
@@ -741,9 +777,9 @@ struct SchemaFieldView: View {
                 TextField(field.label, text: Binding(get: { values[field.name]?.double.map { field.kind == .integer ? String(Int($0)) : String($0) } ?? "" }, set: { text in
                     // An empty field means no answer, which the worker checks against `required`.
                     values[field.name] = Double(text).map(JSON.number)
-                })).textFieldStyle(.roundedBorder)
+                })).textFieldStyle(WorkbenchTextFieldStyle())
             case .text:
-                TextField(field.label, text: Binding(get: { values[field.name]?.string ?? field.defaultValue?.string ?? "" }, set: { values[field.name] = .string($0) })).textFieldStyle(.roundedBorder)
+                TextField(field.label, text: Binding(get: { values[field.name]?.string ?? field.defaultValue?.string ?? "" }, set: { values[field.name] = .string($0) })).textFieldStyle(WorkbenchTextFieldStyle())
             }
             if let description = field.description { Text(description).font(.caption2).foregroundStyle(.secondary) }
         }

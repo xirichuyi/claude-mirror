@@ -82,3 +82,21 @@ test('capability inspection does not persist a throwaway session or fork history
   assert.equal(received.forkSession,undefined);
   assert.equal(received.resume,'existing');
 });
+
+test('native slash output preserves line breaks and a plain-text display marker', () => {
+  const message = newAssistant('usage');
+  new Transcript(message).consume({ type: 'system', subtype: 'local_command_output', content: 'Session: 20%\nWeek: 30%' });
+  assert.equal(message.blocks[0].format, 'command');
+  assert.equal(message.blocks[0].text, 'Session: 20%\nWeek: 30%');
+});
+
+test('CLI result-only usage packet renders as command output without invoking model text formatting', () => {
+  const message = newAssistant('usage-result');
+  const transcript = new Transcript(message);
+  transcript.consume({ type: 'result', subtype: 'success', local_command: 'usage', is_error: false,
+    num_turns: 0, total_cost_usd: 0, result: 'Current session: 94% used\nCurrent week: 10% used' });
+  assert.equal(message.blocks.length, 1);
+  assert.equal(message.blocks[0].format, 'command');
+  assert.match(message.blocks[0].text, /Current week/);
+  assert.equal(message.costUSD, 0);
+});

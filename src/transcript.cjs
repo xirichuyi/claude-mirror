@@ -42,7 +42,7 @@ class Transcript {
       return block;
     }
     if (content.type === 'text') {
-      const block = { type: 'text', text: content.text || '', sourceId };
+      const block = { type: 'text', text: content.text || '', sourceId, ...(content.format === 'command' ? { format: 'command' } : {}) };
       this.message.blocks.push(block);
       return block;
     }
@@ -124,7 +124,7 @@ class Transcript {
   }
 
   system(event) {
-    if (event.subtype === 'local_command_output') this.addBlock({ type: 'text', text: event.content }, event.uuid);
+    if (event.subtype === 'local_command_output') this.addBlock({ type: 'text', text: event.content, format: 'command' }, event.uuid);
     if (event.subtype === 'compact_boundary') {
       delete this.message.activity;
       const { pre_tokens: before, post_tokens: after, trigger } = event.compact_metadata || {};
@@ -167,7 +167,10 @@ class Transcript {
     if (event.type === 'result') {
       if (event.is_error) this.message.error = event.result || event.errors?.join('\n') || '远端 Claude 返回错误';
       if (!this.message.blocks.some(b => b.type === 'text') && event.result && !event.is_error)
-        this.addBlock({ type: 'text', text: event.result }, 'result');
+        this.addBlock({ type: 'text', text: event.result, format: event.local_command ? 'command' : undefined }, 'result');
+      if (event.local_command && !event.is_error) {
+        for (const block of this.message.blocks) if (block.type === 'text') block.format = 'command';
+      }
       this.message.durationMs = event.duration_ms;
       this.message.costUSD = event.total_cost_usd;
       delete this.message.activity;

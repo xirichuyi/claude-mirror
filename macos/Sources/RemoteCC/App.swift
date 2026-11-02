@@ -11,7 +11,7 @@ struct RemoteCCApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        WindowGroup("镜像 Claude") {
+        WindowGroup("claude-mirror") {
             RootView()
                 .environmentObject(model)
                 .frame(minWidth: 1000, minHeight: 620)
@@ -22,6 +22,9 @@ struct RemoteCCApp: App {
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("检查更新…") { Task { await model.checkForUpdates(manual: true) } }
+            }
+            CommandGroup(replacing: .appSettings) {
+                Button("设置…") { model.showSettings = true }.keyboardShortcut(",")
             }
             CommandGroup(replacing: .newItem) {
                 Button("新对话") { model.newConversation() }.keyboardShortcut("n")

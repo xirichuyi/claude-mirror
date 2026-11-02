@@ -7,9 +7,9 @@ SwiftUI 客户端，通过系统 SSH 使用服务器上的 Claude Code。需要 
 ```sh
 # 在仓库根目录安装打包服务端程序所需的 Claude Agent SDK
 npm ci --ignore-scripts
-# 生成 macos/dist/RemoteCC.app
+# 生成 macos/dist/claude-mirror.app
 macos/scripts/build-app.sh
-open macos/dist/RemoteCC.app
+open macos/dist/claude-mirror.app
 ```
 
 ## 结构

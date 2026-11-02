@@ -11,10 +11,10 @@ struct MachineHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text(model.currentConfig == nil ? "你的机器，你的工作。" : "今天，想完成什么？")
-                        .font(.title.weight(.medium))
+                    Text(model.currentConfig == nil ? "连接服务器" : "新对话")
+                        .font(.system(size: 28, weight: .medium, design: .serif))
                         .foregroundStyle(WorkbenchTheme.ink)
-                    Text(model.currentConfig == nil ? "连接一台机器，找回已有对话。\n在不同机器之间切换，工作始终各归其位。" : "在 \(model.currentConfig!.displayName) 上开始，或继续最近的对话。")
+                    Text(model.currentConfig == nil ? "使用服务器上的 Claude Code。" : model.currentConfig!.displayName)
                         .font(.body).foregroundStyle(.secondary).lineSpacing(6)
                     if model.currentConfig == nil || !model.isConnected {
                     HStack(spacing: 12) {
@@ -24,7 +24,7 @@ struct MachineHomeView: View {
                                     .buttonStyle(WorkbenchButtonStyle()).disabled(syncing)
                             }
                         } else {
-                            Button { model.showConnect = true } label: { Label("连接第一台机器", systemImage: "plus") }
+                            Button { model.showConnect = true } label: { Label("添加服务器", systemImage: "plus") }
                                 .buttonStyle(WorkbenchButtonStyle(prominent: true))
                             Text("支持 SSH 别名与 user@host").font(.subheadline).foregroundStyle(.tertiary)
                         }
@@ -45,17 +45,16 @@ struct MachineHomeView: View {
                         if recent.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(syncing ? "正在读取远端历史…" : "还没有对话").font(.body.weight(.medium))
-                                Text(syncing ? "已有项目和对话会自动出现在这里。" : (model.historyStatus.isEmpty ? "连接后会自动同步历史，无需选择目录。" : model.historyStatus))
+                                Text(model.historyStatus)
                                     .font(.callout).foregroundStyle(.secondary)
                             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
                                 .background(WorkbenchTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
                         } else {
-                            VStack(spacing: 0) {
+                            VStack(spacing: 4) {
                                 ForEach(recent) { session in
                                     Button { model.select(session.id) } label: {
                                         HStack(spacing: 14) {
-                                            Image(systemName: "bubble.left").font(.title3).foregroundStyle(.secondary)
-                                            VStack(alignment: .leading, spacing: 5) {
+                                                                                        VStack(alignment: .leading, spacing: 5) {
                                                 Text(historyDisplayTitle(session.name)).font(.body.weight(.medium)).lineLimit(1)
                                                 Text(session.directory).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                                             }
@@ -64,19 +63,11 @@ struct MachineHomeView: View {
                                                 .font(.caption2).foregroundStyle(.tertiary)
                                             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                                         }.padding(16).contentShape(Rectangle())
-                                    }.buttonStyle(.plain)
-                                    if session.id != recent.last?.id { Divider().padding(.leading, 45) }
+                                    }.buttonStyle(SidebarNavigationStyle())
                                 }
-                            }.background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
-                                .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
+                            }
                         }
                     }
-                } else {
-                    HStack(alignment: .top, spacing: 32) {
-                        feature("历史自动找回", detail: "接着终端里的对话继续", icon: "clock.arrow.circlepath")
-                        feature("多台机器", detail: "每台机器保留独立历史", icon: "square.stack.3d.up")
-                        feature("沿用现有环境", detail: "使用你的 SSH 配置和密钥", icon: "key")
-                    }.padding(.top, 12)
                 }
             }
             .frame(maxWidth: 620).padding(.horizontal, 44).padding(.top, 72).padding(.bottom, 48)
@@ -84,12 +75,5 @@ struct MachineHomeView: View {
         }
     }
 
-    private func feature(_ title: String, detail: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Image(systemName: icon).font(.title3).foregroundStyle(.secondary)
-            Text(title).font(.callout.weight(.medium))
-            Text(detail).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
 }
 #endif

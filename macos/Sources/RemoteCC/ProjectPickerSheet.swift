@@ -17,7 +17,7 @@ struct ProjectPickerSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             SheetHeading(title: "选择项目") { dismiss() }.disabled(busy)
             Label(model.active?.host ?? "", systemImage: "server.rack").font(.callout).foregroundStyle(.secondary)
-            TextField("远端项目路径", text: $directory).textFieldStyle(.roundedBorder)
+            TextField("远端项目路径", text: $directory).textFieldStyle(WorkbenchTextFieldStyle())
             if !recent.isEmpty {
                 Text("最近的项目").font(.caption).foregroundStyle(.secondary)
                 ScrollView {

@@ -24,8 +24,8 @@
 
 ### 安装 DMG
 
-1. 从发布页下载 `Claude-Mirror-0.18.0-macOS-arm64.dmg`。
-2. 打开 DMG，将 **Claude Mirror.app** 拖入 **Applications**。
+1. 从发布页下载 `claude-mirror-0.19.0-macOS-arm64.dmg`。
+2. 打开 DMG，将 **claude-mirror.app** 拖入 **Applications**。
 3. 从应用程序启动「镜像 Claude」，添加 SSH 主机。
 
 本机使用 DMG 无需安装 Node.js、Swift 或 Xcode；远端仍需要 Node.js 和 Claude Code。发布页附 SHA-256 校验文件。
@@ -122,7 +122,7 @@ git clone https://github.com/xirichuyi/claude-mirror.git
 cd claude-mirror
 npm ci --ignore-scripts
 sh macos/scripts/build-app.sh
-open macos/dist/RemoteCC.app
+open macos/dist/claude-mirror.app
 ```
 
 源码构建后的界面显示名为“镜像 Claude”。为兼容旧版安装、存储和构建脚本，目前内部 Swift 模块、bundle ID 和构建输出仍保留 RemoteCC 名称。构建脚本会打包远端代理、SSH 认证辅助程序和应用图标；不要用裸 `swift run` 验收密码弹窗。
@@ -155,9 +155,9 @@ sh macos/scripts/build-dmg.sh
 
 ```sh
 # 1. 修改 macos/Resources/Info.plist 中的 CFBundleShortVersionString 和 CFBundleVersion
-# 2. 编写 docs/releases/v0.18.0.md
-git commit -am "Release v0.18.0" && git push origin main
-git tag -a v0.18.0 -m "镜像 Claude v0.18.0" && git push origin v0.18.0
+# 2. 编写 docs/releases/v0.19.0.md
+git commit -am "Release v0.19.0" && git push origin main
+git tag -a v0.19.0 -m "镜像 Claude v0.19.0" && git push origin v0.19.0
 ```
 
 CI 构建同样只做 ad-hoc 签名，不经过 Apple 公证。

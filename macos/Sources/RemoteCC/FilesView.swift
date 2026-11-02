@@ -73,10 +73,10 @@ struct FileTreeView: View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 Button { Task { await workspace.goToParent() } } label: { Image(systemName: "arrow.up") }.buttonStyle(.plain).help("上一级")
-                TextField("远端目录", text: $path).textFieldStyle(.roundedBorder).font(.system(size: 11, design: .monospaced))
+                TextField("远端目录", text: $path).textFieldStyle(WorkbenchTextFieldStyle()).font(.system(size: 11, design: .monospaced))
                     .onSubmit { Task { await workspace.browse(path) } }
                 Button { Task { await workspace.reload(force: true) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.plain).help("刷新")
-                Button { model.pickAndUpload(to: workspace.root) } label: { Image(systemName: "square.and.arrow.up") }
+                Button { model.pickAndUpload(to: workspace.root) } label: { Label("上传", systemImage: "square.and.arrow.up") }
                     .buttonStyle(.plain).help("上传文件").accessibilityLabel("上传文件")
                 Menu {
                     Button("新建文件…") { if let root = workspace.root { prompt = NamePrompt(title: "新文件名称", initial: "", action: .newFile(root)) } }
@@ -103,7 +103,7 @@ struct FileTreeView: View {
         }
         .onAppear { path = workspace.root ?? model.active?.directory ?? "~" }
         .onChange(of: workspace.root) { if let root = workspace.root { path = root } }
-        .sheet(item: $prompt) { NameSheet(prompt: $0, workspace: workspace) }
+        .sheet(item: $prompt) { NameSheet(prompt: $0, workspace: workspace).workbenchPanel() }
     }
 
     private func rowView(_ row: TreeRow) -> some View {
@@ -188,7 +188,7 @@ struct NameSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(prompt.title).font(.headline)
-            TextField("名称", text: $name).textFieldStyle(.roundedBorder).onSubmit(confirm)
+            TextField("名称", text: $name).textFieldStyle(WorkbenchTextFieldStyle()).onSubmit(confirm)
             HStack {
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -257,7 +257,7 @@ struct SearchView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TextField("在工作目录中搜索内容", text: $query).textFieldStyle(.roundedBorder).padding(8).onSubmit(run)
+            TextField("在工作目录中搜索内容", text: $query).textFieldStyle(WorkbenchTextFieldStyle()).padding(8).onSubmit(run)
             if !status.isEmpty { Text(status).font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 4) }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -302,7 +302,7 @@ struct QuickOpenSheet: View {
     var body: some View {
         VStack(spacing: 6) {
             TextField("按名称查找服务器上的文件", text: $query)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(WorkbenchTextFieldStyle())
                 .onSubmit { if let file = results[safeIndex: selection] { choose(file) } }
                 .onKeyPress(.downArrow) { selection = min(selection + 1, max(results.count - 1, 0)); return .handled }
                 .onKeyPress(.upArrow) { selection = max(selection - 1, 0); return .handled }
@@ -371,7 +371,7 @@ struct EditorPane: View {
             Button { model.close(tab, in: workspace) } label: { Image(systemName: "xmark").font(.caption2) }.buttonStyle(.plain).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(tab.id == workspace.activeTabId ? Color(nsColor: .textBackgroundColor) : Color.clear)
+        .background(tab.id == workspace.activeTabId ? WorkbenchTheme.surface : Color.clear)
     }
 
     private func header(_ tab: EditorTab) -> some View {
@@ -453,6 +453,7 @@ struct EditorContent: View {
             if tab.draft != nil {
                 TextEditor(text: Binding(get: { tab.draft ?? "" }, set: { tab.draft = $0; model.objectWillChange.send() }))
                     .font(.system(size: 12, design: .monospaced))
+                    .scrollContentBackground(.hidden).background(WorkbenchTheme.surface)
             } else if isMarkdown(preview), !tab.showSource {
                 ScrollView {
                     MarkdownView(text: preview.text ?? "", actions: FileActions(open: { model.open($0, line: $1) }))
@@ -498,7 +499,9 @@ struct CodeTextView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
+        scroll.drawsBackground = false
         let view = scroll.documentView as! NSTextView
+        view.drawsBackground = false
         view.isEditable = false; view.isSelectable = true; view.isRichText = false
         view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         view.textContainerInset = NSSize(width: 8, height: 10)

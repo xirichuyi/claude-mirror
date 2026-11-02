@@ -3,25 +3,73 @@ import SwiftUI
 import AppKit
 
 enum WorkbenchTheme {
-    static let canvas = adaptive(light: 0xFCFCFC, dark: 0x242424)
-    static let sidebar = adaptive(light: 0xF3F3F3, dark: 0x1F1F1F)
-    static let surface = adaptive(light: 0xFFFFFF, dark: 0x292929)
-    static let ink = adaptive(light: 0x292929, dark: 0xECECEC)
-    static let onInk = adaptive(light: 0xFFFFFF, dark: 0x242424)
-    /// Follows the accent colour chosen in System Settings, as Mac apps are expected to.
-    static let accent = Color.accentColor
-    static let userBubble = adaptive(light: 0xF0F0F0, dark: 0x343434)
-    static let border = Color.primary.opacity(0.09)
+    static let canvas = adaptive(light: 0xFAF6F2, dark: 0x242424)
+    static let sidebar = adaptive(light: 0xF0EAE3, dark: 0x1C1C1C)
+    static let surface = adaptive(light: 0xF6F1EB, dark: 0x2C2C2C)
+    static let ink = adaptive(light: 0x272727, dark: 0xEAEAEA)
+    static let onInk = adaptive(light: 0xFAFAFA, dark: 0x242424)
+    /// Restrained brand accent, with a brighter counterpart for dark appearance.
+    static let accent = adaptive(light: 0x353535, dark: 0xDEDEDE)
+    static let userBubble = adaptive(light: 0xEDE5DC, dark: 0x343434)
+    static let border = ink.opacity(0.14)
+    static let sidebarInk = adaptive(light: 0x303030, dark: 0xEAEAEA)
+    static let sage = adaptive(light: 0x566746, dark: 0xB4C49E)
 
     /// One spacing and corner scale for the whole app instead of per-view numbers.
     enum Space { static let xs: CGFloat = 4, s: CGFloat = 8, m: CGFloat = 12, l: CGFloat = 16, xl: CGFloat = 24 }
-    enum Radius { static let small: CGFloat = 6, medium: CGFloat = 10, large: CGFloat = 14 }
+    static let conversationWidth: CGFloat = 800
+
+    enum Radius { static let small: CGFloat = 6, medium: CGFloat = 10, large: CGFloat = 16 }
 
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let hex = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
             return NSColor(srgbRed: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255, blue: CGFloat(hex & 255) / 255, alpha: 1)
         })
+    }
+}
+
+
+extension View {
+    func workbenchPanel() -> some View {
+        self
+            .foregroundStyle(WorkbenchTheme.ink)
+            .tint(WorkbenchTheme.accent)
+            .scrollContentBackground(.hidden)
+            .background(WorkbenchTheme.canvas)
+            .presentationBackground(WorkbenchTheme.canvas)
+    }
+}
+
+struct WorkbenchTextFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration.textFieldStyle(.plain)
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(WorkbenchTheme.border))
+    }
+}
+
+struct SidebarNavigationStyle: ButtonStyle {
+    var selected = false
+    func makeBody(configuration: Configuration) -> some View {
+        SidebarNavigationBody(configuration: configuration, selected: selected)
+    }
+}
+
+private struct SidebarNavigationBody: View {
+    let configuration: ButtonStyleConfiguration
+    let selected: Bool
+    @State private var hovered = false
+    var body: some View {
+        configuration.label
+            .foregroundStyle(WorkbenchTheme.sidebarInk)
+            .padding(.horizontal, 8).padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .background(WorkbenchTheme.ink.opacity(selected ? 0.09 : hovered ? 0.045 : 0), in: RoundedRectangle(cornerRadius: 6))
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .onHover { hovered = $0 }
     }
 }
 
@@ -41,9 +89,9 @@ struct ComposerActionStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
-            .foregroundStyle(enabled ? Color.white : Color.secondary.opacity(0.45))
+            .foregroundStyle(enabled ? WorkbenchTheme.onInk : Color.secondary.opacity(0.45))
             .frame(width: 28, height: 28)
-            .background(enabled ? Color.accentColor : Color.primary.opacity(0.06), in: Circle())
+            .background(enabled ? WorkbenchTheme.accent : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
@@ -65,12 +113,12 @@ private struct WorkbenchButtonBody: View {
         configuration.label
             .font(.callout.weight(.medium))
             .padding(.horizontal, 12).padding(.vertical, 7)
-            .foregroundStyle(prominent ? Color.white : WorkbenchTheme.ink)
-            .background(prominent ? Color.accentColor : hovered && enabled ? WorkbenchTheme.sidebar : WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small + 2))
+            .foregroundStyle(prominent ? WorkbenchTheme.onInk : WorkbenchTheme.ink)
+            .background(prominent ? WorkbenchTheme.accent : hovered && enabled ? WorkbenchTheme.sidebar : WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small + 2))
             .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small + 2).strokeBorder(prominent ? .clear : WorkbenchTheme.border))
             .opacity(!enabled ? 0.4 : configuration.isPressed ? 0.72 : 1)
             .onHover { hovered = $0 }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: hovered)
     }
 }
 

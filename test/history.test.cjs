@@ -133,3 +133,27 @@ test('project availability follows deletion and recreation without deleting hist
     await assert.rejects(f.call({ operation: 'projects', directories: Array(201).fill(folder) }), /200/);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
+
+test('project history trash matches exact cwd and preserves recovery copies and project files', async () => {
+  const f = fixture();
+  const sibling = path.join(path.dirname(f.file), randomUUID() + '.jsonl');
+  const projectFile = path.join(f.root, 'keep.txt');
+  try {
+    fs.writeFileSync(f.file, JSON.stringify({ type: 'user', cwd: '/tmp/test', message: { content: 'hello' } }) + '\n');
+    fs.writeFileSync(sibling, JSON.stringify({ type: 'user', cwd: '/tmp/test/child', message: { content: 'child' } }) + '\n');
+    fs.writeFileSync(projectFile, 'keep');
+    const result = await f.call({ operation: 'trashProject', directory: '/tmp/test' });
+    assert.equal(result.count, 1);
+    assert.deepEqual(result.references, [f.reference]);
+    assert.equal(fs.existsSync(f.file), false);
+    assert.equal(fs.existsSync(sibling), true);
+    assert.equal(fs.readFileSync(projectFile, 'utf8'), 'keep');
+    assert.match(fs.readFileSync(path.join(result.trash, f.reference), 'utf8'), /hello/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(result.trash, 'manifest.json'))).directory, '/tmp/test');
+    const list = await f.call({ operation: 'list' });
+    assert.equal(list.sessions.length, 1);
+    assert.equal(list.sessions[0].directory, '/tmp/test/child');
+    assert.equal((await f.call({ operation: 'trashProject', directory: '/tmp/test' })).count, 0);
+    await assert.rejects(f.call({ operation: 'trashProject', directory: '../test' }), /绝对目录/);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});

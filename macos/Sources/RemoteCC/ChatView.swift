@@ -70,8 +70,11 @@ struct MessagesList: View {
     @EnvironmentObject private var model: AppModel
     let session: ChatSession
     @State private var followsReply = true
+    @State private var bottomDistance: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
@@ -88,24 +91,44 @@ struct MessagesList: View {
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.horizontal, 28).padding(.vertical, 24)
-                .frame(maxWidth: 820, alignment: .leading)
+                .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
+                .background(GeometryReader { content in
+                    Color.clear.preference(key: ReplyBottomPreference.self,
+                        value: content.frame(in: .named("replyViewport")).maxY)
+                })
+            }
+            .coordinateSpace(name: "replyViewport")
+            .onPreferenceChange(ReplyBottomPreference.self) { bottom in
+                bottomDistance = max(0, bottom - viewport.size.height)
+                if ReplyScrollPolicy.isNearBottom(Double(bottomDistance)) { followsReply = true }
             }
             .background(ScrollReadingDetector { followsReply = false })
             .overlay(alignment: .bottomTrailing) {
-                if !followsReply {
+                if ReplyScrollPolicy.showsJump(distance: Double(bottomDistance), following: followsReply) {
                     Button {
                         followsReply = true
-                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
-                    } label: { Label("回到最新", systemImage: "arrow.down") }
-                        .buttonStyle(WorkbenchButtonStyle()).shadow(color: .black.opacity(0.08), radius: 8, y: 3).padding(16)
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                    } label: {
+                        Image(systemName: "arrow.down").font(.system(size: 14, weight: .medium))
+                            .frame(width: 34, height: 34)
+                            .background(WorkbenchTheme.surface, in: Circle())
+                            .overlay(Circle().strokeBorder(WorkbenchTheme.border))
+                    }.buttonStyle(.plain).help("回到最新").accessibilityLabel("回到最新")
+                        .shadow(color: .black.opacity(0.06), radius: 5, y: 2).padding(16)
                 }
             }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             .onChange(of: followsReply) { if followsReply { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: session.messages.last) { if followsReply { proxy.scrollTo("bottom", anchor: .bottom) } }
         }
+        }
     }
+}
+
+private struct ReplyBottomPreference: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 struct HistoryNotice: View {
@@ -146,7 +169,7 @@ struct MessageRow: View, Equatable {
     var body: some View {
         Group { if message.role == "user" { userBody } else { assistantBody } }
             .sheet(isPresented: $showRewind) {
-                if let checkpoint = message.checkpointId, let id = model.activeId { RewindSheet(sessionId: id, checkpoint: checkpoint) }
+                if let checkpoint = message.checkpointId, let id = model.activeId { RewindSheet(sessionId: id, checkpoint: checkpoint).workbenchPanel() }
             }
     }
 
@@ -170,7 +193,7 @@ struct MessageRow: View, Equatable {
 
     private var assistantBody: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array((message.blocks ?? []).enumerated()), id: \.offset) { index, block in
+            ForEach(Array((message.blocks ?? []).enumerated()).filter { !isDuplicateError($0.element) }, id: \.offset) { index, block in
                 BlockView(block: block, actions: actions, thinkingActive: busy && sessionStatus == "working" && index == (message.blocks?.count ?? 0) - 1)
             }
             if let issue = message.serviceIssue {
@@ -184,13 +207,7 @@ struct MessageRow: View, Equatable {
                     .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             }
             if let error = message.error {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("本次回复未完成", systemImage: "exclamationmark.circle").font(.body.weight(.medium))
-                    Text(error).font(.callout).textSelection(.enabled)
-                    Button("重新编辑上一条请求") { restoreRequest() }
-                        .buttonStyle(WorkbenchButtonStyle()).disabled(model.active?.isBusy == true)
-                }.foregroundStyle(.red).padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.05), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+                ReplyFailureView(error: error, canEdit: model.active?.isBusy != true, edit: restoreRequest)
             }
             if busy && message.error == nil && !hasInlineProgress {
                 HStack(spacing: 8) {
@@ -202,6 +219,10 @@ struct MessageRow: View, Equatable {
             if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(.secondary) }
             if !busy { footer }
         }
+    }
+
+    private func isDuplicateError(_ block: Block) -> Bool {
+        message.error.map { ReplyFailure($0).duplicates(block) } ?? false
     }
 
     private var hasInlineProgress: Bool {
@@ -231,8 +252,9 @@ struct MessageRow: View, Equatable {
     }
 
     @ViewBuilder private var footer: some View {
-        let text = (message.blocks ?? []).filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n\n")
-        let parts = [message.model, message.durationMs.map { String(format: "%.1fs", $0 / 1000) }, message.costUSD.map { String(format: "$%.4f", $0) }].compactMap { $0 }
+        let text = (message.blocks ?? []).filter { $0.type == "text" && !isDuplicateError($0) }.compactMap(\.text).joined(separator: "\n\n")
+        let isUsageReport = (message.blocks ?? []).contains { UsageReport($0.text ?? "") != nil }
+        let parts = isUsageReport ? [] : [message.model, message.durationMs.map { String(format: "%.1fs", $0 / 1000) }, message.costUSD.map { String(format: "$%.4f", $0) }].compactMap { $0 }
         if !text.isEmpty || !parts.isEmpty || message.checkpointId != nil {
             HStack(spacing: 10) {
                 if !text.isEmpty {
@@ -242,7 +264,7 @@ struct MessageRow: View, Equatable {
                         if copied { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
                     }
                 }
-                if message.checkpointId != nil {
+                if message.checkpointId != nil && message.error == nil && !isUsageReport {
                     Button { showRewind = true } label: { Label("回退文件", systemImage: "arrow.uturn.backward") }.buttonStyle(QuietButtonStyle()).disabled(model.active?.isBusy == true || !model.isConnected)
                 }
                 Text(parts.joined(separator: " · ")).lineLimit(1).truncationMode(.middle)
@@ -257,6 +279,34 @@ func copyToPasteboard(_ text: String) {
     NSPasteboard.general.setString(text, forType: .string)
 }
 
+struct ReplyFailureView: View {
+    let error: String
+    let canEdit: Bool
+    let edit: () -> Void
+    @State private var expanded = false
+
+    var body: some View {
+        let failure = ReplyFailure(error)
+        VStack(alignment: .leading, spacing: 10) {
+            Label(failure.title, systemImage: "exclamationmark.circle")
+                .font(.callout.weight(.medium)).foregroundStyle(.orange)
+            Text(failure.summary).font(.callout).foregroundStyle(.secondary).lineLimit(expanded ? nil : 2)
+            HStack(spacing: 12) {
+                Button("编辑请求", action: edit).disabled(!canEdit)
+                Button(expanded ? "收起详情" : "查看详情") { expanded.toggle() }
+                if expanded { Button("复制错误") { copyToPasteboard(error) } }
+            }.buttonStyle(.borderless).font(.caption)
+            if expanded {
+                Text(error).font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
+    }
+}
+
 struct BlockView: View {
     let block: Block
     let actions: FileActions
@@ -264,7 +314,14 @@ struct BlockView: View {
 
     var body: some View {
         switch block.type {
-        case "text": MarkdownView(text: block.text ?? "", actions: actions)
+        case "text":
+            if let report = UsageReport(block.text ?? "") {
+                UsageReportView(report: report)
+            } else if block.format == "command" {
+                Text(block.text ?? "").font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+            } else { MarkdownView(text: block.text ?? "", actions: actions) }
         case "thinking": ThinkingCard(text: block.text ?? "", active: thinkingActive)
         case "tool": ToolCard(block: block, actions: actions)
         case "notice":
@@ -294,7 +351,7 @@ struct ToolCard: View {
         case "running": return .orange
         case "error": return .red
         case "stopped", "history": return .gray
-        default: return .green
+        default: return WorkbenchTheme.sage
         }
     }
     private var statusText: String {
@@ -332,7 +389,7 @@ struct ToolCard: View {
                 if let output = block.output, !output.isEmpty, !view.hidesOutput || block.status == "error" {
                     CodeBlock(text: output, color: block.status == "error" ? .red : .secondary)
                 } else if block.name == "Read" {
-                    Text(block.status == "running" ? "正在读取文件…" : block.status == "history" ? "这条历史记录没有保存读取结果，可打开文件查看当前内容。" : "未返回可显示的内容。")
+                    Text(block.status == "running" ? "正在读取…" : block.status == "history" ? "读取结果未保存在历史中" : "无输出")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -443,14 +500,13 @@ struct MarkdownView: View {
     let actions: FileActions
 
     var body: some View {
-        Markdown(text)
+        Markdown(RemoteFileLinks.markdown(text))
             .markdownTheme(.remoteCC)
             .textSelection(.enabled)
         .environment(\.openURL, OpenURLAction { url in
             // Links such as `src/app.js` refer to the server; only web links leave the app.
             if ["http", "https"].contains(url.scheme ?? "") { return .systemAction }
-            let raw = url.absoluteString.replacingOccurrences(of: "rcc-file:", with: "").removingPercentEncoding ?? url.path
-            if let reference = remotePathReference(raw) { actions.open(reference.path, reference.line) }
+            if let reference = RemoteFileLinks.reference(url) { actions.open(reference.path, reference.line) }
             return .handled
         })
     }

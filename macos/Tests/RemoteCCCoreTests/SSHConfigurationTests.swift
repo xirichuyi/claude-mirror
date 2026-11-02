@@ -182,4 +182,28 @@ final class SSHConfigurationTests: XCTestCase {
         XCTAssertEqual(connections.state(config).status, .connected)
         await connections.disconnect(config)
     }
+    func testFormPasswordIsEphemeralAndCleanedAfterSSHFailure() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let ssh = folder.appendingPathComponent("ssh")
+        let record = folder.appendingPathComponent("path")
+        let script = """
+        #!/bin/sh
+        [ "$(cat "$MIRROR_SSH_CREDENTIAL_FILE")" = 'dummy password' ] || exit 41
+        [ "$(stat -f %Lp "$MIRROR_SSH_CREDENTIAL_FILE")" = 600 ] || exit 42
+        printf '%s' "$MIRROR_SSH_CREDENTIAL_FILE" > '\(record.path)'
+        exit 1
+        """
+        try script.write(to: ssh, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: ssh.path)
+        let connections = try SSHConnections(executable: ssh.path, askpassPath: "/unused")
+        do {
+            try await connections.connect(ConnectionConfig(host: "test", authentication: .password), password: "dummy password")
+            XCTFail("Expected SSH failure")
+        } catch {}
+        let path = try String(contentsOf: record, encoding: .utf8)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+    }
+
 }

@@ -703,7 +703,56 @@ async function projectDirectories(request) {
   });
   return { directories: result };
 }
-const historyOperations = { list: historyList, messages: historyMessages, projects: projectDirectories };
+// Move only top-level transcripts whose recorded cwd exactly matches the selected
+// project. Never remove the project directory or infer its name from encoded paths.
+async function trashProjectHistory(request) {
+  if (typeof request.directory !== 'string' || !path.isAbsolute(request.directory) ||
+      request.directory.includes('\0')) throw new Error('需要远端绝对目录');
+  const directory = path.normalize(request.directory);
+  const entries = await historyEntries();
+  const selected = [];
+  for (const entry of entries) {
+    const data = await summarize(entry.reference, entry.size, entry.modified);
+    if (data.directory && path.normalize(data.directory) === directory) selected.push(entry);
+  }
+  if (!selected.length) return { count: 0, references: [] };
+  // Refuse deletion while any client-owned worker for this directory is alive.
+  const tasks = await fsp.readdir(TASKS, { withFileTypes: true }).catch(() => []);
+  for (const task of tasks.filter(item => item.isDirectory())) {
+    const folder = path.join(TASKS, task.name);
+    if (!ownerAlive(folder)) continue;
+    const original = await readJSON(path.join(folder, 'request.json'));
+    if (original.session?.directory === directory) throw new Error('请先停止此项目的远端任务');
+  }
+  const trash = path.join(path.dirname(PROJECTS()), 'remotecc-trash', crypto.randomUUID());
+  await fsp.mkdir(trash, { recursive: true, mode: 0o700 });
+  await atomicJSON(path.join(trash, 'manifest.json'), {
+    directory, createdAt: Date.now(), references: selected.map(item => item.reference),
+  });
+  const moved = [];
+  try {
+    for (const entry of selected) {
+      const source = historyPath(entry.reference);
+      const info = await fsp.stat(source, { bigint: true });
+      if (`${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}` !== entry.signature)
+        throw new Error('聊天记录正在变化，请停止远端会话后重试');
+      const target = path.join(trash, entry.reference);
+      await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      await fsp.rename(source, target);
+      moved.push({ source, target });
+    }
+  } catch (error) {
+    for (const item of moved.reverse()) {
+      // Never overwrite a new transcript created by an independent CLI.
+      try { await fsp.link(item.target, item.source); await fsp.unlink(item.target); }
+      catch { /* Keep recovery copy and report its location. */ }
+    }
+    throw new Error(error.message + '；恢复副本：' + trash);
+  } finally { listSnapshots.clear(); historyIndexes.clear(); }
+  return { count: moved.length, references: selected.map(item => item.reference), trash };
+}
+
+const historyOperations = { list: historyList, messages: historyMessages, projects: projectDirectories, trashProject: trashProjectHistory };
 
 // ---------------------------------------------------------------- persistent tasks
 

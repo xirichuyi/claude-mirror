@@ -14,12 +14,12 @@ struct ThinkingCard: View {
                     if active { ProgressView().controlSize(.mini) }
                     else { Image(systemName: "checkmark.circle").foregroundStyle(.secondary) }
                     Text(active ? "正在思考…" : "思考过程").font(.callout)
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.secondary)
+                    if !text.isEmpty { Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.secondary) }
                 }.contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton).accessibilityLabel((active ? "正在思考" : "思考过程") + (expanded ? "，收起" : "，展开"))
-            if expanded {
+            }.buttonStyle(.plain).disabled(text.isEmpty).accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton).accessibilityLabel((active ? "正在思考" : "思考过程") + (expanded ? "，收起" : "，展开"))
+            if expanded && !text.isEmpty {
                 ScrollView {
-                    Text(text.isEmpty ? "等待远端返回思考内容…" : text)
+                    Text(text)
                         .font(.body).lineSpacing(5).foregroundStyle(.secondary)
                         .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(maxHeight: 260).fixedSize(horizontal: false, vertical: true)

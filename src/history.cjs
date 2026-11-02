@@ -23,7 +23,12 @@ function historyMessages(records) {
       const previous = messages.at(-1);
       if (previous?.role === 'assistant') new Transcript(previous).toolResults(event);
       const text = userText(blocks.filter(block => block.type === 'text').map(block => block.text).join('\n'));
-      if (text) messages.push({ id: event.uuid, role: 'user', text, createdAt: Date.parse(event.timestamp) || 0 });
+      if (text) {
+        const raw = blocks.filter(block => block.type === 'text').map(block => block.text).join('\n');
+        if (raw.includes('<local-command-stdout>') && !raw.includes('<command-name>'))
+          messages.push({ id: event.uuid, role: 'assistant', blocks: [{ type: 'text', text, format: 'command' }], createdAt: Date.parse(event.timestamp) || 0 });
+        else messages.push({ id: event.uuid, role: 'user', text, createdAt: Date.parse(event.timestamp) || 0 });
+      }
     } else {
       const message = newAssistant(event.uuid);
       message.createdAt = Date.parse(event.timestamp) || 0;

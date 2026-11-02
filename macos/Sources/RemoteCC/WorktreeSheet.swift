@@ -11,7 +11,7 @@ struct WorktreeSheet: View {
         VStack(alignment: .leading, spacing: 18) {
             SheetHeading(title: "新建隔离工作区") { dismiss() }.disabled(busy)
             Text("从当前仓库的 HEAD 创建独立分支与目录，并开启新对话。原目录的未提交修改不会复制过去。").font(.callout).foregroundStyle(.secondary)
-            TextField("新分支名", text: $branch).textFieldStyle(.roundedBorder)
+            TextField("新分支名", text: $branch).textFieldStyle(WorkbenchTextFieldStyle())
             Text("目录会放在仓库旁的 worktrees 文件夹中。").font(.caption).foregroundStyle(.secondary)
             if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             HStack {

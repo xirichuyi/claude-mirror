@@ -41,8 +41,17 @@ public func historyMessages(_ records: [JSON]) -> [ChatMessage] {
                 }.joined(separator: "\n")
                 if result["is_error"]?.isTruthy == true { messages[target].blocks?[index].status = "error" }
             }
-            let text = historyUserText(blocks.filter { $0["type"]?.string == "text" }.compactMap { $0["text"]?.string }.joined(separator: "\n"))
-            if !text.isEmpty { messages.append(ChatMessage(id: identifier, role: "user", text: text, createdAt: timestamp)) }
+            let raw = blocks.filter { $0["type"]?.string == "text" }.compactMap { $0["text"]?.string }.joined(separator: "\n")
+            let text = historyUserText(raw)
+            if !text.isEmpty {
+                if raw.contains("<local-command-stdout>") && !raw.contains("<command-name>") {
+                    var output = Block(type: "text", text: text)
+                    output.format = "command"
+                    messages.append(ChatMessage(id: identifier, role: "assistant", blocks: [output], createdAt: timestamp))
+                } else {
+                    messages.append(ChatMessage(id: identifier, role: "user", text: text, createdAt: timestamp))
+                }
+            }
         } else {
             var converted: [Block] = []
             for block in blocks {
