@@ -958,6 +958,7 @@ async function taskOperation(request, token) {
     ensureOwner(folder, path.join(BUNDLES, request.digest));
     return { started: true };
   }
+  if (operation === 'status') return readSync(path.join(folder, 'state.json')) || {};
   if (operation === 'acknowledge') { atomicSync(path.join(folder, 'acknowledged'), true); return { accepted: true }; }
   if (operation === 'command') return taskCommand(request, folder, token);
   throw new Error('Unknown task operation');

@@ -69,6 +69,7 @@ struct WelcomeView: View {
 struct MessagesList: View {
     @EnvironmentObject private var model: AppModel
     let session: ChatSession
+    @StateObject private var selection = TranscriptSelection()
     @State private var followsReply = true
     @State private var bottomDistance: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -90,6 +91,7 @@ struct MessagesList: View {
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
+                .environment(\.transcriptSelection, selection)
                 .padding(.horizontal, 28).padding(.vertical, 24)
                 .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
@@ -162,6 +164,7 @@ struct MessageRow: View, Equatable {
     let actions: FileActions
     @EnvironmentObject private var model: AppModel
     @State private var copied = false
+    @Environment(\.transcriptSelection) private var selection
     @State private var showRewind = false
 
     static func == (a: MessageRow, b: MessageRow) -> Bool { a.busy == b.busy && a.sessionStatus == b.sessionStatus && a.showHeader == b.showHeader && a.message == b.message }
@@ -176,9 +179,7 @@ struct MessageRow: View, Equatable {
     private var userBody: some View {
         VStack(alignment: .trailing, spacing: 6) {
             if let text = message.text, !text.isEmpty {
-            Text(text)
-                .textSelection(.enabled)
-                .font(.body).lineSpacing(3)
+            SelectableTranscriptText(text: text, markdown: false, scope: selection)
                 .padding(.horizontal, 14).padding(.vertical, 9)
                 .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
             }
@@ -498,18 +499,13 @@ struct DiffView: View {
 struct MarkdownView: View {
     let text: String
     let actions: FileActions
+    @Environment(\.transcriptSelection) private var selection
 
     var body: some View {
-        Markdown(RemoteFileLinks.markdown(text))
-            .markdownTheme(.remoteCC)
-            .textSelection(.enabled)
-        .environment(\.openURL, OpenURLAction { url in
-            // Links such as `src/app.js` refer to the server; only web links leave the app.
-            if ["http", "https"].contains(url.scheme ?? "") { return .systemAction }
-            if let reference = RemoteFileLinks.reference(url) { actions.open(reference.path, reference.line) }
-            return .handled
-        })
+        SelectableTranscriptText(text: text, scope: selection) { url in
+            if ["http", "https"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
+            else if let reference = RemoteFileLinks.reference(url) { actions.open(reference.path, reference.line) }
+        }
     }
-
 }
 #endif

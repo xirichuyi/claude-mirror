@@ -272,9 +272,19 @@ public final class ChatEngine {
 
     private func continueTurn(_ id: String) async {
         do {
+            let originalTask = sessions[try index(id)].remoteTask?.id
+            if let originalTask {
+                let config = sessions[try index(id)].config
+                let state = try await agents.call(config, "task", ["operation": "status", "taskId": .string(originalTask)])
+                if state["done"]?.isTruthy == true && state["hibernated"]?.isTruthy == true {
+                    try apply(id, state: state)
+                    return
+                }
+            }
             await attach(id)
             let position = try index(id)
-            guard let task = sessions[position].remoteTask, let messageId = task.messageId, let message = sessions[position].messages.first(where: { $0.id == messageId }) else { return }
+            guard sessions[position].remoteTask?.id == originalTask,
+                  let task = sessions[position].remoteTask, let messageId = task.messageId, let message = sessions[position].messages.first(where: { $0.id == messageId }) else { return }
             _ = try await command(id, kind: "send", fields: ["prompt": .string(task.prompt ?? ""), "message": try JSON.from(message)], commandId: messageId)
             if let current = try? index(id) { sessions[current].remoteTask?.submitted = true }
             changed(id)
@@ -396,6 +406,15 @@ public final class ChatEngine {
         // A queued new turn must not be overwritten by the previous turn's idle snapshot.
         if let task, messageId != task.messageId {
             if done {
+                if state["hibernated"]?.isTruthy == true {
+                    if let remoteId = state["remoteSessionId"]?.string { sessions[position].remoteSessionId = remoteId }
+                    sessions[position].remoteOwner = nil
+                    sessions[position].remoteTask = RemoteTask(id: UUID().uuidString.lowercased(), prompt: task.prompt, version: -1, submitted: false, messageId: task.messageId, continuation: false)
+                    watchers[id]?.kill(); watchers[id] = nil
+                    changed(id)
+                    Task { @MainActor [weak self] in await self?.attach(id) }
+                    return
+                }
                 if let target = sessions[position].messages.firstIndex(where: { $0.id == task.messageId }) {
                     sessions[position].messages[target].error = "远端会话已退出，新消息未执行。请重新发送。"
                 }

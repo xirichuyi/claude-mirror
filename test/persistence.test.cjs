@@ -100,3 +100,23 @@ test('dead resident owner rejects an undispatched turn instead of leaving it con
   assert.equal(session.status,'error');assert.match(session.messages[1].error,/未执行/);
   await service.close();
 });
+
+test('a hibernated owner resumes only the unsent new turn with the saved Claude session', async () => {
+  const service = new ChatService({load:()=>[],save(){}});
+  const transport = new PersistentTasks({}, service); service.persistent = transport;
+  const session = service.create({host:'axi'});
+  session.messages = [{id:'old',blocks:[]}, {id:'new',blocks:[]}];
+  session.remoteOwner = {id:'owner',version:2};
+  session.remoteTask = {id:'owner',messageId:'new',prompt:'next turn',continuation:true};
+  service.runs.set(session.id,{persistent:true});
+  let attached = 0; transport.attach = async () => { attached++; };
+  transport.apply(session,{version:3,done:true,hibernated:true,status:'idle',remoteSessionId:'saved-claude-id',message:session.messages[0]});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(attached,1);
+  assert.equal(session.remoteSessionId,'saved-claude-id');
+  assert.notEqual(session.remoteTask.id,'owner');
+  assert.equal(session.remoteTask.prompt,'next turn');
+  assert.equal(session.remoteTask.continuation,false);
+  assert.equal(session.messages[1].error,undefined);
+  delete session.remoteTask; service.runs.clear(); await service.close();
+});

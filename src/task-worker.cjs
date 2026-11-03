@@ -8,17 +8,19 @@ const { ChatService } = require('./chat-service.cjs');
 const { Transcript } = require('./transcript.cjs');
 const { catalogue, preferencePatch } = require('./capabilities.cjs');
 const { SessionInput } = require('./session-input.cjs');
+const { IdlePolicy } = require('./idle-policy.cjs');
+const idle = new IdlePolicy();
 const folder = process.argv[2];
 const request = JSON.parse(fs.readFileSync(path.join(folder, 'request.json'), 'utf8'));
 const session = request.session;
 session.permissions = [];
-let version = 0, ended = false;
+let version = 0, ended = false, hibernating = false;
 function atomic(filename, value) {
   fs.writeFileSync(filename + '.tmp', JSON.stringify(value), { mode: 0o600 });
   fs.renameSync(filename + '.tmp', filename);
 }
 function snapshot() {
-  atomic(path.join(folder, 'state.json'), { version: ++version, done: ended, resident: true,
+  atomic(path.join(folder, 'state.json'), { version: ++version, done: ended, resident: true, hibernated: hibernating,
     status: session.status, permissions: session.permissions, message: session.messages.at(-1),
     remoteSessionId: session.remoteSessionId, model: session.model, preferences: session.preferences,
     capabilities: session.capabilities, tools: session.tools, plugins: session.plugins,
@@ -38,6 +40,7 @@ service.runs.set(session.id, run);
 let query, handling = false;
 const rewind = require('./checkpoint-control.cjs').checkpointControl(() => query, () => service.runs.has(session.id) || session.tasks?.some(task => task.status === 'running'));
 async function control(command) {
+  idle.touch();
   if (command.kind === 'send') {
     if (run.message.id === command.message.id) return {}; // Replay after an uncertain transport ACK.
     validateDirectory(session.directory);
@@ -117,7 +120,18 @@ async function commands() {
 }
 session.preferences ||= {};
 snapshot();
-const runCommands = () => commands().catch(error => console.error(error.message));
+const runCommands = async () => {
+  try {
+    await commands();
+    if (!query || handling || hibernating || ended) return;
+    if (idle.expired(session, service.runs.has(session.id))) {
+      // Mark completion before closing the SDK, so reconnecting clients can resume
+      // from remoteSessionId instead of sending into a dead command queue.
+      hibernating = true; ended = true; snapshot();
+      input.close(); query.close();
+    }
+  } catch (error) { console.error(error.message); }
+};
 // fs.watch makes stop and approvals immediate; the interval covers filesystems without inotify.
 const timer = setInterval(runCommands, 1000);
 let commandWatcher;
@@ -144,6 +158,7 @@ try { commandWatcher = fs.watch(path.join(folder, 'commands'), runCommands); com
     }
   }
 })().catch(error => {
+  if (hibernating) return; // SDK cancellation is expected after a deliberate idle shutdown.
   run.message.error = [error.message, run.stderr].filter(Boolean).join('\n');
   session.status = 'error';
 }).finally(() => {

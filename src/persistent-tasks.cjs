@@ -8,7 +8,7 @@ const { agentFor } = require('./agent-client.cjs');
 
 function taskBundle() {
   const files = {};
-  for (const name of ['claude-launch.cjs', 'checkpoint-control.cjs', 'task-worker.cjs', 'task-inspect.cjs', 'chat-service.cjs', 'remote.cjs', 'transcript.cjs', 'capabilities.cjs', 'interaction-schema.js', 'session-input.cjs'])
+  for (const name of ['claude-launch.cjs', 'checkpoint-control.cjs', 'task-worker.cjs', 'task-inspect.cjs', 'chat-service.cjs', 'remote.cjs', 'transcript.cjs', 'capabilities.cjs', 'interaction-schema.js', 'session-input.cjs', 'idle-policy.cjs'])
     files[name] = fs.readFileSync(path.join(__dirname, name), 'utf8');
   files['sdk.mjs'] = fs.readFileSync(require.resolve('@anthropic-ai/claude-agent-sdk'), 'utf8');
   const data = Buffer.from(JSON.stringify(files));
@@ -59,7 +59,10 @@ class PersistentTasks {
   async continueTurn(session) {
     const task = session.remoteTask;
     this.service.changed(session, true);
+    const state = await this.call(session, { operation: 'status', taskId: task.id });
+    if (state.done && state.hibernated) { this.apply(session, state); return; }
     await this.attach(session);
+    if (session.remoteTask !== task) return;
     await this.command(session, { kind: 'send', prompt: task.prompt, message: session.messages.find(item => item.id === task.messageId) }, task.messageId);
     task.submitted = true;
     this.service.changed(session, true);
@@ -118,6 +121,15 @@ class PersistentTasks {
     // A queued new turn must not be overwritten by the previous turn's idle snapshot.
     if (task && state.message.id !== task.messageId) {
       if (state.done) {
+        if (state.hibernated) {
+          session.remoteSessionId = state.remoteSessionId || session.remoteSessionId;
+          delete session.remoteOwner;
+          session.remoteTask = { ...task, id: randomUUID(), version: -1, submitted: false, continuation: false };
+          this.watchers.get(session.id)?.kill(); this.watchers.delete(session.id);
+          this.service.changed(session, true);
+          void Promise.resolve(this.pending.get(session.id)).then(() => this.attach(session));
+          return;
+        }
         const message = session.messages.find(item => item.id === task.messageId);
         if (message) message.error = '远端会话已退出，新消息未执行。请重新发送。';
         session.status = 'error'; session.queuePaused = true;
