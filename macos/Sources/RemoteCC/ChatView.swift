@@ -81,7 +81,16 @@ struct MessagesList: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if session.remoteHistoryRef != nil,
                        session.historyLoaded == false || session.historyBefore != nil || model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil {
-                        HistoryNotice(session: session)
+                        HistoryNotice(session: session) {
+                            followsReply = false
+                            let anchor = session.messages.first?.id
+                            model.perform {
+                                try await model.engine?.loadHistory(session.id, older: true)
+                                // Keep the first previously visible message in place after prepending.
+                                await Task.yield()
+                                if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                            }
+                        }
                     }
                     ForEach(Array(session.messages.enumerated()), id: \.element.id) { index, message in
                         // Equatable lets unchanged messages skip rendering while the last one streams.
@@ -100,10 +109,17 @@ struct MessagesList: View {
                         value: content.frame(in: .named("replyViewport")).maxY)
                 })
             }
+            .defaultScrollAnchor(.bottom)
             .coordinateSpace(name: "replyViewport")
             .onPreferenceChange(ReplyBottomPreference.self) { bottom in
                 bottomDistance = max(0, bottom - viewport.size.height)
-                if ReplyScrollPolicy.isNearBottom(Double(bottomDistance)) { followsReply = true }
+                if followsReply && bottomDistance > 1 {
+                    // Lazy rows and native text measure after the initial scroll request.
+                    // Re-anchor on the resulting layout, unless the user has started reading.
+                    DispatchQueue.main.async {
+                        if followsReply { proxy.scrollTo("bottom", anchor: .bottom) }
+                    }
+                } else if ReplyScrollPolicy.isNearBottom(Double(bottomDistance)) { followsReply = true }
             }
             .background(ScrollReadingDetector { followsReply = false })
             .overlay(alignment: .bottomTrailing) {
@@ -136,6 +152,7 @@ private struct ReplyBottomPreference: PreferenceKey {
 struct HistoryNotice: View {
     @EnvironmentObject private var model: AppModel
     let session: ChatSession
+    var loadEarlier: (() -> Void)? = nil
 
     var body: some View {
         HStack {
@@ -144,7 +161,10 @@ struct HistoryNotice: View {
             if session.historyLoaded == false {
                 Button("加载消息") { model.perform { try await model.engine?.loadHistory(session.id) } }
             } else if session.historyBefore != nil {
-                Button("加载更早消息") { model.perform { try await model.engine?.loadHistory(session.id, older: true) } }.disabled(session.isBusy)
+                Button("加载更早消息") {
+                    if let loadEarlier { loadEarlier() }
+                    else { model.perform { try await model.engine?.loadHistory(session.id, older: true) } }
+                }.disabled(session.isBusy)
             }
         }
         .font(.caption).foregroundStyle(.secondary)
