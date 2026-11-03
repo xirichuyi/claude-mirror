@@ -13,11 +13,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-macos
   cancel-in-progress: false
 
 jobs:
   dmg:
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
     name: Build and publish DMG
     runs-on: macos-26
     env:
@@ -46,14 +47,21 @@ jobs:
             echo "::error::Info.plist version $version does not match tag $TAG"
             exit 1
           fi
+      - run: python3 macos/scripts/test-publish-appcast.py
       - run: swift test --package-path macos
       - run: sh macos/scripts/build-dmg.sh
+      - name: Sign the update archive and feed
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          test -n "$SPARKLE_PRIVATE_KEY" || { echo "::error::Missing Sparkle signing key"; exit 1; }
+          bash macos/scripts/generate-appcast.sh
       - name: Upload to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           dmg="macos/dist/claude-mirror-${TAG#v}-macOS-arm64.dmg"
-          files=("$dmg" "$dmg.sha256" scripts/setup-remote.sh scripts/install-claude-remote.sh)
+          files=("$dmg" "$dmg.sha256" macos/dist/appcast.xml scripts/setup-remote.sh scripts/install-claude-remote.sh)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
           else
@@ -61,6 +69,10 @@ jobs:
             if [ -f "$notes" ]; then source=(--notes-file "$notes"); else source=(--generate-notes); fi
             gh release create "$TAG" --title "claude-mirror $TAG" "${source[@]}" --verify-tag "${files[@]}"
           fi
+      - name: Publish the stable update feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 macos/scripts/publish-appcast.py
       - uses: actions/upload-artifact@v4
         with:
           name: claude-mirror-${{ env.TAG }}-macOS-arm64

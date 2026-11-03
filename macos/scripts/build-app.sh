@@ -9,6 +9,8 @@ trap 'rm -rf "$STAGING"' EXIT HUP INT TERM
 APP="$STAGING/claude-mirror.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c "${BUILD_CONFIGURATION:-release}" --show-bin-path)/RemoteCC" "$APP/Contents/MacOS/RemoteCC"
+mkdir -p "$APP/Contents/Frameworks"
+ditto .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
 swiftc Helpers/ClaudockAskpass.swift -o "$APP/Contents/MacOS/ClaudockAskpass"
 codesign --force --sign - "$APP/Contents/MacOS/ClaudockAskpass"
 cp -R Resources/server "$APP/Contents/Resources/server"

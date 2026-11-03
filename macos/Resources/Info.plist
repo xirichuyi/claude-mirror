@@ -8,10 +8,16 @@
   <key>CFBundleIdentifier</key><string>local.remotecc.native</string>
   <key>CFBundleExecutable</key><string>RemoteCC</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.20.0</string>
-  <key>CFBundleVersion</key><string>5</string>
+  <key>CFBundleShortVersionString</key><string>0.21.0</string>
+  <key>CFBundleVersion</key><string>6</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>SUFeedURL</key><string>https://raw.githubusercontent.com/xirichuyi/claude-mirror/updates/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>fPjgOfQ8SJh5DWEgRZrhKXtS66FX0Rk9MySkFHRXhLs=</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUAutomaticallyUpdate</key><false/>
+  <key>SURequireSignedFeed</key><true/>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
 </dict>
 </plist>

@@ -25,9 +25,10 @@ final class AppModel: ObservableObject {
     @Published var reverseStates: [String: ReverseAccess] = [:]
     /// Held while any server can reach this Mac, so idle sleep does not cut it off. Lid close still sleeps.
     private var sleepAssertion: IOPMAssertionID = 0
-    @Published var availableUpdate: AppUpdate?
+    @Published var availableUpdate: String?
+    private lazy var appUpdater = AppUpdater(model: self)
     private var updateChecksStarted = false
-    @Published private(set) var checkingForUpdates = false
+    @Published var checkingForUpdates = false
     @Published var activeId: String?
     @Published var showArchived = false
     @Published var searchText = ""
@@ -79,6 +80,10 @@ final class AppModel: ObservableObject {
     private let lastConnectionKey = "last-connection"
 
     init() {
+        drafts = UserDefaults.standard.dictionary(forKey: "composer-drafts") as? [String: String] ?? [:]
+        if let data = UserDefaults.standard.data(forKey: "composer-attachments") {
+            attachments = (try? JSONDecoder().decode([String: [Attachment]].self, from: data)) ?? [:]
+        }
         #if DEBUG
         if Bundle.main.bundleIdentifier == "local.claudemirror.demo" {
             do {
@@ -213,59 +218,15 @@ final class AppModel: ObservableObject {
 
     var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
 
-    /// Checks once shortly after launch, then at most once a day while the app keeps running.
     func startUpdateChecks() {
-        guard !updateChecksStarted else { return }
+        guard !updateChecksStarted, Bundle.main.bundleIdentifier == "local.remotecc.native" else { return }
         updateChecksStarted = true
-        Task { [weak self] in
-            await self?.checkForUpdates(manual: false)
-            while !Task.isCancelled {
-                do { try await Task.sleep(nanoseconds: 6 * 3600 * 1_000_000_000) }
-                catch { return }
-                guard let self else { return }
-                let last = UserDefaults.standard.object(forKey: "last-update-check") as? Date ?? .distantPast
-                if Date().timeIntervalSince(last) >= 24 * 3600 { await self.checkForUpdates(manual: false) }
-            }
-        }
+        appUpdater.start()
     }
 
     func checkForUpdates(manual: Bool) async {
-        guard !checkingForUpdates else { return }
-        checkingForUpdates = true
-        defer { checkingForUpdates = false }
-        do {
-            let latest = try await UpdateChecker.fetchLatest()
-            UserDefaults.standard.set(Date(), forKey: "last-update-check")
-            guard let latest, UpdateChecker.isNewer(latest.version, than: currentVersion) else {
-                availableUpdate = nil
-                if manual { show("已是最新版本（\(currentVersion)）") }
-                return
-            }
-            availableUpdate = latest
-            // A skipped version is only offered again when asked for explicitly.
-            if manual || UserDefaults.standard.string(forKey: "skipped-update-version") != latest.version { presentUpdate(latest) }
-        } catch {
-            if manual { show(error.localizedDescription) }
-        }
-    }
-
-    func presentUpdate(_ update: AppUpdate) {
-        let alert = NSAlert()
-        alert.messageText = "镜像 Claude \(update.version) 已发布"
-        let notes = update.notes.count > 700 ? String(update.notes.prefix(700)) + "…" : update.notes
-        alert.informativeText = "当前版本 \(currentVersion)。" + (notes.isEmpty ? "" : "\n\n" + notes)
-            + "\n\n下载后打开 DMG，用新版替换“应用程序”中的 Claude Mirror；聊天记录和机器配置会保留。"
-        alert.addButton(withTitle: update.downloadURL == nil ? "前往下载" : "下载 DMG")
-        alert.addButton(withTitle: "查看更新内容")
-        alert.addButton(withTitle: "稍后")
-        alert.addButton(withTitle: "跳过此版本")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn: NSWorkspace.shared.open(update.downloadURL ?? update.pageURL)
-        case .alertSecondButtonReturn: NSWorkspace.shared.open(update.pageURL)
-        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
-            UserDefaults.standard.set(update.version, forKey: "skipped-update-version")
-        default: break
-        }
+        startUpdateChecks()
+        appUpdater.check(manual: manual)
     }
 
     func reverseStatus(_ machine: ConnectionConfig) -> String {
@@ -861,6 +822,10 @@ final class AppModel: ObservableObject {
     }
 
     func shutdown() {
+        UserDefaults.standard.set(drafts.filter { !$0.value.isEmpty }, forKey: "composer-drafts")
+        if let data = try? JSONEncoder().encode(attachments) {
+            UserDefaults.standard.set(data, forKey: "composer-attachments")
+        }
         historyPoll?.cancel()
         engine?.shutdown()
         let connections = self.connections

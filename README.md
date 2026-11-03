@@ -25,13 +25,13 @@
 
 ### 安装 DMG
 
-1. 从发布页下载 `claude-mirror-0.20.0-macOS-arm64.dmg`。
+1. 从发布页下载 `claude-mirror-0.21.0-macOS-arm64.dmg`。
 2. 打开 DMG，将 **claude-mirror.app** 拖入 **Applications**。
 3. 从应用程序启动「镜像 Claude」，添加 SSH 主机。
 
 本机使用 DMG 无需安装 Node.js、Swift 或 Xcode；远端仍需要 Node.js 和 Claude Code。发布页附 SHA-256 校验文件。
 
-**检查更新**：应用启动后会查询本仓库的 GitHub Releases，之后每天最多查一次；发现新版本时会弹窗，可选择下载 DMG、查看更新内容或跳过此版本。也可以从菜单“镜像 Claude → 检查更新…”手动检查。应用只负责提醒，不会自动下载或替换自身（当前构建未经 Apple 公证）。升级时用新版替换“应用程序”中的旧版即可，聊天记录和机器配置会保留。
+**应用内更新**：从 v0.21.0 起接入 Sparkle，每次启动检查新版，也可点击右上角“检查更新”。确认后在应用内下载、验证签名、安装并重启，不用手动替换 DMG。退出前保存输入草稿和已上传附件，远端任务继续运行；未保存的文件编辑会先提示。v0.20.0 及更早版本需要最后手动安装一次 v0.21.0。更新包及更新源使用 Ed25519 签名；当前应用仍未经过 Apple 公证。
 
 当前构建为 ad-hoc 签名，尚未通过 Apple Developer ID 签名和 Apple 公证。macOS 可能阻止首次启动；核对下载来源后，可在「系统设置 → 隐私与安全性」中允许本次打开。不要关闭全局 Gatekeeper。
 
@@ -327,6 +327,12 @@ npm test
 真实 SSH / 模型测试需显式配置测试主机，见 [macOS 开发与验收记录](macos/README.md)。记录中的测试结果属于对应提交和环境；不能据此认定所有新认证方式、所有服务器或所有 Claude 版本都已通过验收。
 
 后续重点：密码认证的更多服务器兼容性、认证失败后的引导、复杂交互协议适配、完整无障碍验收及正式签名发行。
+
+### 维护 macOS 自动更新
+
+发布工作流通过 `SPARKLE_PRIVATE_KEY` GitHub Actions Secret 签名 DMG 和 appcast，在 Release 资产上传成功后更新 `updates` 分支的 `appcast.xml`。客户端内置公钥，安装前验证更新包和更新源。每次发布必须同时递增 `CFBundleShortVersionString` 和 `CFBundleVersion`；Windows 预览标签不会进入 macOS 更新源。
+
+本地签名工具随 SwiftPM 的 Sparkle 依赖下载，私钥保存在 macOS 登录钥匙串的 `claude-mirror` account 中，不应提交到仓库。请备份签名私钥；丢失后无法给现有安装继续签署可信更新。手动生成更新源：`bash macos/scripts/generate-appcast.sh`。更新源必须在对应安装包可下载后发布，签名后的 XML 不能手工修改。
 
 ## 来源与许可
 

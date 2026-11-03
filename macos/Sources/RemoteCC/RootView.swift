@@ -38,13 +38,12 @@ struct RootView: View {
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            if let update = model.availableUpdate { model.presentUpdate(update) }
-                            else { Task { await model.checkForUpdates(manual: true) } }
+                            Task { await model.checkForUpdates(manual: true) }
                         } label: {
                             HStack(spacing: 6) {
                                 if model.checkingForUpdates { ProgressView().controlSize(.mini) }
                                 else { Image(systemName: model.availableUpdate == nil ? "arrow.triangle.2.circlepath" : "arrow.down.circle.fill") }
-                                Text(model.checkingForUpdates ? "检查中…" : model.availableUpdate.map { "更新至 " + $0.version } ?? "检查更新")
+                                Text(model.checkingForUpdates ? "检查中…" : model.availableUpdate.map { "更新至 " + $0 } ?? "检查更新")
                             }
                         }
                         .disabled(model.checkingForUpdates)
