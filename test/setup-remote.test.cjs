@@ -36,3 +36,19 @@ test('remote setup stops on download failure and preserves broken existing insta
     f.put('claude', 'exit 7'); const result = f.run(); assert.equal(result.status, 1); assert.match(result.stderr, /cannot launch/);
   } finally { f.close(); }
 });
+test('remote setup enables lingering only where logout kills background sessions', () => {
+  const f = fixture(); try {
+    f.put('claude', 'echo fixture-version');
+    const log = path.join(f.home, 'loginctl.log');
+    const loginctl = kill => `echo "$*" >> '${log}'
+case "$1" in show-session) echo ${kill};; show-user) echo no;; enable-linger) exit 0;; esac`;
+    f.put('loginctl', loginctl('no'));
+    let result = f.run(); assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(fs.readFileSync(log, 'utf8'), /enable-linger/);
+    f.put('loginctl', loginctl('yes'));
+    result = f.run(); assert.equal(result.status, 0, result.stderr);
+    assert.match(fs.readFileSync(log, 'utf8'), /enable-linger/); assert.match(result.stdout, /enabled user lingering/);
+    f.put('loginctl', loginctl('yes').replace('enable-linger) exit 0', 'enable-linger) exit 1'));
+    result = f.run(); assert.equal(result.status, 0, result.stderr); assert.match(result.stderr, /sudo loginctl enable-linger/);
+  } finally { f.close(); }
+});

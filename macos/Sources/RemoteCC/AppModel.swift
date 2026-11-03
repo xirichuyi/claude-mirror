@@ -347,6 +347,7 @@ final class AppModel: ObservableObject {
             rememberMachine(config)
             if selectedMachine?.key == config.key { selectedMachine = config; lastConnection = config }
             if info.claude == nil { show("SSH 已连接。远端未找到 Claude Code，仍可查看可用历史。") }
+            else if let warning = info.persistenceWarning { show(warning) }
             await discoverHistory(config)
             await engine.restore(config)
         } catch {

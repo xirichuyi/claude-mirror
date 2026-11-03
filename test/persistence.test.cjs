@@ -120,3 +120,30 @@ test('a hibernated owner resumes only the unsent new turn with the saved Claude 
   assert.equal(session.messages[1].error,undefined);
   delete session.remoteTask; service.runs.clear(); await service.close();
 });
+
+test('owner detection works without /proc, so a reused PID on macOS servers is not mistaken for the worker', () => {
+  const { processCommand } = require('../src/remote-agent.cjs');
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'remotecc-ps-'));
+  try {
+    const ps = path.join(folder, 'ps');
+    fs.writeFileSync(ps, '#!/bin/sh\ncase "$5" in 100) echo "node /x/task-worker.cjs /tasks/a";; 200) exit 1;; *) exit 2;; esac\n', { mode: 0o755 });
+    const options = { procRoot: path.join(folder, 'missing-proc'), ps };
+    assert.match(processCommand(100, options), /task-worker\.cjs \/tasks\/a/);
+    assert.equal(processCommand(200, options), '');
+    assert.equal(processCommand(300, options), null);
+    assert.equal(processCommand(100, { ...options, ps: path.join(folder, 'no-ps') }), null);
+  } finally { fs.rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('workers leave the SSH login through systemd-run only when lingering keeps the user manager alive', () => {
+  const { workerCommand, persistenceWarning } = require('../src/remote-agent.cjs');
+  const [plain, plainArgs] = workerCommand('/b', '/t', { systemdScope: false });
+  assert.equal(plain, process.execPath); assert.deepEqual(plainArgs, ['/b/task-worker.cjs', '/t']);
+  const [scoped, scopedArgs] = workerCommand('/b', '/t', { systemdScope: true });
+  assert.equal(scoped, 'systemd-run');
+  assert.deepEqual(scopedArgs, ['--user', '--scope', '--quiet', '--collect', process.execPath, '/b/task-worker.cjs', '/t']);
+  assert.equal(persistenceWarning({ killUserProcesses: false, systemdScope: false }), null);
+  assert.equal(persistenceWarning({ killUserProcesses: null, systemdScope: false }), null);
+  assert.equal(persistenceWarning({ killUserProcesses: true, systemdScope: true }), null);
+  assert.match(persistenceWarning({ killUserProcesses: true, systemdScope: false }), /loginctl enable-linger/);
+});

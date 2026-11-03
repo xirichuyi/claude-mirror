@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
-const { spawn, execFile } = require('node:child_process');
+const { spawn, execFile, execFileSync } = require('node:child_process');
 
 const HOME = os.homedir();
 const expand = value => value === '~' ? HOME : value.startsWith('~/') ? path.join(HOME, value.slice(2)) : value;
@@ -316,7 +316,7 @@ async function hello() {
   const version = process.versions.node.split('.').map(Number);
   return { home: HOME, hostname: os.hostname(), platform: process.platform, arch: process.arch, node: process.versions.node,
     nodeSupported: version[0] > 18 || (version[0] === 18 && version[1] >= 14), nodePath: process.execPath, agentPath: __filename,
-    claude: located.code ? null : located.stdout.trim() };
+    claude: located.code ? null : located.stdout.trim(), persistenceWarning: persistenceWarning() };
 }
 
 async function attachmentLocation(request) {
@@ -773,8 +773,60 @@ function atomicSync(filename, value) {
 }
 const readSync = filename => { try { return JSON.parse(fs.readFileSync(filename, 'utf8')); } catch { return undefined; } };
 
-function processCommand(pid) {
-  try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'latin1'); } catch { return null; }
+// Returns the command line, '' when the process is gone, or null when it cannot be determined.
+// macOS and the BSDs have no /proc, so ask ps there; otherwise a reused PID after a reboot
+// would be mistaken for the task owner and the task would never finish.
+function processCommand(pid, { procRoot = '/proc', ps = 'ps' } = {}) {
+  try { return fs.readFileSync(`${procRoot}/${pid}/cmdline`, 'latin1'); } catch { /* No /proc: fall through. */ }
+  try {
+    return execFileSync(ps, ['-ww', '-o', 'command=', '-p', String(pid)], { encoding: 'latin1', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch (error) {
+    return error.status === 1 ? '' : null; // ps exits 1 when no such process exists.
+  }
+}
+
+// ---------------------------------------------------------------- session persistence
+// With systemd-logind's KillUserProcesses=yes, every process of an SSH login is killed when it
+// logs out, detached or not. Only a lingering user manager survives that, so when lingering is
+// on, workers are started in their own `systemd-run --user --scope` unit outside the login.
+
+function loginctlValue(args) {
+  try { return execFileSync('loginctl', args, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+  catch { return null; }
+}
+
+let persistenceCache = null;
+function sessionPersistence({ refresh = false } = {}) {
+  if (persistenceCache && !refresh) return persistenceCache;
+  const result = { killUserProcesses: null, linger: null, systemdScope: false };
+  if (process.platform === 'linux') {
+    const kill = loginctlValue(['show-session', '-p', 'KillUserProcesses', '--value']);
+    if (kill === 'yes' || kill === 'no') result.killUserProcesses = kill === 'yes';
+    const user = os.userInfo().username;
+    const linger = loginctlValue(['show-user', user, '-p', 'Linger', '--value']);
+    if (linger === 'yes' || linger === 'no') result.linger = linger === 'yes';
+    else if (fs.existsSync('/var/lib/systemd/linger/' + user)) result.linger = true;
+    if (result.linger) {
+      try {
+        execFileSync('systemd-run', ['--user', '--scope', '--quiet', '--collect', 'true'], { timeout: 5000, stdio: 'ignore' });
+        result.systemdScope = true;
+      } catch { /* No reachable user manager; plain detached workers are the fallback. */ }
+    }
+  }
+  persistenceCache = result;
+  return result;
+}
+
+function persistenceWarning(state = sessionPersistence()) {
+  if (state.killUserProcesses !== true || state.systemdScope) return null;
+  return '此服务器在 SSH 断开时会结束后台会话（systemd KillUserProcesses=yes），断线后回复会中断。'
+    + '在服务器上运行 loginctl enable-linger 后重新连接即可保持。';
+}
+
+function workerCommand(bundle, folder, state = sessionPersistence()) {
+  const worker = [process.execPath, path.join(bundle, 'task-worker.cjs'), folder];
+  // --scope execs the command in place, so the spawned PID is the worker itself.
+  return state.systemdScope ? ['systemd-run', ['--user', '--scope', '--quiet', '--collect', ...worker]] : [worker[0], worker.slice(1)];
 }
 
 function pidAlive(pid) {
@@ -830,7 +882,8 @@ function ensureOwner(folder, bundle) {
   const log = fs.openSync(path.join(folder, 'worker.log'), 'a', 0o600);
   let child;
   try {
-    child = spawn(process.execPath, [path.join(bundle, 'task-worker.cjs'), folder], { detached: true, stdio: ['ignore', log, log] });
+    const [command, args] = workerCommand(bundle, folder);
+    child = spawn(command, args, { detached: true, stdio: ['ignore', log, log] });
   } finally { fs.closeSync(log); }
   child.once('error', error => { fs.appendFileSync(path.join(folder, 'worker.log'), error.message + '\n'); finalizeTask(folder, 127); });
   child.once('exit', code => finalizeTask(folder, code ?? 'signal'));
@@ -1098,4 +1151,5 @@ if (require.main === module) {
   } else serve();
 }
 
-module.exports = { fileOperations, historyOperations, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore };
+module.exports = { fileOperations, historyOperations, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
+  processCommand, persistenceWarning, workerCommand };

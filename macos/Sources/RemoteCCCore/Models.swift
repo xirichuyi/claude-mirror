@@ -357,4 +357,6 @@ public struct ServerInfo: Codable, Hashable, Sendable {
     public var nodePath: String
     public var agentPath: String
     public var claude: String?
+    /// Set when the server kills background sessions on SSH logout (older agents omit it).
+    public var persistenceWarning: String?
 }

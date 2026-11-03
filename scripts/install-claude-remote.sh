@@ -23,5 +23,18 @@ if ! command -v node >/dev/null 2>&1 || ! node -e 'const [a,b]=process.versions.
   echo 'Claude is installed. Claude Mirror additionally needs Node.js >=18.14 on the remote server.' >&2
   exit 3
 fi
+# systemd-logind with KillUserProcesses=yes kills every process of an SSH login when it ends,
+# including Claude Mirror's background sessions. A lingering user manager lets them survive.
+if command -v loginctl >/dev/null 2>&1 && [ "$(loginctl show-session -p KillUserProcesses --value 2>/dev/null)" = yes ]; then
+  user=$(id -un)
+  if [ "$(loginctl show-user "$user" -p Linger --value 2>/dev/null)" = yes ]; then
+    echo 'Background sessions: user lingering already enabled.'
+  elif loginctl enable-linger "$user" 2>/dev/null; then
+    echo "Background sessions: enabled user lingering for $user, so replies continue after SSH disconnects."
+  else
+    echo "Warning: this server ends background sessions when SSH disconnects (KillUserProcesses=yes)." >&2
+    echo "Ask an administrator to run: sudo loginctl enable-linger $user" >&2
+  fi
+fi
 echo 'Ready. If Claude is not authenticated, SSH into this server and run: ~/.local/bin/claude auth login (or claude auth login for an existing PATH installation).'
 echo 'Then connect to the same SSH host in Claude Mirror.'
