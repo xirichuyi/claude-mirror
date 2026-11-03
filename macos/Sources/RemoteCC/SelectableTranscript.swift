@@ -75,7 +75,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
         view.isEditable = false; view.isSelectable = true; view.drawsBackground = false
         view.textContainerInset = .zero; view.textContainer?.lineFragmentPadding = 0
         view.isVerticallyResizable = true; view.isHorizontallyResizable = false
-        view.textContainer?.widthTracksTextView = true
+        view.textContainer?.widthTracksTextView = false
         view.delegate = context.coordinator
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return view
@@ -85,23 +85,35 @@ struct SelectableTranscriptText: NSViewRepresentable {
         view.selectionScope = scope; scope?.register(view)
         guard context.coordinator.source != text else { return }
         context.coordinator.source = text
+        context.coordinator.measuredWidth = nil
         let range = view.selectedRange()
         view.textStorage?.setAttributedString(Self.render(text, markdown: markdown))
         if NSMaxRange(range) <= (view.string as NSString).length { view.setSelectedRange(range) }
         view.invalidateIntrinsicContentSize()
     }
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: TranscriptTextView, context: Context) -> CGSize? {
-        let available = max(1, proposal.width ?? 600)
-        let natural = view.attributedString().boundingRect(with: NSSize(width: available, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading]).width
-        let width = markdown ? available : min(available, ceil(natural) + 2)
+        let proposed = proposal.width ?? 600
+        let available = max(1, proposed.isFinite ? proposed : 600)
+        if context.coordinator.measuredWidth == available { return context.coordinator.measuredSize }
+        let width: CGFloat
+        if markdown { width = available }
+        else {
+            let natural = view.attributedString().boundingRect(with: NSSize(width: available, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading]).width
+            width = min(available, ceil(natural) + 2)
+        }
         view.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         guard let container = view.textContainer, let layout = view.layoutManager else { return nil }
         layout.ensureLayout(for: container)
-        return CGSize(width: width, height: ceil(layout.usedRect(for: container).height) + 2)
+        let size = CGSize(width: width, height: ceil(layout.usedRect(for: container).height) + 2)
+        context.coordinator.measuredWidth = available
+        context.coordinator.measuredSize = size
+        return size
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var source: String?
+        var measuredWidth: CGFloat?
+        var measuredSize: CGSize?
         var open: (URL) -> Void = { _ in }
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             if let url = link as? URL { open(url) }

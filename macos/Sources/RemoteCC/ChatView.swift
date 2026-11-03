@@ -72,13 +72,27 @@ struct MessagesList: View {
     @StateObject private var selection = TranscriptSelection()
     @State private var followsReply = true
     @State private var bottomDistance: CGFloat = 0
+    @State private var contentHeight: CGFloat = 0
+    @State private var visibleMessageLimit = 50
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 18) {
+                    if session.messages.count > visibleMessageLimit {
+                        Button("加载更早消息") {
+                            let anchor = session.messages.suffix(visibleMessageLimit).first?.id
+                            followsReply = false
+                            visibleMessageLimit += 50
+                            Task { @MainActor in
+                                await Task.yield()
+                                if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                            }
+                        }
+                            .font(.caption)
+                    }
                     if session.remoteHistoryRef != nil,
                        session.historyLoaded == false || session.historyBefore != nil || model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil {
                         HistoryNotice(session: session) {
@@ -92,7 +106,7 @@ struct MessagesList: View {
                             }
                         }
                     }
-                    ForEach(Array(session.messages.enumerated()), id: \.element.id) { index, message in
+                    ForEach(Array(session.messages.enumerated().suffix(visibleMessageLimit)), id: \.element.id) { index, message in
                         // Equatable lets unchanged messages skip rendering while the last one streams.
                         MessageRow(message: message, busy: index == session.messages.count - 1 && session.isBusy, sessionStatus: session.status, showHeader: index == 0 || session.messages[index - 1].role != "assistant", actions: FileActions(open: { model.open($0, line: $1) }))
                             .equatable()
@@ -106,20 +120,22 @@ struct MessagesList: View {
                 .frame(maxWidth: .infinity)
                 .background(GeometryReader { content in
                     Color.clear.preference(key: ReplyBottomPreference.self,
-                        value: content.frame(in: .named("replyViewport")).maxY)
+                        value: ReplyGeometry(height: content.size.height, bottom: content.frame(in: .named("replyViewport")).maxY))
                 })
             }
             .defaultScrollAnchor(.bottom)
             .coordinateSpace(name: "replyViewport")
-            .onPreferenceChange(ReplyBottomPreference.self) { bottom in
-                bottomDistance = max(0, bottom - viewport.size.height)
-                if followsReply && bottomDistance > 1 {
-                    // Lazy rows and native text measure after the initial scroll request.
-                    // Re-anchor on the resulting layout, unless the user has started reading.
-                    DispatchQueue.main.async {
-                        if followsReply { proxy.scrollTo("bottom", anchor: .bottom) }
-                    }
-                } else if ReplyScrollPolicy.isNearBottom(Double(bottomDistance)) { followsReply = true }
+            .onPreferenceChange(ReplyBottomPreference.self) { geometry in
+                // Offset changes only update the jump button. Never scroll from an offset
+                // callback: scrolling changes the offset again and creates a layout loop.
+                bottomDistance = max(0, geometry.bottom - viewport.size.height)
+                contentHeight = geometry.height
+            }
+            .task(id: contentHeight) {
+                // Coalesce streamed text and wait for native text measurement to settle.
+                do { try await Task.sleep(for: .milliseconds(40)) } catch { return }
+                guard followsReply else { return }
+                proxy.scrollTo("bottom", anchor: .bottom)
             }
             .background(ScrollReadingDetector { followsReply = false })
             .overlay(alignment: .bottomTrailing) {
@@ -138,15 +154,22 @@ struct MessagesList: View {
             }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             .onChange(of: followsReply) { if followsReply { proxy.scrollTo("bottom", anchor: .bottom) } }
-            .onChange(of: session.messages.last) { if followsReply { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: session.messages.count) { oldCount, newCount in
+                // New replies must not evict the messages the user is reading.
+                visibleMessageLimit += max(0, newCount - oldCount)
+            }
         }
         }
     }
 }
 
+private struct ReplyGeometry: Equatable {
+    var height: CGFloat = 0
+    var bottom: CGFloat = 0
+}
 private struct ReplyBottomPreference: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+    static var defaultValue = ReplyGeometry()
+    static func reduce(value: inout ReplyGeometry, nextValue: () -> ReplyGeometry) { value = nextValue() }
 }
 
 struct HistoryNotice: View {
