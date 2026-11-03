@@ -1,0 +1,32 @@
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>claude-mirror</title>
+        <item>
+            <title>0.21.0</title>
+            <pubDate>Wed, 04 Nov 2026 01:21:13 +0800</pubDate>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>0.21.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# claude-mirror v0.21.0
+
+macOS 现在支持应用内更新。
+
+- 每次启动自动检查新版，右上角也可以随时检查。
+- 在更新窗口中下载、安装并重新启动，不用再手动打开 DMG、拖动替换应用。
+- 更新包和更新源使用 Ed25519 签名，安装前验证。
+- 退出前保存输入框草稿和已上传附件；未保存的文件编辑会提示确认。远端正在执行的任务保持运行。
+
+**首次升级**：v0.20.0 及更早版本仍需手动安装一次本版 DMG；从 v0.21.0 起，后续版本可在应用内更新。
+
+此版本提供 macOS 14+、Apple Silicon 安装包。Windows 原生预览版仍在独立 Release 中，本次没有加入 Windows 自动更新。
+]]></description>
+            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.0/claude-mirror-0.21.0-macOS-arm64.dmg" length="7757028" type="application/octet-stream" sparkle:edSignature="/yUF6ggUWwmTBWXUM7XYw+ca1YnH3IebGrZxLpDNuHCGpEmeT3//qQnvcIQ/k+OdWDiCUWoLiWgpN7tmyU7zAw=="></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: fMTB0HO7C5J36+CrR5Jl3LTTxIqOU06E9KGaAzh/xXkmPmN0ysyUCKIAqVIitycizQ8kOjLm0W11P5ZSLXl+Dw==
+length: 1952
+-->
