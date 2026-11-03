@@ -25,7 +25,7 @@
 
 ### 安装 DMG
 
-1. 从发布页下载 `claude-mirror-0.19.0-macOS-arm64.dmg`。
+1. 从发布页下载 `claude-mirror-0.20.0-macOS-arm64.dmg`。
 2. 打开 DMG，将 **claude-mirror.app** 拖入 **Applications**。
 3. 从应用程序启动「镜像 Claude」，添加 SSH 主机。
 
@@ -156,9 +156,9 @@ sh macos/scripts/build-dmg.sh
 
 ```sh
 # 1. 修改 macos/Resources/Info.plist 中的 CFBundleShortVersionString 和 CFBundleVersion
-# 2. 编写 docs/releases/v0.19.0.md
-git commit -am "Release v0.19.0" && git push origin main
-git tag -a v0.19.0 -m "镜像 Claude v0.19.0" && git push origin v0.19.0
+# 2. 编写 docs/releases/v0.20.0.md
+git commit -am "Release v0.20.0" && git push origin main
+git tag -a v0.20.0 -m "claude-mirror v0.20.0" && git push origin v0.20.0
 ```
 
 CI 构建同样只做 ad-hoc 签名，不经过 Apple 公证。
