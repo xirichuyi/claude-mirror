@@ -20,9 +20,9 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 - 多主机命名，地址/端口/用户名，密码或私钥文件认证；密码仅保存在当前连接过程内存中。
 - 首次确认主机指纹，指纹变更拒绝连接；SSH keepalive。
 - 项目分组、分页同步历史索引、选中后读取消息。
-- 新会话、历史续聊、远端持久任务、停止、工具权限确认。
+- 新会话、历史续聊、远端持久任务、停止、工具权限确认与 AskUserQuestion 回答。
 - 远端模型/命令列表；命令填入输入框，发送后由远端处理。
-- 远端目录浏览，文本/图片预览和下载，选择文件/拖放上传。
+- 远端目录浏览，文本/图片预览和下载，选择文件/拖放上传；附件按内容哈希存入远端缓存，相同内容复用路径。
 - 会话 ID 和远端任务 ID 保存在 LocalAppData/claude-mirror，可在重连选择历史会话时重新订阅。
 
 ## 当前边界
@@ -30,3 +30,9 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 这是独立的 Windows 原生客户端首版，并非 macOS 版全部功能已经移植。当前消息以原生文本控件显示，Markdown 富文本、复杂命令的专用交互卡片、文件编辑/删除、自动重连、SSH config/ProxyJump/agent、反向访问、可视化 usage、自动更新检查尚未移植。私钥需要手动选择，不自动读取 macOS 配置。目录切换请新建会话，运行中的任务仍使用原目录。
 
 原生 Windows 窗口交互须在 Windows 实机验收；macOS 只能验证共享 C# 核心和远端协议。CI 提供 Windows 编译、测试和自包含 x64 ZIP 工件。当前未签名、未提供安装向导，不会覆盖已有 macOS 发布包。
+
+## 验证
+
+核心单元测试覆盖状态增量、乱序保护、Shell 参数引用和本地状态持久化。已通过 `axi` 实测 SSH 连接、历史索引、文件目录、真实 Claude 回复与会话能力读取。Windows CI 另外检查编译和原生窗口 Loaded 事件，再输出 ZIP。
+
+集成测试默认跳过。维护者可以设置 `MIRROR_SMOKE_HOST`、`MIRROR_SMOKE_PORT`、`MIRROR_SMOKE_USER`、`MIRROR_SMOKE_KEY`、`MIRROR_SMOKE_FINGERPRINT` 和 `MIRROR_SMOKE_RESOURCES` 运行只读连接检查；额外设置 `MIRROR_SMOKE_CHAT=1` 会创建一条测试会话，产生一次模型请求，随后关闭测试任务。私钥和真实主机配置不要提交到仓库。
