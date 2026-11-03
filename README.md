@@ -25,7 +25,7 @@
 
 ### 安装 DMG
 
-1. 从发布页下载 `claude-mirror-0.21.0-macOS-arm64.dmg`。
+1. 从发布页下载 `claude-mirror-0.21.1-macOS-arm64.dmg`。
 2. 打开 DMG，将 **claude-mirror.app** 拖入 **Applications**。
 3. 从应用程序启动「镜像 Claude」，添加 SSH 主机。
 
