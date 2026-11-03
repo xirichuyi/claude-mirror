@@ -17,7 +17,8 @@
 | macOS 原生客户端 | SwiftUI / AppKit；macOS 14+，本次提供 Apple Silicon（arm64）DMG |
 | Intel Mac | 可尝试使用对应 Mac 从源码构建；本次不提供已验证的 Intel 安装包 |
 | Electron 客户端 | 仓库保留跨平台实现，可从源码启动；与原生版功能尚未完全一致 |
-| Windows / Linux 本地客户端 | 可尝试 Electron 源码版本；本次未完成这两个系统的发行验收，不提供安装包 |
+| Windows 原生客户端（预览） | C# / WinUI 3，Windows 10 1809+ / Windows 11 x64；[构建与功能范围](windows/README.md)，[下载 CI 工件](https://github.com/xirichuyi/claude-mirror/actions/workflows/windows.yml) |
+| Linux 本地客户端 | 可尝试 Electron 源码版本；未完成发行验收 |
 | 远端服务器 | 通过 SSH 访问；主要验证 Linux。安装脚本支持 Linux、macOS、WSL 的 Linux 环境 |
 
 项目不限定本地操作系统；**当前可以直接下载的正式构建产物是 macOS arm64 版**，不代表其他平台已经完成打包与测试。
@@ -195,7 +196,8 @@ sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
 
 请先阅读仓库 README，再按实际平台操作：
 1. 确认本机平台与架构。Apple Silicon macOS 14+ 优先使用 GitHub Releases
-   的 DMG；其他平台检查 Electron 源码入口，不要假设存在已验证的安装包。
+   的 DMG；Windows x64 查看 windows/README.md 的原生预览版和 CI ZIP；
+   Linux 检查 Electron 源码入口，不要假设存在正式安装包。
 2. 验证 SSH 连通性和主机身份。沿用我的 SSH 配置，不关闭主机指纹验证。
 3. 检查远端 Node.js 和 Claude Code。若 Claude 缺失，运行仓库的
    scripts/setup-remote.sh 连接目标主机并安装；保留已有安装及认证配置。
@@ -297,7 +299,7 @@ scripts/                    构建与端到端验证脚本
 docs/assets/                项目标识
 ```
 
-密码、私钥选择和主机名称等功能属于 **macOS 原生客户端**。旧 Electron 界面尚未同步这些功能。
+密码、私钥选择和主机名称已在 macOS 与 Windows 原生客户端接入。Windows 目前为基础功能预览版；旧 Electron 界面尚未同步这些功能。
 
 连接、刷新历史及重连时会批量检查项目目录。已删除目录不再列为可用项目，其对话保留在“目录已移除 · 历史对话”；发送前再次检查。目录重新创建后刷新即可恢复。离线或权限不足不会直接判定为删除。
 
