@@ -31,7 +31,7 @@ public sealed class MainWindow : Window
     private string? taskKey;
     private bool busy;
     private TextBlock? reply;
-    private JsonObject? latest;
+    private readonly SemaphoreSlim permissionLock = new(1);
     private readonly HashSet<string> approvalDialogs = [];
     private sealed record ModelChoice(string Value, string Label);
     private static SolidColorBrush Brush(byte r, byte g, byte b) => new(Windows.UI.Color.FromArgb(255, r, g, b));
@@ -122,11 +122,11 @@ public sealed class MainWindow : Window
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? address.Text.Trim() : name.Text.Trim(), address.Text.Trim(), (int)port.Value, user.Text.Trim(), mode.SelectedIndex == 1 ? key.Text : null);
         agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…";
-        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => { status.Text = error; busy = false; });
+        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => { if (agent == next) { status.Text = error; busy = false; } });
         try { await next.ConnectAsync(profile, password.Password, phrase.Password, Path.Combine(AppContext.BaseDirectory, "server"), fingerprint => ConfirmHostAsync(profile, fingerprint)); }
         catch { next.Dispose(); throw; }
         finally { password.Password = ""; phrase.Password = ""; }
-        host = profile; local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(profile)); local.Hosts.Add(profile); local.Save();
+        busy = false; host = profile; local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(profile)); local.Hosts.Add(profile); local.Save();
         hosts.ItemsSource = local.Hosts.ToList(); hosts.SelectedItem = profile; directory.Text = next.Home;
         await NewConversationAsync(); await RefreshHistoryAsync(); status.Text = "已连接";
     }
@@ -208,11 +208,11 @@ public sealed class MainWindow : Window
     private Task WatchCurrentAsync()
     {
         var watched = taskId!;
-        return RequireAgent().WatchAsync(watched, state => { if (taskId == watched) OnState(state); });
+        return RequireAgent().WatchAsync(watched, state => OnState(watched, state));
     }
-    private void OnState(JsonObject state) => DispatcherQueue.TryEnqueue(async () =>
+    private void OnState(string watched, JsonObject state) => DispatcherQueue.TryEnqueue(async () =>
     {
-        latest = state; reply ??= AddMessage(""); reply.Text = Protocol.MessageText(state["message"]);
+        if (taskId != watched) return; reply ??= AddMessage(""); reply.Text = Protocol.MessageText(state["message"]);
         if (state["message"]?["error"] is not null) reply.Text += "\n" + state["message"]!["error"]!.GetValue<string>();
         var value = state["status"]?.GetValue<string>(); busy = value is "working" or "connecting" or "permission";
         status.Text = busy ? "正在回复" : "就绪";
@@ -220,14 +220,48 @@ public sealed class MainWindow : Window
         foreach (var permission in state["permissions"]?.AsArray() ?? [])
         {
             var id = permission!["id"]!.GetValue<string>(); if (!approvalDialogs.Add(id)) continue;
-            await RunAsync(async () =>
-            {
-                var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = "Claude 请求授权", Content = new ScrollViewer { Content = new TextBlock { Text = permission.ToJsonString(new() { WriteIndented = true }), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true }, MaxHeight = 400 }, PrimaryButtonText = "允许本次", CloseButtonText = "拒绝" };
-                var allow = await dialog.ShowAsync() == ContentDialogResult.Primary;
-                await RequireAgent().TaskCommandAsync(taskId!, new { kind = "respond", permissionId = id, answer = new { allow } });
-            });
+            await RunAsync(() => RequestPermissionAsync(watched, permission, id));
         }
     });
+    private async Task RequestPermissionAsync(string watched, JsonNode permission, string id)
+    {
+        await permissionLock.WaitAsync();
+        try
+        {
+            if (taskId != watched) return;
+            var fields = new Dictionary<string, TextBox>();
+            var panel = new StackPanel { Spacing = 12 };
+            var elicitation = permission["kind"]?.GetValue<string>() == "elicitation";
+            if (permission["name"]?.GetValue<string>() == "AskUserQuestion")
+            {
+                foreach (var question in permission["input"]?["questions"]?.AsArray() ?? [])
+                {
+                    var label = question!["question"]!.GetValue<string>();
+                    var field = new TextBox { Header = label, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
+                    var options = question["options"]?.AsArray().Select(option => option?["label"]?.GetValue<string>()).ToArray();
+                    if (options?.Length > 0) panel.Children.Add(new TextBlock { Text = string.Join(" / ", options), TextWrapping = TextWrapping.Wrap });
+                    fields[label] = field; panel.Children.Add(field);
+                }
+            }
+            else panel.Children.Add(new TextBlock { Text = permission.ToJsonString(new() { WriteIndented = true }), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+            var dialog = new ContentDialog
+            {
+                XamlRoot = root.XamlRoot, Title = elicitation ? "此交互暂未支持" : fields.Count > 0 ? "Claude 的问题" : "Claude 请求授权",
+                Content = new ScrollViewer { Content = panel, MaxHeight = 400 },
+                PrimaryButtonText = elicitation ? "" : fields.Count > 0 ? "提交" : "允许本次", CloseButtonText = "取消"
+            };
+            dialog.PrimaryButtonClick += (_, e) =>
+            {
+                if (fields.Values.Any(field => string.IsNullOrWhiteSpace(field.Text))) e.Cancel = true;
+            };
+            var allow = await dialog.ShowAsync() == ContentDialogResult.Primary;
+            if (taskId != watched) return;
+            object answer = elicitation ? new { interaction = new { action = "cancel" } } :
+                new { allow, answers = fields.ToDictionary(pair => pair.Key, pair => pair.Value.Text) };
+            await RequireAgent().TaskCommandAsync(watched, new { kind = "respond", permissionId = id, answer });
+        }
+        finally { permissionLock.Release(); }
+    }
     private async Task StopAsync() { if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
     private async Task<string?> PickAsync()
     {
@@ -240,7 +274,7 @@ public sealed class MainWindow : Window
     {
         var remote = RequireAgent(); var path = new TextBox { Text = directory.Text }; var entries = new StackPanel { Spacing = 4 };
         var panel = new StackPanel { Spacing = 12 }; panel.Children.Add(path); panel.Children.Add(new ScrollViewer { Content = entries, MaxHeight = 400 });
-        ContentDialog? browser = null;
+        ContentDialog? browser = null; string? previewPath = null;
         async Task Load()
         {
             var result = await remote.CallAsync("file", new { operation = "list", path = path.Text, @base = directory.Text });
@@ -251,13 +285,17 @@ public sealed class MainWindow : Window
                 var item = entry!.DeepClone(); entries.Children.Add(Button(item["name"]!.GetValue<string>(), async () =>
                 {
                     if (item["directory"]?.GetValue<bool>() == true || item["type"]?.GetValue<string>() == "directory") { path.Text = item["path"]!.GetValue<string>(); await Load(); }
-                    else { browser!.Hide(); await PreviewAsync(item["path"]!.GetValue<string>()); }
+                    else { previewPath = item["path"]!.GetValue<string>(); browser!.Hide(); }
                 }));
             }
         }
         panel.Children.Add(Button("前往", Load)); await Load();
         browser = new ContentDialog { XamlRoot = root.XamlRoot, Title = "远端文件", Content = panel, PrimaryButtonText = "设为工作目录", CloseButtonText = "关闭" };
-        if (await browser.ShowAsync() == ContentDialogResult.Primary) directory.Text = path.Text;
+        if (await browser.ShowAsync() == ContentDialogResult.Primary)
+        {
+            await NewConversationAsync(); directory.Text = path.Text; await RefreshCapabilitiesAsync();
+        }
+        if (previewPath is not null) await PreviewAsync(previewPath);
     }
     private async Task PreviewAsync(string path)
     {

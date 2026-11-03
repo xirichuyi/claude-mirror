@@ -123,7 +123,13 @@ public sealed class RemoteAgent : IDisposable
         };
         await CallAsync("taskWatch", new { taskId = task, subscription });
     }
-    public Task<JsonNode> TaskCommandAsync(string task, object value) => CallAsync("task", new { operation = "command", taskId = task, commandId = Guid.NewGuid().ToString(), command = value, wait = true });
+    public async Task<JsonNode> TaskCommandAsync(string task, object value)
+    {
+        var result = await CallAsync("task", new { operation = "command", taskId = task, commandId = Guid.NewGuid().ToString(), command = value, wait = true });
+        if (result["ok"]?.GetValue<bool>() == false)
+            throw new IOException(result["error"]?.GetValue<string>() ?? "远端操作失败");
+        return result;
+    }
     public async Task DownloadAsync(string remotePath, string localPath)
     {
         using var download = ssh!.CreateCommand("cat -- " + Protocol.Quote(remotePath));
@@ -138,7 +144,13 @@ public sealed class RemoteAgent : IDisposable
         var hash = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(file)).ToLowerInvariant(); file.Position = 0;
         var folder = Home + "/.cache/claude-mirror/attachments/" + hash;
         var remote = folder + "/" + Path.GetFileName(localPath);
-        using var upload = ssh!.CreateCommand("mkdir -p " + Protocol.Quote(folder) + " && chmod 700 " + Protocol.Quote(folder) + " && cat > " + Protocol.Quote(remote + ".tmp") + " && chmod 600 " + Protocol.Quote(remote + ".tmp") + " && mv " + Protocol.Quote(remote + ".tmp") + " " + Protocol.Quote(remote));
+        using (var existing = ssh!.CreateCommand("test -f " + Protocol.Quote(remote)))
+        {
+            await existing.ExecuteAsync(lifetime.Token);
+            if (existing.ExitStatus == 0) return remote;
+        }
+        var temporary = remote + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        using var upload = ssh!.CreateCommand("mkdir -p " + Protocol.Quote(folder) + " && chmod 700 " + Protocol.Quote(folder) + " && cat > " + Protocol.Quote(temporary) + " && chmod 600 " + Protocol.Quote(temporary) + " && mv " + Protocol.Quote(temporary) + " " + Protocol.Quote(remote));
         var executing = upload.ExecuteAsync(lifetime.Token);
         using (var input = upload.CreateInputStream()) await file.CopyToAsync(input, lifetime.Token);
         await executing;

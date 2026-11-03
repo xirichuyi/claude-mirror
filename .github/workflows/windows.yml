@@ -25,6 +25,15 @@ jobs:
       - run: node macos/scripts/prepare-server.cjs windows/Resources/server
       - run: dotnet test windows/ClaudeMirror.Tests -c Release
       - run: dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o windows/dist/claude-mirror
+      - name: Verify native window starts
+        shell: pwsh
+        run: |
+          $marker = Join-Path $env:TEMP 'claude-mirror-smoke.txt'
+          Remove-Item $marker -ErrorAction SilentlyContinue
+          $app = Start-Process windows/dist/claude-mirror/claude-mirror.exe -ArgumentList '--smoke-test' -PassThru
+          if (-not $app.WaitForExit(30000)) { $app.Kill(); throw 'WinUI startup timed out' }
+          if ($app.ExitCode -ne 0 -or -not (Test-Path $marker)) { throw "WinUI startup failed: $($app.ExitCode)" }
+          Get-Content $marker
       - name: Package portable Windows client
         shell: pwsh
         run: |
