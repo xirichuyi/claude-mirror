@@ -186,6 +186,8 @@ public sealed class MainWindow : Window
     private async Task SendAsync()
     {
         if (busy || string.IsNullOrWhiteSpace(prompt.Text)) return;
+        if (conversation is not null && directory.Text != conversation.Directory)
+            throw new IOException("切换工作目录请新建对话");
         var remote = RequireAgent(); var text = prompt.Text; prompt.Text = ""; busy = true; AddMessage(text, true); reply = AddMessage("正在回复…");
         var message = new { id = Guid.NewGuid().ToString(), role = "assistant", blocks = Array.Empty<object>() };
         try
@@ -214,9 +216,19 @@ public sealed class MainWindow : Window
     {
         if (taskId != watched) return; reply ??= AddMessage(""); reply.Text = Protocol.MessageText(state["message"]);
         if (state["message"]?["error"] is not null) reply.Text += "\n" + state["message"]!["error"]!.GetValue<string>();
-        var value = state["status"]?.GetValue<string>(); busy = value is "working" or "connecting" or "permission";
+        var value = state["status"]?.GetValue<string>(); busy = value is "working" or "connecting" or "permission" or "stopping";
         status.Text = busy ? "正在回复" : "就绪";
-        if (state["remoteSessionId"] is JsonValue session && taskId is not null) { local.Tasks[LocalState.HostKey(host!) + "|" + session.GetValue<string>()] = taskId; local.Save(); }
+        if (state["remoteSessionId"] is JsonValue session && taskId is not null)
+        {
+            var sessionId = session.GetValue<string>();
+            conversation = new Conversation(conversation?.Name ?? "Windows 对话", directory.Text, sessionId, conversation?.Reference);
+            local.Tasks[LocalState.HostKey(host!) + "|" + sessionId] = taskId; local.Save();
+        }
+        if (state["done"]?.GetValue<bool>() == true)
+        {
+            foreach (var key in local.Tasks.Where(pair => pair.Value == watched).Select(pair => pair.Key).ToList()) local.Tasks.Remove(key);
+            local.Save(); taskId = null; busy = false;
+        }
         foreach (var permission in state["permissions"]?.AsArray() ?? [])
         {
             var id = permission!["id"]!.GetValue<string>(); if (!approvalDialogs.Add(id)) continue;

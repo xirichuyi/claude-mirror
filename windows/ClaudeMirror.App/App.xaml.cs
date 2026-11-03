@@ -7,7 +7,7 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         window = new MainWindow();
-        if (args.Arguments == "--smoke-test" && window.Content is FrameworkElement root)
+        if (Environment.GetCommandLineArgs().Contains("--smoke-test") && window.Content is FrameworkElement root)
         {
             root.Loaded += (_, _) =>
             {
