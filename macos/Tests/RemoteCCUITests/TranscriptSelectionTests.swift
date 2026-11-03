@@ -14,6 +14,12 @@ final class TranscriptSelectionTests: XCTestCase {
         var links = 0
         text.enumerateAttribute(.link, in: NSRange(location: 0, length: text.length)) { value, _, _ in if value != nil { links += 1 } }
         XCTAssertEqual(links, 1)
+        var tableCells = 0
+        text.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+            if let style = value as? NSParagraphStyle, !style.textBlocks.isEmpty { tableCells += 1 }
+        }
+        XCTAssertGreaterThanOrEqual(tableCells, 4)
+        XCTAssertTrue(SelectableTranscriptText.html("| a | b |\n| --- | --- |\n| c | d |").contains("<td>c</td>"))
     }
     @MainActor func testSelectionCopiesAcrossMessageViewsInVisualOrder() {
         _ = NSApplication.shared

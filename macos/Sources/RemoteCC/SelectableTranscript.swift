@@ -1,7 +1,8 @@
 #if canImport(AppKit)
 import AppKit
 import SwiftUI
-import MarkdownUI
+import cmark_gfm
+import cmark_gfm_extensions
 import RemoteCCCore
 
 /// One selection scope per conversation; text stays native and tool controls remain interactive.
@@ -108,6 +109,21 @@ struct SelectableTranscriptText: NSViewRepresentable {
             return true
         }
     }
+    static func html(_ text: String) -> String {
+        cmark_gfm_core_extensions_ensure_registered()
+        guard let parser = cmark_parser_new(CMARK_OPT_DEFAULT) else { return "" }
+        defer { cmark_parser_free(parser) }
+        for name in ["autolink", "strikethrough", "tagfilter", "tasklist", "table"] {
+            if let ext = cmark_find_syntax_extension(name) { cmark_parser_attach_syntax_extension(parser, ext) }
+        }
+        cmark_parser_feed(parser, text, text.utf8.count)
+        guard let document = cmark_parser_finish(parser) else { return "" }
+        defer { cmark_node_free(document) }
+        guard let result = cmark_render_html(document, CMARK_OPT_DEFAULT, cmark_parser_get_syntax_extensions(parser)) else { return "" }
+        defer { free(result) }
+        return String(cString: result)
+    }
+
     private static let renderedCache: NSCache<NSString, NSAttributedString> = {
         let cache = NSCache<NSString, NSAttributedString>()
         cache.totalCostLimit = 4 * 1024 * 1024; cache.countLimit = 64
@@ -116,9 +132,9 @@ struct SelectableTranscriptText: NSViewRepresentable {
     static func render(_ text: String, markdown: Bool) -> NSAttributedString {
         guard markdown else { return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor(WorkbenchTheme.ink)]) }
         if let cached = renderedCache.object(forKey: text as NSString) { return cached }
-        // MarkdownUI's safe HTML renderer omits raw HTML. No remote resources are loaded
+        // cmark's safe HTML renderer omits raw HTML. No remote resources are loaded
         // by the native HTML importer: inline images become clickable text instead.
-        let body = MarkdownContent(RemoteFileLinks.markdown(text)).renderHTML()
+        let body = Self.html(RemoteFileLinks.markdown(text))
             .replacingOccurrences(of: #"<img[^>]*src="([^"]*)"[^>]*>"#, with: #"<a href="$1">[图片]</a>"#, options: .regularExpression)
             .replacingOccurrences(of: #"href="((?![a-zA-Z][a-zA-Z0-9+.-]*:|#)[^"]+)""#, with: #"href="rcc-file:$1""#, options: .regularExpression)
         let html = """
