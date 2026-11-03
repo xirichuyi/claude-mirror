@@ -21,3 +21,9 @@ macos/Resources/AppIcon.iconset/
 auth.json
 *.pem
 *.key
+
+# Windows native build outputs
+windows/**/bin/
+windows/**/obj/
+windows/Resources/server/
+windows/dist/

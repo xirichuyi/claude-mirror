@@ -1,0 +1,37 @@
+name: Windows native
+on:
+  push:
+    paths: ['windows/**', 'src/**', '.github/workflows/windows.yml', 'macos/scripts/prepare-server.cjs', 'package-lock.json']
+  pull_request:
+    paths: ['windows/**', 'src/**', '.github/workflows/windows.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - run: node macos/scripts/prepare-server.cjs windows/Resources/server
+      - run: dotnet test windows/ClaudeMirror.Tests -c Release
+      - run: dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o windows/dist/claude-mirror
+      - name: Package portable Windows client
+        shell: pwsh
+        run: |
+          Compress-Archive -Path windows/dist/claude-mirror/* -DestinationPath windows/dist/claude-mirror-windows-x64.zip
+          (Get-FileHash windows/dist/claude-mirror-windows-x64.zip -Algorithm SHA256).Hash | Set-Content windows/dist/claude-mirror-windows-x64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-mirror-windows-x64
+          path: windows/dist/*.zip*
+          if-no-files-found: error
