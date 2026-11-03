@@ -4,29 +4,29 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>claude-mirror</title>
         <item>
-            <title>0.21.0</title>
-            <pubDate>Wed, 04 Nov 2026 01:21:13 +0800</pubDate>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>0.21.0</sparkle:shortVersionString>
+            <title>0.21.1</title>
+            <pubDate>Wed, 04 Nov 2026 01:51:38 +0800</pubDate>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>0.21.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# claude-mirror v0.21.0
+            <description sparkle:format="markdown"><![CDATA[# claude-mirror v0.21.1
 
-macOS 现在支持应用内更新。
+修复 macOS 聊天区域反复白屏、滚动卡顿的问题。
 
-- 每次启动自动检查新版，右上角也可以随时检查。
-- 在更新窗口中下载、安装并重新启动，不用再手动打开 DMG、拖动替换应用。
-- 更新包和更新源使用 Ed25519 签名，安装前验证。
-- 退出前保存输入框草稿和已上传附件；未保存的文件编辑会提示确认。远端正在执行的任务保持运行。
+- 调整长会话布局，避免动态消息高度导致正文区域突然变空。
+- 移除滚动位置变化反复触发自动滚动的反馈循环。
+- 缓存文本高度，减少重复排版；历史消息分批显示。
+- 保留跨段落复制、文件链接和表格显示。
 
-**首次升级**：v0.20.0 及更早版本仍需手动安装一次本版 DMG；从 v0.21.0 起，后续版本可在应用内更新。
+已在此前出现白屏的会话中验证滚动、调整聊天区宽度和返回最新消息。Swift 测试通过，8 项依赖特定环境的测试跳过。
 
-此版本提供 macOS 14+、Apple Silicon 安装包。Windows 原生预览版仍在独立 Release 中，本次没有加入 Windows 自动更新。
+macOS 14+，Apple Silicon。v0.21.0 用户可通过右上角“检查更新”直接安装；更早版本请下载 DMG 安装。
 ]]></description>
-            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.0/claude-mirror-0.21.0-macOS-arm64.dmg" length="7757028" type="application/octet-stream" sparkle:edSignature="/yUF6ggUWwmTBWXUM7XYw+ca1YnH3IebGrZxLpDNuHCGpEmeT3//qQnvcIQ/k+OdWDiCUWoLiWgpN7tmyU7zAw=="></enclosure>
+            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.1/claude-mirror-0.21.1-macOS-arm64.dmg" length="7768887" type="application/octet-stream" sparkle:edSignature="j/RHZOG/KrzqGtTwmTH3lKjKm7hAPCBnJknscWwTbI67HXpsDQXMOmYeCGkZCL6iK4bLvC7Ycgg5+r9tO+96AA=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: fMTB0HO7C5J36+CrR5Jl3LTTxIqOU06E9KGaAzh/xXkmPmN0ysyUCKIAqVIitycizQ8kOjLm0W11P5ZSLXl+Dw==
-length: 1952
+edSignature: QpS69ixgeb2WkZqYh6khAj7ZeM3dndhTo1wNUFaMpmxsEDyWaT7B2WmlO08KLFB26EQWBEFnGAdYpD5bpbJjDQ==
+length: 1893
 -->
