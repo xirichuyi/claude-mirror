@@ -2,7 +2,7 @@
   #define Payload "..\dist\claude-mirror"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.21.1"
+  #error Pass AppVersion via windows/build-installer.ps1
 #endif
 [Setup]
 AppId={{7A069CA4-F0B5-4503-935E-48C6EF2CC5B7}
@@ -40,3 +40,17 @@ Name: "{userprograms}\Claude Mirror"; Filename: "{app}\claude-mirror.exe"; Worki
 
 [Run]
 Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,Claude Mirror}"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"; Flags: nowait; Check: IsUpdateRestart
+
+[Code]
+function IsUpdateRestart: Boolean;
+var I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/UPDATEANDRESTART') = 0 then
+    begin
+      Result := WizardSilent;
+      Exit;
+    end;
+end;

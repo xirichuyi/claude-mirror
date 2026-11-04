@@ -17,7 +17,7 @@
 | macOS 原生客户端 | SwiftUI / AppKit；macOS 14+，本次提供 Apple Silicon（arm64）DMG |
 | Intel Mac | 可尝试使用对应 Mac 从源码构建；本次不提供已验证的 Intel 安装包 |
 | Electron 客户端 | 仓库保留跨平台实现，可从源码启动；与原生版功能尚未完全一致 |
-| Windows 原生客户端（预览） | C# / WinUI 3，Windows 10 1809+ / Windows 11 x64；[下载 Windows 安装程序](https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.1-windows.1/Claude-Mirror-Setup-x64.exe)，双击即可安装；[使用与构建说明](windows/README.md)，[下载 CI 工件](https://github.com/xirichuyi/claude-mirror/actions/workflows/windows.yml) |
+| Windows 原生客户端（预览） | C# / WinUI 3，Windows 10 1809+ / Windows 11 x64；从[统一稳定发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载 `Claude-Mirror-Setup-x64.exe`；首次统一发布之前使用 [Windows 首发安装包](https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.1-windows.1/Claude-Mirror-Setup-x64.exe)；[使用与构建说明](windows/README.md)，[下载 CI 工件](https://github.com/xirichuyi/claude-mirror/actions/workflows/windows.yml) |
 | Linux 本地客户端 | 可尝试 Electron 源码版本；未完成发行验收 |
 | 远端服务器 | 通过 SSH 访问；主要验证 Linux。安装脚本支持 Linux、macOS、WSL 的 Linux 环境 |
 
@@ -327,6 +327,15 @@ npm test
 真实 SSH / 模型测试需显式配置测试主机，见 [macOS 开发与验收记录](macos/README.md)。记录中的测试结果属于对应提交和环境；不能据此认定所有新认证方式、所有服务器或所有 Claude 版本都已通过验收。
 
 后续重点：密码认证的更多服务器兼容性、认证失败后的引导、复杂交互协议适配、完整无障碍验收及正式签名发行。
+
+### 发布一个稳定版本
+
+1. 在 `macos/Resources/Info.plist` 更新产品版本（两端共用），并递增 Sparkle build number。在 `docs/releases/vX.Y.Z.md` 写一份更新说明，分别标注 Windows 和 macOS 的变化。只有单平台改动时也使用统一补丁版本。
+2. 维护者可先在 GitHub Actions 手动运行 **Stable release**，保留默认的 rehearsal 选项。在指定源码上执行两端构建、签名和校验，产物仅出现在 Actions，不会创建 Release 或变更更新源。
+3. 从已验证的提交创建并推送 `vX.Y.Z` 标签。工作流从同一提交分别构建 Windows 和 macOS；两端通过后，将 EXE、DMG、便携 ZIP、摘要和更新元数据上传到同一个草稿，逐项核验 GitHub 摘要，然后公开并设为 Latest。Sparkle 的稳定更新源在发布成功后更新。
+4. 失败时修复原因并重试。已公开的附件不允许替换；若只是发布更新源失败，重试沿用已公开的原始字节。带平台后缀的历史标签不参与稳定发布。
+
+Windows 新客户端启动时在后台检查同一稳定版本，也可从“更多操作 → 检查更新”手动检查。下载完成后选择“重启更新”。Windows 首发版用户须手动安装首个包含更新器的统一版本一次。
 
 ### 维护 macOS 自动更新
 

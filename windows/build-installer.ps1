@@ -1,9 +1,13 @@
 param(
     [string]$PublishDir = (Join-Path $PSScriptRoot 'dist/claude-mirror'),
-    [string]$Version = '0.21.1',
+    [string]$Version,
     [string]$OutputDir = (Join-Path $PSScriptRoot 'dist')
 )
 $ErrorActionPreference = 'Stop'
+if (!$Version) {
+    [xml]$plist = Get-Content (Join-Path $PSScriptRoot '../macos/Resources/Info.plist') -Raw
+    $Version = $plist.SelectSingleNode('//key[text()="CFBundleShortVersionString"]/following-sibling::string[1]').InnerText
+}
 if ($Version -notmatch '^\d+(\.\d+){1,3}$') { throw "Invalid installer version: $Version" }
 $payload = (Resolve-Path -LiteralPath $PublishDir).Path
 foreach ($asset in 'claude-mirror.exe','claude-mirror.pri','App.xbf','server/manifest.json','server/remote-agent.cjs') {

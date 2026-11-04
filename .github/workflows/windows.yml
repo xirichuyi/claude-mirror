@@ -31,7 +31,15 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: node macos/scripts/prepare-server.cjs windows/Resources/server
       - run: dotnet test windows/ClaudeMirror.Tests -c Release
-      - run: dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o windows/dist/claude-mirror
+      - name: Read shared product version
+        id: product
+        shell: pwsh
+        run: |
+          [xml]$plist = Get-Content macos/Resources/Info.plist -Raw
+          $version = $plist.SelectSingleNode('//key[text()="CFBundleShortVersionString"]/following-sibling::string[1]').InnerText
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid product version: $version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - run: dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -p:Version=${{ steps.product.outputs.version }} -o windows/dist/claude-mirror
       - name: Verify native window starts
         shell: pwsh
         run: |
@@ -51,11 +59,7 @@ jobs:
           (Get-FileHash windows/dist/claude-mirror-windows-x64.zip -Algorithm SHA256).Hash | Set-Content windows/dist/claude-mirror-windows-x64.zip.sha256
       - name: Build Windows installer
         shell: pwsh
-        env:
-          RELEASE_REVISION: ${{ inputs.revision }}
-        run: |
-          $version = if ($env:RELEASE_REVISION -match '^v(\d+\.\d+\.\d+)$') { $Matches[1] } else { '0.21.1' }
-          ./windows/build-installer.ps1 -Version $version
+        run: ./windows/build-installer.ps1 -Version "${{ steps.product.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: claude-mirror-windows-installer

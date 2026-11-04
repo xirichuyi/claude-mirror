@@ -27,6 +27,7 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: npm test
+      - run: python3 scripts/test-stable-release.py
 
   macos:
     name: macOS tests and DMG

@@ -4,7 +4,7 @@ C# / WinUI 3 客户端，不使用 Electron 或 WebView。SSH.NET 负责连接�
 
 ## 构建
 
-Windows 用户运行发行附件 `Claude-Mirror-Setup-x64.exe`，按提示完成安装。从开始菜单打开 **Claude Mirror**。再次运行新版安装包即可更新；卸载入口在 Windows 设置的“已安装的应用”中。程序按当前用户安装，已有便携版的主机配置仍可使用。
+Windows 用户运行发行附件 `Claude-Mirror-Setup-x64.exe`，按提示完成安装。从开始菜单打开 **Claude Mirror**。支持应用内更新的版本会在启动时后台检查并下载稳定版本，可在“更多操作”中手动检查，或在下载完成后选择“重启更新”。Windows 首发版需手动运行首个带更新器的安装包一次；卸载入口在 Windows 设置的“已安装的应用”中。程序按当前用户安装，已有便携版的主机配置仍可使用。
 
 Windows 10 1809+ / Windows 11，安装 .NET 9 SDK 和 Visual Studio 的 Windows 应用开发组件；构建机另需 Node.js 22。
 
@@ -15,7 +15,7 @@ dotnet test windows/ClaudeMirror.Tests -c Release
 dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o windows/dist/claude-mirror
 ```
 
-构建机安装 Inno Setup 6 后执行 `./windows/build-installer.ps1 -Version 0.21.1`，生成自包含安装程序。也可保留完整发布目录以便携方式运行。本机用户无需安装 .NET、Node.js 或 Claude；远端需要 Linux/macOS、SSH、Node.js 18.14+ 及已认证的 Claude Code。
+构建机安装 Inno Setup 6 后执行 `./windows/build-installer.ps1`，生成自包含安装程序。也可保留完整发布目录以便携方式运行。本机用户无需安装 .NET、Node.js 或 Claude；远端需要 Linux/macOS、SSH、Node.js 18.14+ 及已认证的 Claude Code。
 
 ## 已接入
 
@@ -31,7 +31,7 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 
 聊天和 Markdown 文件共用原生渲染器，支持标题、引用、表格、列表、任务标记、链接、行内代码和带语言名的围栏代码块。打开“远端文件”，选择文本文件即可在聊天右侧打开标签。使用“编辑”和 Ctrl+S 保存；保存遇到版本冲突时保留草稿。完整预览和编辑上限为 1 MB，窄窗口可用“返回对话”切换。
 
-复杂命令的专用交互卡片、文件删除、自动重连、SSH config/ProxyJump/agent、反向访问、可视化 usage 和应用内自动更新尚未移植。私钥需要手动选择，不自动读取 macOS 配置。目录切换请新建会话，运行中的任务仍使用原目录。
+复杂命令的专用交互卡片、文件删除、自动重连、SSH config/ProxyJump/agent、反向访问和可视化 usage 尚未移植。私钥需要手动选择，不自动读取 macOS 配置。目录切换请新建会话，运行中的任务仍使用原目录。
 
 原生 Windows 窗口交互须在 Windows 实机验收；macOS 只能验证共享 C# 核心和远端协议。CI 提供 Windows 编译、测试和自包含 x64 ZIP 工件。安装程序和客户端当前均未签名。
 

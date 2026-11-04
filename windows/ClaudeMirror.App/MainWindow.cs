@@ -47,6 +47,7 @@ public sealed partial class MainWindow : Window
         prompt.DragOver += (_, e) => { if (e.DataView.Contains(StandardDataFormats.StorageItems)) e.AcceptedOperation = DataPackageOperation.Copy; };
         prompt.Drop += async (_, e) => await RunAsync(async () => { foreach (var file in await e.DataView.GetStorageItemsAsync()) if (file is Windows.Storage.StorageFile) await AttachAsync(file.Path); });
         Closed += (_, _) => agent?.Dispose();
+        StartCheckingUpdates();
         RefreshWorkbench();
     }
     private static StackPanel Row(params UIElement[] items)

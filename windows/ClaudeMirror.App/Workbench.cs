@@ -161,7 +161,7 @@ public sealed partial class MainWindow
         title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold; title.Foreground = ink; title.TextTrimming = TextTrimming.CharacterEllipsis;
         subtitle.FontSize = 12; subtitle.Foreground = muted; subtitle.TextTrimming = TextTrimming.CharacterEllipsis;
         headings.Children.Add(title); headings.Children.Add(subtitle); Grid.SetColumn(headings,1); bar.Children.Add(headings);
-        var update = ActionButton("查看发布版本","\uE895",() => Launcher.LaunchUriAsync(new Uri("https://github.com/xirichuyi/claude-mirror/releases")).AsTask());
+        var update = ActionButton("检查更新","\uE895",()=>CheckUpdatesAsync(true),true);
         At(area,bar,0);
         scroll.MaxWidth = 800; scroll.HorizontalAlignment = HorizontalAlignment.Stretch;
         scroll.HorizontalContentAlignment = HorizontalAlignment.Stretch; scroll.HorizontalScrollMode = ScrollMode.Disabled;
@@ -207,7 +207,9 @@ public sealed partial class MainWindow
         var editors = ActionButton("切换文件编辑器","\uE8A5",()=>{ if(openFiles.Count==0)return BrowseAsync(); showEditor=!showEditor;LayoutSplit();return Task.CompletedTask; });
         var more=ActionButton("更多操作","\uE712",()=>Task.CompletedTask);
         more.Flyout=new Flyout { Content=new StackPanel {Children={project,editors,update}} };
-        var headerActions = Row(files,more);
+        restartButton=ActionButton("重启更新","\uE895",InstallUpdateAsync,true);
+        restartButton.Visibility=Visibility.Collapsed;
+        var headerActions = Row(restartButton,files,more);
         Grid.SetColumn(headerActions,2); bar.Children.Add(headerActions);
         directory.TextChanged += (_,_) => UpdateSubtitle();
         prompt.TextChanged += (_,_) => {UpdateActions();ShowSuggestions();};

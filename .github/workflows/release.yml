@@ -1,56 +1,61 @@
-name: Release
-
+name: Stable release
 on:
   push:
-    tags: ['v*']
+    tags: ['v[0-9]*.[0-9]*.[0-9]*', '!v*-*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to rebuild and upload, for example v0.17.0
-        required: true
+        description: Existing stable tag (vMAJOR.MINOR.PATCH)
+        required: false
+      rehearsal:
+        description: Test both builds and signed assets without publishing (uses selected ref)
+        type: boolean
+        default: true
 
 permissions:
-  contents: write
-
-concurrency:
-  group: release-macos
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  windows:
-    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
-    uses: ./.github/workflows/windows.yml
-    with:
-      revision: ${{ inputs.tag || github.ref_name }}
-  publish-windows-installer:
-    needs: [windows, dmg]
+  version:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: claude-mirror-windows-installer
-          path: installer
-      - name: Attach the installer to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: gh release upload "$TAG" installer/Claude-Mirror-Setup-x64.exe* --repo "$GITHUB_REPOSITORY" --clobber
-  dmg:
-    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
-    name: Build and publish DMG
-    runs-on: macos-26
-    env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      revision: ${{ steps.check.outputs.revision }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
-      - name: Use the newest stable Xcode on the runner
+          ref: ${{ inputs.rehearsal && github.sha || inputs.tag || github.ref }}
+      - id: check
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          REHEARSAL: ${{ inputs.rehearsal }}
         run: |
-          ls -d /Applications/Xcode*.app
-          xcode=$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)
-          sudo xcode-select -s "$xcode"
-          swift --version
+          if [[ "$REHEARSAL" == true ]]; then
+            TAG="v$(python3 -c 'import plistlib; print(plistlib.load(open("macos/Resources/Info.plist","rb"))["CFBundleShortVersionString"])')"
+          else
+            test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$TAG^{commit}")"
+          fi
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test -s "docs/releases/$TAG.md"
+          python3 -c 'import os,plistlib; assert "v"+plistlib.load(open("macos/Resources/Info.plist","rb"))["CFBundleShortVersionString"] == os.environ["TAG"]'
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  windows:
+    needs: version
+    uses: ./.github/workflows/windows.yml
+    with:
+      revision: ${{ needs.version.outputs.revision }}
+  macos:
+    needs: version
+    runs-on: macos-26
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.revision }}
+      - name: Select stable Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -58,43 +63,74 @@ jobs:
       - run: npm ci --ignore-scripts
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      - name: Tag must match the app version
-        run: |
-          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' macos/Resources/Info.plist)
-          if [ "v$version" != "$TAG" ]; then
-            echo "::error::Info.plist version $version does not match tag $TAG"
-            exit 1
-          fi
       - run: python3 macos/scripts/test-publish-appcast.py
       - run: swift test --package-path macos
       - run: sh macos/scripts/build-dmg.sh
-      - name: Sign the update archive and feed
+      - name: Sign Sparkle feed
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          test -n "$SPARKLE_PRIVATE_KEY" || { echo "::error::Missing Sparkle signing key"; exit 1; }
+          test -n "$SPARKLE_PRIVATE_KEY"
           bash macos/scripts/generate-appcast.sh
-      - name: Upload to the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          dmg="macos/dist/claude-mirror-${TAG#v}-macOS-arm64.dmg"
-          files=("$dmg" "$dmg.sha256" macos/dist/appcast.xml scripts/setup-remote.sh scripts/install-claude-remote.sh)
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${files[@]}" --clobber
-          else
-            notes="docs/releases/$TAG.md"
-            if [ -f "$notes" ]; then source=(--notes-file "$notes"); else source=(--generate-notes); fi
-            gh release create "$TAG" --title "claude-mirror $TAG" "${source[@]}" --verify-tag "${files[@]}"
-          fi
-      - name: Publish the stable update feed
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 macos/scripts/publish-appcast.py
       - uses: actions/upload-artifact@v4
         with:
-          name: claude-mirror-${{ env.TAG }}-macOS-arm64
+          name: macos-stable
           path: |
             macos/dist/*.dmg
             macos/dist/*.dmg.sha256
+            macos/dist/appcast.xml
           if-no-files-found: error
+  publish:
+    needs: [version, windows, macos]
+    runs-on: macos-26
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-stable
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.revision }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-stable
+          path: staging
+      - uses: actions/download-artifact@v4
+        with:
+          name: claude-mirror-windows-installer
+          path: staging
+      - uses: actions/download-artifact@v4
+        with:
+          name: claude-mirror-windows-x64
+          path: staging
+      - name: Prepare signed Windows update metadata
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)"
+          swift package --package-path macos resolve
+          cp scripts/{setup-remote,install-claude-remote}.sh staging/
+          python3 scripts/stable-release.py manifest "$TAG" staging
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | macos/.build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file - -p staging/windows-update.json > staging/windows-update.sig
+          swift scripts/check-update-signature.swift staging/windows-update.json staging/windows-update.sig
+          python3 scripts/stable-release.py verify "$TAG" staging
+      - uses: actions/upload-artifact@v4
+        if: inputs.rehearsal
+        with:
+          name: stable-release-rehearsal
+          path: staging/*
+      - name: Validate all assets, publish once, then promote Sparkle
+        if: ${{ !inputs.rehearsal }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/stable-release.py publish "$TAG" staging
+          python3 macos/scripts/publish-appcast.py
