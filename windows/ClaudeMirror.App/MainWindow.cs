@@ -10,19 +10,20 @@ using WinRT.Interop;
 
 namespace ClaudeMirror.App;
 
-public sealed class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
     private readonly Grid root = new();
     private readonly StackPanel sidebar = new() { Spacing = 12, Padding = new Thickness(16) };
     private readonly StackPanel projects = new() { Spacing = 8 };
     private readonly StackPanel messages = new() { Spacing = 18, Padding = new Thickness(24) };
-    private readonly ScrollViewer scroll;
+    private readonly ScrollViewer scroll = new();
     private readonly TextBox prompt = new() { PlaceholderText = "发送消息，或输入 / 使用命令", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 90, MaxHeight = 220 };
     private readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     private readonly ComboBox hosts = new() { PlaceholderText = "选择主机", HorizontalAlignment = HorizontalAlignment.Stretch, DisplayMemberPath = "Name" };
-    private readonly ComboBox models = new() { PlaceholderText = "远端默认", MinWidth = 160, DisplayMemberPath = "Label" };
-    private readonly ComboBox commands = new() { PlaceholderText = "命令", MinWidth = 100 };
-    private readonly LocalState local = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "claude-mirror"));
+    private List<ModelChoice> availableModels = [];
+    private List<string> availableCommands = [];
+    private ModelChoice? selectedModel;
+    private readonly LocalState local = new(Environment.GetEnvironmentVariable("CLAUDE_MIRROR_STATE_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "claude-mirror"));
     private readonly TextBox directory = new() { Text = "~", PlaceholderText = "远端工作目录" };
     private RemoteAgent? agent;
     private HostProfile? host;
@@ -30,7 +31,7 @@ public sealed class MainWindow : Window
     private string? taskId;
     private string? taskKey;
     private bool busy;
-    private TextBlock? reply;
+    private MessageView? reply;
     private readonly SemaphoreSlim permissionLock = new(1);
     private readonly HashSet<string> approvalDialogs = [];
     private sealed record ModelChoice(string Value, string Label);
@@ -41,34 +42,12 @@ public sealed class MainWindow : Window
         Title = "claude-mirror · Windows";
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 820));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
-        root.Background = Brush(250, 246, 242); root.RequestedTheme = ElementTheme.Light;
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
-        root.ColumnDefinitions.Add(new ColumnDefinition());
-        sidebar.Background = Brush(240, 234, 227);
-        sidebar.Children.Add(new Image { Source = new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "BrandIcon.png"))), Width = 48, Height = 48, HorizontalAlignment = HorizontalAlignment.Left });
-        sidebar.Children.Add(new TextBlock { Text = "claude-mirror", FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        hosts.ItemsSource = local.Hosts; sidebar.Children.Add(hosts);
-        sidebar.Children.Add(Row(Button("连接", () => ConnectDialogAsync(hosts.SelectedItem as HostProfile)), Button("添加主机", () => ConnectDialogAsync(null))));
-        sidebar.Children.Add(Row(Button("新建对话", NewConversationAsync), Button("↻", RefreshHistoryAsync)));
-        sidebar.Children.Add(new ScrollViewer { Content = projects, MaxHeight = 440 });
-        sidebar.Children.Add(status);
-        root.Children.Add(sidebar);
-        var chat = new Grid { Padding = new Thickness(20) }; Grid.SetColumn(chat, 1);
-        chat.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        chat.RowDefinitions.Add(new RowDefinition()); chat.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var header = Row(directory, Button("文件", BrowseAsync), Button("更新", () => Windows.System.Launcher.LaunchUriAsync(new Uri("https://github.com/xirichuyi/claude-mirror/releases")).AsTask()));
-        chat.Children.Add(header);
-        scroll = new ScrollViewer { Content = messages }; Grid.SetRow(scroll, 1); chat.Children.Add(scroll);
-        var composer = new StackPanel { Spacing = 10 };
-        composer.Children.Add(prompt);
-        composer.Children.Add(Row(Button("附件", UploadAsync), commands, models, Button("停止", StopAsync), Button("发送", SendAsync)));
-        Grid.SetRow(composer, 2); chat.Children.Add(composer); root.Children.Add(chat); Content = root;
+        BuildWorkbench();
         prompt.AllowDrop = true;
         prompt.DragOver += (_, e) => { if (e.DataView.Contains(StandardDataFormats.StorageItems)) e.AcceptedOperation = DataPackageOperation.Copy; };
         prompt.Drop += async (_, e) => await RunAsync(async () => { foreach (var file in await e.DataView.GetStorageItemsAsync()) if (file is Windows.Storage.StorageFile) await AttachAsync(file.Path); });
-        commands.SelectionChanged += (_, _) => { if (commands.SelectedItem is string name) { prompt.Text = "/" + name + " "; prompt.Focus(FocusState.Programmatic); commands.SelectedIndex = -1; } };
         Closed += (_, _) => agent?.Dispose();
-        status.Text = "连接 SSH 服务器开始使用";
+        RefreshWorkbench();
     }
     private static StackPanel Row(params UIElement[] items)
     {
@@ -117,15 +96,28 @@ public sealed class MainWindow : Window
         var pick = Button("选择私钥", async () => { var file = await PickAsync(); if (file is not null) key.Text = file; });
         void UpdateMode() { password.Visibility = mode.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed; phrase.Visibility = key.Visibility = pick.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed; }
         mode.SelectionChanged += (_, _) => UpdateMode(); UpdateMode();
-        var panel = new StackPanel { Spacing = 10 }; foreach (var element in new UIElement[] { name, address, user, port, mode, password, key, pick, phrase }) panel.Children.Add(element);
-        var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = "连接服务器", Content = new ScrollViewer { Content = panel }, PrimaryButtonText = "连接", CloseButtonText = "取消" };
+        name.PlaceholderText = "例如：开发服务器（可选）"; address.Header = "SSH 主机"; address.PlaceholderText = "IP 地址或域名";
+        user.PlaceholderText = "远端用户名"; mode.Header = "认证方式";
+        var endpoint = new Grid { ColumnSpacing = 12 };
+        endpoint.ColumnDefinitions.Add(new ColumnDefinition()); endpoint.ColumnDefinitions.Add(new ColumnDefinition());
+        endpoint.Children.Add(user); Grid.SetColumn(port,1); endpoint.Children.Add(port);
+        var panel = new StackPanel { Spacing = 14 };
+        panel.Children.Add(new TextBlock { Text = "连接 SSH，找回这台机器上的 Claude Code 对话。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
+        foreach (var element in new UIElement[] { name, address, endpoint, mode, password, key, pick, phrase }) panel.Children.Add(element);
+        panel.Children.Add(new TextBlock { Text = "首次连接时会显示主机指纹。", Foreground = muted, FontSize = 12 });
+        var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = existing == null ? "添加机器" : "连接机器", Content = new ScrollViewer { Content = panel }, Background = canvas, PrimaryButtonText = "连接机器", CloseButtonText = "取消" };
+        void Validate() => dialog.IsPrimaryButtonEnabled = !string.IsNullOrWhiteSpace(address.Text) && !string.IsNullOrWhiteSpace(user.Text) && port.Value is >= 1 and <= 65535 &&
+            (mode.SelectedIndex == 0 || !string.IsNullOrWhiteSpace(key.Text));
+        address.TextChanged += (_,_) => Validate(); user.TextChanged += (_,_) => Validate(); key.TextChanged += (_,_) => Validate();
+        mode.SelectionChanged += (_,_) => Validate(); port.ValueChanged += (_,_) => Validate(); Validate();
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? address.Text.Trim() : name.Text.Trim(), address.Text.Trim(), (int)port.Value, user.Text.Trim(), mode.SelectedIndex == 1 ? key.Text : null);
         agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…";
-        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => { if (agent == next) { status.Text = error; busy = false; } });
+        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => { if (agent == next) { status.Text = error; busy = false; RefreshWorkbench(); } });
         try { await next.ConnectAsync(profile, password.Password, phrase.Password, Path.Combine(AppContext.BaseDirectory, "server"), fingerprint => ConfirmHostAsync(profile, fingerprint)); }
-        catch { next.Dispose(); throw; }
+        catch { next.Dispose(); RefreshWorkbench(); throw; }
         finally { password.Password = ""; phrase.Password = ""; }
+        availableModels.Clear(); availableCommands.Clear(); selectedModel=null;
         busy = false; host = profile; local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(profile)); local.Hosts.Add(profile); local.Save();
         hosts.ItemsSource = local.Hosts.ToList(); hosts.SelectedItem = profile; directory.Text = next.Home;
         await NewConversationAsync(); await RefreshHistoryAsync(); status.Text = "已连接";
@@ -140,28 +132,22 @@ public sealed class MainWindow : Window
             foreach (var item in page["sessions"]!.AsArray()) sessions.Add(new(item!["name"]!.GetValue<string>(), item["directory"]?.GetValue<string>() ?? remote.Home, item["sessionId"]?.GetValue<string>(), item["reference"]?.GetValue<string>()));
             if (page["nextOffset"] is null) break; offset = page["nextOffset"]!.GetValue<string>();
         } while (true);
-        projects.Children.Clear();
-        foreach (var group in sessions.GroupBy(c => c.Directory))
-        {
-            var rows = new StackPanel { Spacing = 4 };
-            rows.Children.Add(Button("＋ 新建对话", async () => { directory.Text = group.Key; await NewConversationAsync(); }));
-            foreach (var session in group) rows.Children.Add(Button(session.Name.Length > 26 ? session.Name[..26] + "…" : session.Name, () => SelectAsync(session)));
-            projects.Children.Add(new Expander { Header = group.Key.Split('/').LastOrDefault() ?? group.Key, Content = rows, HorizontalAlignment = HorizontalAlignment.Stretch });
-        }
+        history = sessions; RenderHistory(); RefreshWorkbench();
         status.Text = $"已同步 {sessions.Count} 条会话";
     }
     private async Task NewConversationAsync()
     {
         if (busy) throw new IOException("请先停止当前回复");
-        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear();
+        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
     }
     private async Task SelectAsync(Conversation selected)
     {
         if (busy) throw new IOException("请先停止当前回复");
         conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null;
+        RefreshWorkbench(); RenderHistory();
         var page = await RequireAgent().CallAsync("history", new { operation = "messages", reference = selected.Reference });
-        foreach (var record in page["records"]!.AsArray()) AddMessage(Protocol.MessageText(record?["message"]), record?["type"]?.GetValue<string>() == "user");
+        foreach (var record in page["records"]!.AsArray()) AddMessage("", record?["type"]?.GetValue<string>() == "user").Show(record?["message"]);
         taskKey = LocalState.HostKey(host!) + "|" + selected.SessionId;
         taskId = local.Tasks.GetValueOrDefault(taskKey);
         if (taskId is not null) await WatchCurrentAsync();
@@ -172,16 +158,10 @@ public sealed class MainWindow : Window
         try
         {
             var remote = RequireAgent(); var caps = await remote.CallAsync("task", new { operation = "inspect", digest = remote.Digest, directory = directory.Text, action = "catalogue" });
-            models.ItemsSource = caps["models"]?.AsArray().Select(m => new ModelChoice(m!["value"]!.GetValue<string>(), m["displayName"]?.GetValue<string>() ?? m["value"]!.GetValue<string>())).ToList();
-            commands.ItemsSource = caps["commands"]?.AsArray().Select(c => c!["name"]!.GetValue<string>()).ToList();
+            availableModels = caps["models"]?.AsArray().Select(m => new ModelChoice(m!["value"]!.GetValue<string>(), m["displayName"]?.GetValue<string>() ?? m["value"]!.GetValue<string>())).ToList() ?? [];
+            availableCommands = caps["commands"]?.AsArray().Select(c => c!["name"]!.GetValue<string>()).ToList() ?? [];
         }
         catch (Exception e) { status.Text = "能力读取失败：" + e.Message; }
-    }
-    private TextBlock AddMessage(string text, bool user = false)
-    {
-        var block = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, FontSize = 15 };
-        messages.Children.Add(new Border { Child = block, Padding = new Thickness(14), CornerRadius = new CornerRadius(14), Background = user ? Brush(237, 229, 220) : Brush(250, 246, 242), HorizontalAlignment = user ? HorizontalAlignment.Right : HorizontalAlignment.Stretch });
-        return block;
     }
     private async Task SendAsync()
     {
@@ -196,16 +176,16 @@ public sealed class MainWindow : Window
             {
                 taskId = Guid.NewGuid().ToString(); taskKey = LocalState.HostKey(host!) + "|" + (conversation?.SessionId ?? taskId);
                 local.Tasks[taskKey] = taskId; local.Save();
-                await remote.CallAsync("task", new { operation = "start", taskId, digest = remote.Digest, request = new { session = new { id = Guid.NewGuid().ToString(), host = host!.Host, directory = directory.Text, name = "Windows 对话", remoteSessionId = conversation?.SessionId, messages = new[] { message }, permissions = Array.Empty<object>(), preferences = new { selectedModel = (models.SelectedItem as ModelChoice)?.Value ?? "" } }, prompt = text } });
+                await remote.CallAsync("task", new { operation = "start", taskId, digest = remote.Digest, request = new { session = new { id = Guid.NewGuid().ToString(), host = host!.Host, directory = directory.Text, name = "Windows 对话", remoteSessionId = conversation?.SessionId, messages = new[] { message }, permissions = Array.Empty<object>(), preferences = new { selectedModel = selectedModel?.Value ?? "" } }, prompt = text } });
                 await WatchCurrentAsync();
             }
             else
             {
-                await remote.TaskCommandAsync(taskId, new { kind = "control", action = "model", value = (models.SelectedItem as ModelChoice)?.Value ?? "" });
+                await remote.TaskCommandAsync(taskId, new { kind = "control", action = "model", value = selectedModel?.Value ?? "" });
                 await remote.TaskCommandAsync(taskId, new { kind = "send", prompt = text, message });
             }
         }
-        catch { busy = false; status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
+        catch { busy = false; RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
     }
     private Task WatchCurrentAsync()
     {
@@ -214,8 +194,8 @@ public sealed class MainWindow : Window
     }
     private void OnState(string watched, JsonObject state) => DispatcherQueue.TryEnqueue(async () =>
     {
-        if (taskId != watched) return; reply ??= AddMessage(""); reply.Text = Protocol.MessageText(state["message"]);
-        if (state["message"]?["error"] is not null) reply.Text += "\n" + state["message"]!["error"]!.GetValue<string>();
+        if (taskId != watched) return; reply ??= AddMessage(""); reply.Show(state["message"]);
+        if (state["message"]?["error"] is not null) reply.SetError(state["message"]!["error"]!.GetValue<string>());
         var value = state["status"]?.GetValue<string>(); busy = value is "working" or "connecting" or "permission" or "stopping";
         status.Text = busy ? "正在回复" : "就绪";
         if (state["remoteSessionId"] is JsonValue session && taskId is not null)
@@ -229,6 +209,7 @@ public sealed class MainWindow : Window
             foreach (var key in local.Tasks.Where(pair => pair.Value == watched).Select(pair => pair.Key).ToList()) local.Tasks.Remove(key);
             local.Save(); taskId = null; busy = false;
         }
+        RefreshWorkbench();
         foreach (var permission in state["permissions"]?.AsArray() ?? [])
         {
             var id = permission!["id"]!.GetValue<string>(); if (!approvalDialogs.Add(id)) continue;
@@ -312,6 +293,8 @@ public sealed class MainWindow : Window
     private async Task PreviewAsync(string path)
     {
         var remote = RequireAgent(); var preview = await remote.CallAsync("file", new { operation = "preview", path, @base = directory.Text });
+        if (!ReferenceEquals(remote,agent) || host==null) return;
+        if ((string?)preview["kind"]=="text") { OpenTextEditor(path,LocalState.HostKey(host),preview);return; }
         UIElement content = new TextBlock { Text = preview["text"]?.GetValue<string>() ?? "此文件请下载后查看", IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap };
         if (preview["kind"]?.GetValue<string>() == "image")
         {
