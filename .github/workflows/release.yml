@@ -17,6 +17,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows:
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
+    uses: ./.github/workflows/windows.yml
+    with:
+      revision: ${{ inputs.tag || github.ref_name }}
+  publish-windows-installer:
+    needs: [windows, dmg]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: claude-mirror-windows-installer
+          path: installer
+      - name: Attach the installer to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release upload "$TAG" installer/Claude-Mirror-Setup-x64.exe* --repo "$GITHUB_REPOSITORY" --clobber
   dmg:
     if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
     name: Build and publish DMG

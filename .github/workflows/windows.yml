@@ -5,6 +5,11 @@ on:
   pull_request:
     paths: ['windows/**', 'src/**', '.github/workflows/windows.yml']
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      revision:
+        type: string
+        required: true
 permissions:
   contents: read
 jobs:
@@ -12,6 +17,8 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
@@ -34,11 +41,26 @@ jobs:
           if (-not $app.WaitForExit(30000)) { $app.Kill(); throw 'WinUI startup timed out' }
           if ($app.ExitCode -ne 0 -or -not (Test-Path $marker)) { throw "WinUI startup failed: $($app.ExitCode)" }
           Get-Content $marker
+      - name: Verify SSH setup buttons in the published client
+        shell: pwsh
+        run: ./windows/test-host-dialog.ps1 windows/dist/claude-mirror/claude-mirror.exe
       - name: Package portable Windows client
         shell: pwsh
         run: |
           Compress-Archive -Path windows/dist/claude-mirror/* -DestinationPath windows/dist/claude-mirror-windows-x64.zip
           (Get-FileHash windows/dist/claude-mirror-windows-x64.zip -Algorithm SHA256).Hash | Set-Content windows/dist/claude-mirror-windows-x64.zip.sha256
+      - name: Build Windows installer
+        shell: pwsh
+        env:
+          RELEASE_REVISION: ${{ inputs.revision }}
+        run: |
+          $version = if ($env:RELEASE_REVISION -match '^v(\d+\.\d+\.\d+)$') { $Matches[1] } else { '0.21.1' }
+          ./windows/build-installer.ps1 -Version $version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-mirror-windows-installer
+          path: windows/dist/Claude-Mirror-Setup-x64.exe*
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: claude-mirror-windows-x64
