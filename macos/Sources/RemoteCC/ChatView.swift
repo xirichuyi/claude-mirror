@@ -19,10 +19,16 @@ struct ChatView: View {
             if model.active == nil {
                 MachineHomeView()
             } else if let session = model.active, !session.messages.isEmpty || session.remoteHistoryRef != nil {
+                if model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil || session.historyLoaded == false {
+                    HistoryNotice(session: session).padding(.horizontal, 24).padding(.vertical, 10)
+                        .background(WorkbenchTheme.surface.opacity(0.5))
+                }
                 MessagesList(session: session).id(session.id)
             } else {
                 WelcomeView()
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.currentConfig != nil { ComposerArea() }
         }
         .background(WorkbenchTheme.canvas)
@@ -94,7 +100,7 @@ struct MessagesList: View {
                             .font(.caption)
                     }
                     if session.remoteHistoryRef != nil,
-                       session.historyLoaded == false || session.historyBefore != nil || model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil {
+                       session.historyBefore != nil && session.historyLoaded != false {
                         HistoryNotice(session: session) {
                             followsReply = false
                             let anchor = session.messages.first?.id
@@ -111,6 +117,17 @@ struct MessagesList: View {
                         MessageRow(message: message, busy: index == session.messages.count - 1 && session.isBusy, sessionStatus: session.status, showHeader: index == 0 || session.messages[index - 1].role != "assistant", actions: FileActions(open: { model.open($0, line: $1) }))
                             .equatable()
                             .id(message.id)
+                    }
+                    if !session.isBusy, session.historyLoaded != false, session.messages.count == 1,
+                       session.messages.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) == "/usage" {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("这条历史记录未保存用量结果", systemImage: "chart.bar").font(.callout.weight(.medium))
+                            Text("可直接查看账户当前的五小时与本周用量，无需发送消息。")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Button("查看当前用量") { model.presentation = .accountUsage }
+                                .buttonStyle(WorkbenchButtonStyle())
+                        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 12))
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
@@ -176,21 +193,29 @@ struct HistoryNotice: View {
     @EnvironmentObject private var model: AppModel
     let session: ChatSession
     var loadEarlier: (() -> Void)? = nil
+    private var refreshing: Bool { model.refreshingHistory.contains(session.id) }
 
     var body: some View {
-        HStack {
-            if let error = model.historyRefreshErrors[session.id] { Text(error).foregroundStyle(.orange) }
-            if model.refreshingHistory.contains(session.id) { ProgressView().controlSize(.mini) }
-            if session.historyLoaded == false {
-                Button("加载消息") { model.perform { try await model.engine?.loadHistory(session.id) } }
+        HStack(spacing: 10) {
+            if refreshing {
+                ProgressView().controlSize(.mini)
+                Text(session.historyLoaded == false ? "正在加载历史消息…" : "正在同步最新消息…")
+            } else if let error = model.historyRefreshErrors[session.id] {
+                Label("消息同步失败", systemImage: "exclamationmark.circle")
+                Text(error).lineLimit(1).help(error)
+                Spacer()
+                Button("重试") { Task { await model.refreshVisibleHistory(session.id) } }.disabled(!model.isConnected)
+            } else if session.historyLoaded == false {
+                Text(model.isConnected ? "历史消息尚未加载" : "连接服务器后加载历史消息")
+                Spacer()
+                Button("加载消息") { model.perform { try await model.engine?.loadHistory(session.id) } }.disabled(!model.isConnected)
             } else if session.historyBefore != nil {
                 Button("加载更早消息") {
                     if let loadEarlier { loadEarlier() }
                     else { model.perform { try await model.engine?.loadHistory(session.id, older: true) } }
-                }.disabled(session.isBusy)
+                }.disabled(session.isBusy || !model.isConnected)
             }
-        }
-        .font(.caption).foregroundStyle(.secondary)
+        }.font(.caption).foregroundStyle(.secondary).buttonStyle(.borderless)
     }
 }
 

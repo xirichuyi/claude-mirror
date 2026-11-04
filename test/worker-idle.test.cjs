@@ -10,9 +10,11 @@ test('worker exits after quiescence and retains the resumable Claude session', {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),'mirror-idle-worker-'));
   let child;
   try {
-    for (const file of ['task-worker.cjs','session-input.cjs']) fs.copyFileSync(path.join(__dirname,'../src',file),path.join(dir,file));
+    for (const file of ['task-worker.cjs','session-input.cjs','account-quota.cjs','quota-coordinator.cjs', 'runtime-controls.cjs']) fs.copyFileSync(path.join(__dirname,'../src',file),path.join(dir,file));
     const policy = path.resolve(__dirname,'../src/idle-policy.cjs');
     fs.writeFileSync(path.join(dir,'idle-policy.cjs'), `const {IdlePolicy:Base}=require(${JSON.stringify(policy)});exports.IdlePolicy=class extends Base{constructor(){super(50)}};`);
+    const workerPath = path.join(dir, 'task-worker.cjs');
+    fs.writeFileSync(workerPath, fs.readFileSync(workerPath, 'utf8').replace('path.dirname(folder)', 'folder'));
     fs.writeFileSync(path.join(dir,'claude-launch.cjs'), 'exports.resolveClaudeLaunch=d=>({cwd:d,executable:"unused"});exports.validateDirectory=()=>{};');
     fs.writeFileSync(path.join(dir,'checkpoint-control.cjs'), 'exports.checkpointControl=()=>()=>{};');
     fs.writeFileSync(path.join(dir,'capabilities.cjs'), 'exports.catalogue=async()=>({});exports.preferencePatch=x=>x;');
@@ -24,7 +26,7 @@ test('worker exits after quiescence and retains the resumable Claude session', {
       finish(session){this.runs.delete(session.id);session.status='idle';this.store.save();}
     };`);
     fs.writeFileSync(path.join(dir,'sdk.mjs'), `export function query({prompt}) {
-      return {async *[Symbol.asyncIterator](){for await (const input of prompt) yield {type:'result'};},close(){prompt.close()}};
+      return {async usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(){return {rate_limits_available:true,rate_limits:{five_hour:{utilization:0},seven_day:{utilization:0}}}},async *[Symbol.asyncIterator](){for await (const input of prompt) yield {type:'result'};},close(){prompt.close()}};
     }`);
     fs.mkdirSync(path.join(dir,'commands'));
     fs.writeFileSync(path.join(dir,'request.json'),JSON.stringify({session:{id:'s',directory:dir,messages:[{id:'m',blocks:[]}]},prompt:'test'}));

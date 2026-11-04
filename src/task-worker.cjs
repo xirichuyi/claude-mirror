@@ -9,10 +9,15 @@ const { Transcript } = require('./transcript.cjs');
 const { catalogue, preferencePatch } = require('./capabilities.cjs');
 const { SessionInput } = require('./session-input.cjs');
 const { IdlePolicy } = require('./idle-policy.cjs');
+const { readAccountQuota, requireQuota } = require('./account-quota.cjs');
+const { runtimeStatus, updateRuntime } = require('./runtime-controls.cjs');
+const { QuotaCoordinator } = require('./quota-coordinator.cjs');
 const idle = new IdlePolicy();
 const folder = process.argv[2];
 const request = JSON.parse(fs.readFileSync(path.join(folder, 'request.json'), 'utf8'));
 const session = request.session;
+const quotaCoordinator = new QuotaCoordinator(path.join(path.dirname(folder), 'quota-protection'));
+const isConsuming = () => service.runs.has(session.id) || session.tasks?.some(task => task.status === 'running');
 session.permissions = [];
 let version = 0, ended = false, hibernating = false;
 function atomic(filename, value) {
@@ -38,6 +43,32 @@ const run = { stopped: false, stderr: '', message: session.messages.at(-1) };
 run.transcript = new Transcript(run.message);
 service.runs.set(session.id, run);
 let query, handling = false;
+let quotaCheck, quotaTimer;
+async function checkQuota() {
+  quotaCoordinator.check();
+  if (!quotaCheck) quotaCheck = readAccountQuota(query).finally(() => { quotaCheck = null; });
+  const report = await quotaCheck;
+  quotaCoordinator.record(report);
+  requireQuota(report);
+  quotaCoordinator.claim(report);
+  return report;
+}
+async function monitorQuota() {
+  if (ended) return;
+  if (!isConsuming()) { quotaCoordinator.release(); return; }
+  try { await checkQuota(); }
+  catch (error) {
+    // Close the owner on a protection failure, including all SDK background work.
+    // This also prevents a disconnected client from resuming a queued turn.
+    run.message.error = error.message;
+    run.stopped = true;
+    session.queuePaused = true;
+    session.status = 'error';
+    ended = true;
+    input.close();
+    query.close();
+  }
+}
 const rewind = require('./checkpoint-control.cjs').checkpointControl(() => query, () => service.runs.has(session.id) || session.tasks?.some(task => task.status === 'running'));
 async function control(command) {
   idle.touch();
@@ -45,6 +76,8 @@ async function control(command) {
     if (run.message.id === command.message.id) return {}; // Replay after an uncertain transport ACK.
     validateDirectory(session.directory);
     if (service.runs.has(session.id)) throw new Error('远端会话正在回复');
+    await checkQuota();
+    if (ended) throw new Error('额度保护：远端会话已停止，请重新发送');
     session.messages = [command.message];
     Object.assign(run, { message: command.message, stopped: false, stderr: '', transcript: new Transcript(command.message) });
     service.runs.set(session.id, run); session.status = 'working'; snapshot();
@@ -86,9 +119,16 @@ async function control(command) {
         if (typeof query.stopTask !== 'function') throw new Error('当前远端版本不支持停止后台任务');
         await query.stopTask(command.value);
       },
+      runtimeStatus: () => runtimeStatus(query),
+      manageRuntime: async () => {
+        const result = await updateRuntime(query, session, command.value);
+        session.capabilities = await catalogue(query);
+        return result;
+      },
+      accountQuota: () => readAccountQuota(query),
       context: () => query.getContextUsage({ detail: 'summary' }),
       mcp: () => query.mcpServerStatus(),
-      plugins: () => query.reloadPlugins({ holdOnCacheImpact: true }),
+      plugins: () => updateRuntime(query, session, { action: 'reloadPlugins' }),
     };
     if (!methods[command.action]) throw new Error('未知会话控制操作');
     const result = await methods[command.action]();
@@ -124,6 +164,11 @@ const runCommands = async () => {
   try {
     await commands();
     if (!query || handling || hibernating || ended) return;
+    if (!isConsuming()) quotaCoordinator.release();
+    else {
+      try { quotaCoordinator.check(); }
+      catch { await monitorQuota(); }
+    }
     if (idle.expired(session, service.runs.has(session.id))) {
       // Mark completion before closing the SDK, so reconnecting clients can resume
       // from remoteSessionId instead of sending into a dead command queue.
@@ -142,6 +187,8 @@ try { commandWatcher = fs.watch(path.join(folder, 'commands'), runCommands); com
   service.claudeExecutable = launch.executable;
   const { query: createQuery } = await import(pathToFileURL(path.join(__dirname, 'sdk.mjs')).href);
   query = createQuery({ prompt: input, options: service.options(session, run) }); run.query = query;
+  await checkQuota();
+  quotaTimer = setInterval(() => { void monitorQuota(); }, 5000);
   input.push(request.prompt, run.message.id, session.remoteSessionId);
   session.capabilities = await catalogue(query); snapshot();
   for await (const event of query) {
@@ -159,10 +206,11 @@ try { commandWatcher = fs.watch(path.join(folder, 'commands'), runCommands); com
   }
 })().catch(error => {
   if (hibernating) return; // SDK cancellation is expected after a deliberate idle shutdown.
-  run.message.error = [error.message, run.stderr].filter(Boolean).join('\n');
+  run.message.error ||= [error.message, run.stderr].filter(Boolean).join('\n');
   session.status = 'error';
 }).finally(() => {
-  ended = true; clearInterval(timer); commandWatcher?.close(); input.close(); query?.close();
+  quotaCoordinator.release();
+  ended = true; clearInterval(quotaTimer); clearInterval(timer); commandWatcher?.close(); input.close(); query?.close();
   if (service.runs.has(session.id)) service.finish(session, run, true);
   for (const pending of service.timers.values()) clearTimeout(pending);
   snapshot();

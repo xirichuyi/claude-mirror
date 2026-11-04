@@ -6,9 +6,19 @@ const { resolveClaudeLaunch } = require('./claude-launch.cjs');
 const { ChatService } = require('./chat-service.cjs');
 const { inspectRemote, catalogue } = require('./capabilities.cjs');
 
+const { readAccountQuota } = require('./account-quota.cjs');
+
+const { accountStatus, environmentStatus } = require('./account-status.cjs');
+
+const { runtimeStatus } = require('./runtime-controls.cjs');
+
 const request = JSON.parse(process.argv[2]);
 const actions = {
   catalogue,
+  runtimeStatus,
+  accountStatus,
+  environmentStatus,
+  accountQuota: readAccountQuota,
   context: client => client.getContextUsage({ detail: 'summary' }),
   mcp: async client => (await client.mcpServerStatus()).map(server => ({ name: server.name, status: server.status, error: server.error,
     tools: server.tools?.map(tool => ({ name: tool.name, description: tool.description })) })),

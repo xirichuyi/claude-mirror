@@ -52,8 +52,7 @@ struct SearchPicker: View {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         if results.isEmpty {
-                            Text(items.isEmpty ? "列表尚未加载，请刷新" : "没有匹配结果")
-                                .font(.callout).foregroundStyle(.secondary).padding(24)
+                            InterfaceState(title: items.isEmpty ? "尚未读取到" + title : "没有匹配结果", detail: items.isEmpty ? "点击下方刷新重新读取。" : "试试名称的一部分或其他关键词。", symbol: "magnifyingglass")
                         }
                         ForEach(results) { item in
                             Button { choose(item.id) } label: {
@@ -63,7 +62,7 @@ struct SearchPicker: View {
                                         if !item.detail.isEmpty { Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                                     }
                                     Spacer()
-                                    if selected == item.id { Image(systemName: "checkmark").foregroundStyle(WorkbenchTheme.sage) }
+                                    if selected == item.id { Image(systemName: "checkmark").foregroundStyle(WorkbenchTheme.ink) }
                                 }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                                     .contentShape(Rectangle())
                                     .background(selection == item.id ? WorkbenchTheme.userBubble : .clear, in: RoundedRectangle(cornerRadius: 8))
@@ -80,9 +79,12 @@ struct SearchPicker: View {
                 Button("刷新", action: refresh).buttonStyle(.borderless)
             }.padding(12)
         }
-        .frame(width: 360).background(WorkbenchTheme.canvas)
+        .frame(width: 360)
+        .presentationBackground { FrostedBackground(material: .popover) }
+        .tint(WorkbenchTheme.accent)
         .onAppear { focused = true; selection = selected ?? results.first?.id }
         .onChange(of: query) { selection = results.first?.id }
+        .onChange(of: items.map(\.id)) { if !results.contains(where: { $0.id == selection }) { selection = results.first?.id } }
     }
 }
 #endif

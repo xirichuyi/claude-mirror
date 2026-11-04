@@ -14,6 +14,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
 /// Bridges the core engine to SwiftUI. Core objects hold the state; this republishes their changes.
 @MainActor
 final class AppModel: ObservableObject {
+    let accountStore = AccountStore()
     private(set) var engine: ChatEngine?
     private(set) var connections: SSHConnections?
     private var workspaces: [String: Workspace] = [:]
@@ -29,20 +30,20 @@ final class AppModel: ObservableObject {
     private lazy var appUpdater = AppUpdater(model: self)
     private var updateChecksStarted = false
     @Published var checkingForUpdates = false
-    @Published var activeId: String?
+    @Published var activeId: String? {
+        didSet {
+            if activeId != oldValue { showSessionDetails = false }
+        }
+    }
     @Published var showArchived = false
     @Published var searchText = ""
     @Published var toast: String?
     @Published var panel: SidePanel = .files
     @Published var showFiles = false
-    @Published var showProjectPicker = false
     var proposedProject: String?
     @Published var composerFocus = UUID()
-    @Published var showConnect = false
-    @Published var showPreferences = false
-    @Published var showSettings = false
-    @Published var showQuickOpen = false
-    @Published var showSessionTools = false
+    @Published var sessionToolsSection = "skills"
+    @Published var showSessionDetails = false
     @Published var historyStatus = ""
     @Published private var transferStatuses: [ConnectionConfig: String] = [:]
     @Published private var batchUploadProgress: [String: String] = [:]
@@ -52,19 +53,15 @@ final class AppModel: ObservableObject {
     }
     @Published var drafts: [String: String] = [:]
     @Published var attachments: [String: [Attachment]] = [:]
-    @Published var commandPicker: CommandInteraction?
+    @Published var presentation: AppPresentation?
     @Published var fatalError: String?
     #if DEBUG
-    @Published var showChatGallery = false
     #endif
 
-    @Published var showWorktree = false
-    @Published var showUsage = false
     @Published var notificationsEnabled = UserDefaults.standard.bool(forKey: "task-notifications")
     var failedUploadDirectories: [String: [URL: String]] = [:]
     @Published var failedUploads: [String: [URL]] = [:]
     @Published var uploadingSessions = Set<String>()
-    @Published var showActivity = false
     @Published var unreadSessions = Set<String>()
     @Published var historyRefreshErrors: [String: String] = [:]
     @Published var refreshingHistory = Set<String>()
@@ -523,6 +520,11 @@ final class AppModel: ObservableObject {
             self.attachments[id] = nil
             self.drafts[id] = ""
         }
+    }
+
+    func openTools(_ section: String) {
+        sessionToolsSection = section
+        showSessionTools = true
     }
 
     /// Quick actions use the server catalogue and the normal Claude command path.

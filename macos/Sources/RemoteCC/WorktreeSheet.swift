@@ -27,7 +27,7 @@ struct WorktreeSheet: View {
                     }
                 }.buttonStyle(WorkbenchButtonStyle(prominent: true)).disabled(busy || branch.isEmpty || !model.isConnected)
             }
-        }.padding(24).frame(width: 520).background(WorkbenchTheme.canvas).interactiveDismissDisabled(busy)
+        }.padding(24).frame(width: 520).interactiveDismissDisabled(busy)
     }
 }
 #endif

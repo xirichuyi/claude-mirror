@@ -26,15 +26,14 @@ struct FilePanel: View {
                 Label("工作区", systemImage: "folder").font(.callout.weight(.semibold))
                 Spacer()
                 Button { model.showFiles = false } label: { Image(systemName: "xmark") }
-                    .buttonStyle(QuietButtonStyle()).help("关闭文件面板")
+                    .buttonStyle(QuietButtonStyle()).help("关闭文件面板").accessibilityLabel("关闭文件面板")
             }.padding(.horizontal, 12).padding(.top, 8)
-            Picker("", selection: $model.panel) {
-                ForEach(SidePanel.allCases) { panel in
-                    if panel == .changes, let count = model.activeWorkspace?.gitStatus?.files.count, count > 0 { Text("变更 \(count)").tag(panel) }
-                    else { Text(panel.rawValue).tag(panel) }
+            CapsulePicker(label: "工作区面板", options: SidePanel.allCases, selection: $model.panel) { panel in
+                if panel == .changes, let count = model.activeWorkspace?.gitStatus?.files.count, count > 0 {
+                    return "变更 \(count)"
                 }
-            }
-            .pickerStyle(.segmented).labelsHidden().padding(8)
+                return panel.rawValue
+            }.padding(8)
             Divider()
             if let workspace = model.activeWorkspace {
                 if !model.isConnected {
@@ -51,7 +50,7 @@ struct FilePanel: View {
             } else {
                 ContentUnavailableView("未连接 SSH", systemImage: "network.slash").frame(maxHeight: .infinity)
             }
-        }.background(WorkbenchTheme.canvas)
+        }.background { FrostedBackground() }
     }
 }
 
@@ -72,10 +71,10 @@ struct FileTreeView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
-                Button { Task { await workspace.goToParent() } } label: { Image(systemName: "arrow.up") }.buttonStyle(.plain).help("上一级")
+                Button { Task { await workspace.goToParent() } } label: { Image(systemName: "arrow.up") }.buttonStyle(QuietButtonStyle()).help("上一级").accessibilityLabel("上一级目录")
                 TextField("远端目录", text: $path).textFieldStyle(WorkbenchTextFieldStyle()).font(.system(size: 11, design: .monospaced))
                     .onSubmit { Task { await workspace.browse(path) } }
-                Button { Task { await workspace.reload(force: true) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.plain).help("刷新")
+                Button { Task { await workspace.reload(force: true) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(QuietButtonStyle()).help("刷新文件").accessibilityLabel("刷新文件")
                 Button { model.pickAndUpload(to: workspace.root) } label: { Label("上传", systemImage: "square.and.arrow.up") }
                     .buttonStyle(.plain).help("上传文件").accessibilityLabel("上传文件")
                 Menu {
@@ -97,7 +96,7 @@ struct FileTreeView: View {
                 }
                 .padding(4)
             }
-            .overlay { if workspace.rows.isEmpty && workspace.error == nil && workspace.root != nil { Text("空目录").font(.caption).foregroundStyle(.secondary) } }
+            .overlay { if workspace.rows.isEmpty && workspace.error == nil && workspace.root != nil { InterfaceState(title: "空目录", detail: "可上传文件，或从目录菜单新建文件。", symbol: "folder") } }
             Divider()
             Text(workspace.footer).font(.caption2).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(8)
         }
@@ -254,39 +253,57 @@ struct SearchView: View {
     @State private var status = ""
     @State private var matches: [SearchMatch] = []
     @State private var task: Task<Void, Never>?
+    @State private var searching = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TextField("在工作目录中搜索内容", text: $query).textFieldStyle(WorkbenchTextFieldStyle()).padding(8).onSubmit(run)
-            if !status.isEmpty { Text(status).font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 4) }
+            HStack(spacing: 6) {
+                TextField("搜索文件内容", text: $query)
+                    .textFieldStyle(WorkbenchTextFieldStyle()).focused($focused).onSubmit(run)
+                    .onExitCommand { query = "" }
+                Button(action: run) { Image(systemName: "magnifyingglass") }
+                    .buttonStyle(QuietButtonStyle()).help("搜索 · Enter").accessibilityLabel("搜索文件内容")
+                    .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.isConnected || searching)
+            }.padding(8)
+            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 8) }
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(matches) { match in
                         Button { model.open(match.path, line: match.line) } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(match.relative):\(match.line)").font(.caption2).foregroundStyle(.blue).lineLimit(1)
-                                Text(match.text.trimmingCharacters(in: .whitespaces)).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                            .padding(.horizontal, 10).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain).help(match.path)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("\(match.relative):\(match.line)").font(.caption.weight(.medium)).lineLimit(1)
+                                Text(match.text.trimmingCharacters(in: .whitespaces)).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).lineLimit(2)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }.buttonStyle(QuietButtonStyle()).help(match.path)
                     }
+                }.padding(.horizontal, 4)
+            }.overlay {
+                if searching {
+                    InterfaceState(title: "正在搜索…", detail: "", loading: true)
+                } else if matches.isEmpty && status.isEmpty {
+                    InterfaceState(title: "搜索项目内容", detail: "输入关键词，按 Enter 搜索。点击结果可打开对应行。", symbol: "doc.text.magnifyingglass")
                 }
             }
         }
+        .task { await Task.yield(); focused = true }
+        .onChange(of: query) { task?.cancel(); searching = false; matches = []; status = "" }
+        .onDisappear { task?.cancel() }
     }
 
     private func run() {
         task?.cancel()
-        guard !query.isEmpty else { return }
-        status = "搜索中…"; matches = []
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty, model.isConnected else { return }
+        status = ""; matches = []; searching = true
         task = Task {
             do {
-                let result = try await workspace.search(query)
+                let result = try await workspace.search(term)
                 guard !Task.isCancelled else { return }
                 matches = result.matches
-                status = "\(result.matches.count) 处匹配" + (result.truncated == true ? "（已截断）" : "")
-            } catch { if !Task.isCancelled { status = error.localizedDescription } }
+                status = result.matches.isEmpty ? "没有找到匹配内容，试试其他关键词。" : "\(result.matches.count) 处匹配" + (result.truncated == true ? "（仅显示部分结果，请缩小搜索范围）" : "")
+                searching = false
+            } catch { if !Task.isCancelled { status = error.localizedDescription; searching = false } }
         }
     }
 }
@@ -295,6 +312,8 @@ struct QuickOpenSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @State private var status = ""
+    @FocusState private var focused: Bool
     @State private var results: [FileEntry] = []
     @State private var selection = 0
     @State private var task: Task<Void, Never>?
@@ -302,11 +321,12 @@ struct QuickOpenSheet: View {
     var body: some View {
         VStack(spacing: 6) {
             TextField("按名称查找服务器上的文件", text: $query)
-                .textFieldStyle(WorkbenchTextFieldStyle())
+                .textFieldStyle(WorkbenchTextFieldStyle()).focused($focused)
                 .onSubmit { if let file = results[safeIndex: selection] { choose(file) } }
                 .onKeyPress(.downArrow) { selection = min(selection + 1, max(results.count - 1, 0)); return .handled }
                 .onKeyPress(.upArrow) { selection = max(selection - 1, 0); return .handled }
                 .onKeyPress(.escape) { dismiss(); return .handled }
+            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary).padding(8) }
             MenuList(count: results.count, selection: selection) { index in
                 let file = results[index]
                 return AnyView(Button { choose(file) } label: {
@@ -316,17 +336,25 @@ struct QuickOpenSheet: View {
         }
         .padding(10).frame(width: 560)
         .onChange(of: query) { search() }
-        .onAppear { search() }
+        .task { await Task.yield(); focused = true; search() }
+        .onDisappear { task?.cancel() }
     }
 
     private func search() {
         task?.cancel()
-        guard let workspace = model.activeWorkspace, model.isConnected else { return }
+        results = []; selection = 0
+        guard let workspace = model.activeWorkspace, model.isConnected else { status = "连接服务器并打开项目后查找文件。"; return }
+        status = "正在查找…"
         let current = query
         task = Task {
             try? await Task.sleep(nanoseconds: 60_000_000)
-            guard !Task.isCancelled, let found = try? await workspace.suggest(current), !Task.isCancelled else { return }
-            results = found; selection = 0
+            guard !Task.isCancelled else { return }
+            do {
+                let found = try await workspace.suggest(current)
+                guard !Task.isCancelled else { return }
+                results = found; selection = 0
+                status = found.isEmpty ? "未找到文件，试试其他名称。" : "↑ ↓ 选择 · Enter 打开 · Esc 关闭"
+            } catch { if !Task.isCancelled { status = error.localizedDescription } }
         }
     }
 
@@ -368,7 +396,7 @@ struct EditorPane: View {
                 Text((tab.isDirty ? "● " : "") + tab.title).font(.caption).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180)
                     .foregroundStyle(tab.id == workspace.activeTabId ? Color.primary : Color.secondary)
             }.buttonStyle(.plain).help(tab.path)
-            Button { model.close(tab, in: workspace) } label: { Image(systemName: "xmark").font(.caption2) }.buttonStyle(.plain).foregroundStyle(.secondary)
+            Button { model.close(tab, in: workspace) } label: { Image(systemName: "xmark").font(.caption2).frame(width: 24, height: 24) }.buttonStyle(.plain).foregroundStyle(.secondary).help("关闭 " + tab.title).accessibilityLabel("关闭 " + tab.title)
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(tab.id == workspace.activeTabId ? WorkbenchTheme.surface : Color.clear)
@@ -388,7 +416,7 @@ struct EditorPane: View {
                         Button("编辑") { workspace.beginEditing(tab) }
                     }
                     if isMarkdown(preview), tab.draft == nil {
-                        Button(tab.showSource ? "渲染" : "源码") { tab.showSource.toggle(); model.objectWillChange.send() }
+                        Button(tab.showSource ? "预览" : "源码") { tab.showSource.toggle(); model.objectWillChange.send() }
                     }
                     Spacer(minLength: 0)
                     Menu {

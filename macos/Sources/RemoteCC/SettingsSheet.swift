@@ -27,7 +27,8 @@ struct SettingsSheet: View {
                             Text("claude mirror").font(.title2.weight(.semibold))
                             Text("版本 " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"))
                                 .foregroundStyle(.secondary)
-                            Button("检查更新") { Task { await model.checkForUpdates(manual: true) } }
+                            Button(model.checkingForUpdates ? "正在检查…" : "检查更新") { Task { await model.checkForUpdates(manual: true) } }
+                                .disabled(model.checkingForUpdates)
                                 .buttonStyle(WorkbenchButtonStyle())
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
@@ -91,7 +92,7 @@ struct SettingsSheet: View {
                 Text(historyDisplayTitle(session.name)).lineLimit(2).foregroundStyle(.secondary)
                 Button("模型与权限") { dismiss(); model.showPreferences = true }
                 Button("上下文与用量") { dismiss(); model.showUsage = true }
-                Button("会话工具") { dismiss(); model.showSessionTools = true }
+                Button("扩展与配置") { dismiss(); model.openTools("config") }
             } else {
                 Text("打开对话后可调整模型和权限。").foregroundStyle(.secondary)
             }

@@ -38,7 +38,7 @@ struct PreferencesSheet: View {
             }
             .padding()
         }
-        .frame(width: 440).background(WorkbenchTheme.canvas)
+        .frame(width: 440)
         .task { load(refresh: false) }
     }
 
@@ -167,68 +167,65 @@ struct CommandPickerSheet: View {
 struct SessionToolsSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var title = "会话"
-    @State private var content = ""
     @State private var localPort = ""
     @State private var remotePort = ""
     @State private var tunnels: [Tunnel] = []
-    @State private var toolSection = "details"
-    @State private var detailSection = "status"
     @State private var error = ""
 
-    private let sections = [("status", "状态"), ("cost", "用量"), ("context", "上下文"), ("skills", "技能"), ("agents", "Agents"), ("mcp", "MCP"), ("plugins", "插件"), ("tasks", "任务")]
+    private let destinations = [("skills", "技能", "sparkles"), ("commands", "命令", "terminal"),
+        ("mcp", "连接器", "point.3.connected.trianglepath.dotted"), ("plugins", "插件", "puzzlepiece.extension"),
+        ("agents", "Agents", "person.2"), ("tasks", "后台任务", "checklist"),
+        ("config", "记忆与配置", "doc.text"), ("models", "模型", "cpu"),
+        ("tools", "工具", "wrench.and.screwdriver"), ("status", "会话状态", "info.circle"), ("ssh", "端口转发", "network")]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(title).font(.headline)
-                Spacer()
-                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
-            if let session = model.active {
-                Picker("工具", selection: $toolSection) {
-                    Text("Claude").tag("details")
-                    Text("端口转发").tag("ssh")
-                }.pickerStyle(.segmented)
-                if toolSection == "details" {
-                    HStack {
-                        Picker("查看", selection: $detailSection) {
-                            ForEach(sections, id: \.0) { section in Text(section.1).tag(section.0) }
-                        }.onChange(of: detailSection) {
-                            load(detailSection, title: "会话工具", id: session.id)
-                        }
-                        Button("刷新") { load(detailSection, title: "会话工具", id: session.id) }
+        VStack(spacing: 0) {
+            SheetHeading(title: "扩展与配置") { dismiss() }.padding(20)
+            Divider()
+            HStack(spacing: 0) {
+                VStack(spacing: 3) {
+                    ForEach(destinations, id: \.0) { item in
+                        Button { model.sessionToolsSection = item.0 } label: {
+                            Label(item.1, systemImage: item.2).frame(maxWidth: .infinity, alignment: .leading)
+                        }.buttonStyle(SidebarNavigationStyle(selected: model.sessionToolsSection == item.0))
                     }
-                    if !content.isEmpty { CodeBlock(text: content).frame(maxHeight: 300) }
-                } else {
-                Text("SSH 端口转发").font(.subheadline)
-                HStack {
-                    TextField("本地端口", text: $localPort).frame(width: 110)
-                    TextField("远端端口", text: $remotePort).frame(width: 110)
-                    Button("转发") { forward(session) }.disabled(Int(localPort) == nil || Int(remotePort) == nil)
-                }
-                .textFieldStyle(WorkbenchTextFieldStyle())
-                ForEach(tunnels) { tunnel in
-                    HStack {
-                        Button("localhost:\(tunnel.localPort) → 远端 \(tunnel.remotePort)") {
-                            if let url = URL(string: "http://127.0.0.1:\(tunnel.localPort)") { NSWorkspace.shared.open(url) }
-                        }.buttonStyle(.link)
-                        Button("关闭") { close(tunnel, session) }.controlSize(.small)
+                    Spacer()
+                }.padding(12).frame(width: 160).background(WorkbenchTheme.sidebar)
+                Divider()
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(destinations.first { $0.0 == model.sessionToolsSection }?.1 ?? "扩展")
+                        .font(.title3.weight(.semibold))
+                    if let session = model.active {
+                        if model.sessionToolsSection == "ssh" { portForwarding(session) }
+                        else { ClaudeToolsView(sessionID: session.id, section: SessionToolSection(rawValue: model.sessionToolsSection) ?? .skills).id(session.id + ":" + model.sessionToolsSection) }
+                    } else {
+                        Text("打开对话后管理该项目的扩展和配置。").foregroundStyle(.secondary)
+                        Spacer()
                     }
-                }
-                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
-                }
+                }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-        }
-        .padding(20).frame(width: 640)
-        .onAppear { if let session = model.active { tunnels = model.connections?.tunnels(session.config) ?? []; load(detailSection, title: "会话工具", id: session.id) } }
+        }.frame(width: 820, height: 600)
+        .onAppear { if let session = model.active { tunnels = model.connections?.tunnels(session.config) ?? [] } }
     }
 
-    private func load(_ section: String, title: String, id: String) {
-        self.title = title; content = "读取中…"
-        Task {
-            do { content = try await model.engine?.details(id, section: section).text(pretty: true) ?? "" }
-            catch { content = error.localizedDescription }
+    private func portForwarding(_ session: ChatSession) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("将远端服务转发到本机，在浏览器中访问。").foregroundStyle(.secondary)
+            HStack {
+                TextField("本地端口", text: $localPort).frame(width: 110)
+                TextField("远端端口", text: $remotePort).frame(width: 110)
+                Button("转发") { forward(session) }.disabled(Int(localPort) == nil || Int(remotePort) == nil)
+            }.textFieldStyle(WorkbenchTextFieldStyle())
+            ForEach(tunnels) { tunnel in
+                HStack {
+                    Button("localhost:\(tunnel.localPort) → 远端 \(tunnel.remotePort)") {
+                        if let url = URL(string: "http://127.0.0.1:\(tunnel.localPort)") { NSWorkspace.shared.open(url) }
+                    }.buttonStyle(.link)
+                    Button("关闭") { close(tunnel, session) }
+                }
+            }
+            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
+            Spacer()
         }
     }
 

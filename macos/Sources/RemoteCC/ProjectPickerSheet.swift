@@ -6,6 +6,7 @@ struct ProjectPickerSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var directory = ""
+    @FocusState private var pathFocused: Bool
     @State private var busy = false
     @State private var error = ""
 
@@ -17,7 +18,7 @@ struct ProjectPickerSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             SheetHeading(title: "选择项目") { dismiss() }.disabled(busy)
             Label(model.active?.host ?? "", systemImage: "server.rack").font(.callout).foregroundStyle(.secondary)
-            TextField("远端项目路径", text: $directory).textFieldStyle(WorkbenchTextFieldStyle())
+            TextField("远端项目路径", text: $directory).textFieldStyle(WorkbenchTextFieldStyle()).focused($pathFocused)
             if !recent.isEmpty {
                 Text("最近的项目").font(.caption).foregroundStyle(.secondary)
                 ScrollView {
@@ -52,8 +53,9 @@ struct ProjectPickerSheet: View {
                     .disabled(busy || directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.isConnected)
             }
         }
-        .padding(28).frame(width: 460).background(WorkbenchTheme.canvas)
+        .padding(28).frame(width: 460)
         .interactiveDismissDisabled(busy)
+        .task { await Task.yield(); pathFocused = true }
         .onAppear { directory = model.proposedProject ?? model.active?.directory ?? "~" }
     }
 }

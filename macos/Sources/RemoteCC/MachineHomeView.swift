@@ -9,10 +9,10 @@ struct MachineHomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
-                VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(model.currentConfig == nil ? "连接服务器" : "新对话")
-                        .font(.system(size: 28, weight: .medium, design: .serif))
+                        .font(.largeTitle.weight(.semibold))
                         .foregroundStyle(WorkbenchTheme.ink)
                     Text(model.currentConfig == nil ? "使用服务器上的 Claude Code。" : model.currentConfig!.displayName)
                         .font(.body).foregroundStyle(.secondary).lineSpacing(6)
@@ -62,7 +62,7 @@ struct MachineHomeView: View {
                                             Text(Date(timeIntervalSince1970: session.updatedAt / 1000), format: .dateTime.month().day())
                                                 .font(.caption2).foregroundStyle(.tertiary)
                                             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
-                                        }.padding(16).contentShape(Rectangle())
+                                        }.padding(.vertical, 8).padding(.horizontal, 4).contentShape(Rectangle())
                                     }.buttonStyle(SidebarNavigationStyle())
                                 }
                             }
@@ -70,7 +70,7 @@ struct MachineHomeView: View {
                     }
                 }
             }
-            .frame(maxWidth: 620).padding(.horizontal, 44).padding(.top, 72).padding(.bottom, 48)
+            .frame(maxWidth: 620).padding(.horizontal, 44).padding(.top, 40).padding(.bottom, 48)
             .frame(maxWidth: .infinity, alignment: .center)
         }
     }

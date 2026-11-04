@@ -19,7 +19,7 @@ struct ActivitySheet: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(model.savedMachines, id: \.key) { machine in
+                    ForEach(model.savedMachines.filter { machine in model.attentionSessions.contains { $0.config.key == machine.key } || model.engine?.connectionState(machine).status != .connected }, id: \.key) { machine in
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
                                 Label(machine.displayName, systemImage: "desktopcomputer").font(.headline)
@@ -78,7 +78,7 @@ struct ActivitySheet: View {
                     }
                 }
             }
-        }.padding(24).frame(width: 680, height: 480).background(WorkbenchTheme.canvas)
+        }.padding(24).frame(width: 680, height: 480)
     }
 }
 #endif

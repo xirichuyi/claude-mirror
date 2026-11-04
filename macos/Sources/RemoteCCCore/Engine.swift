@@ -536,6 +536,21 @@ public final class ChatEngine {
 
     // MARK: Capabilities and settings
 
+    /// Machine account and environment inspection never creates or resumes a conversation.
+    public func machineDetails(_ config: ConnectionConfig, section: String) async throws -> JSON {
+        guard ["accountStatus", "environmentStatus"].contains(section) else { throw RemoteError("未知机器信息查询") }
+        try await ensureInstalled(config)
+        return try await agents.call(config, "task", ["operation": "inspect", "digest": .string(agents.resources.bundleDigest),
+                                                     "action": .string(section), "directory": "~"], timeout: 60)
+    }
+
+    /// Account quota is queried independently of chat history and project settings.
+    public func accountQuota(_ config: ConnectionConfig) async throws -> JSON {
+        try await ensureInstalled(config)
+        return try await agents.call(config, "task", ["operation": "inspect", "digest": .string(agents.resources.bundleDigest),
+                                                     "action": "accountQuota", "directory": "~"], timeout: 60)
+    }
+
     private func inspect(_ session: ChatSession, action: String, value: JSON = .null) async throws -> JSON {
         try await ensureInstalled(session.config)
         return try await agents.call(session.config, "task", ["operation": "inspect", "digest": .string(agents.resources.bundleDigest), "action": .string(action), "value": value,
@@ -649,6 +664,20 @@ public final class ChatEngine {
         changed(id)
     }
 
+    public func manageRuntime(_ id: String, action: String, name: String? = nil, enabled: Bool? = nil) async throws -> JSON {
+        guard sessions[try index(id)].remoteOwner != nil else { throw RemoteError("此操作需要已建立的实时会话，请先正常发送一条消息。") }
+        guard ["reconnectMcp", "toggleMcp", "reloadSkills", "reloadOutputStyles", "reloadPlugins"].contains(action) else { throw RemoteError("未知运行环境操作") }
+        var request: JSON = ["action": .string(action)]
+        if let name { request["name"] = .string(name) }
+        if let enabled { request["enabled"] = .bool(enabled) }
+        let result = try await control(id, action: "manageRuntime", value: request)
+        if action == "reloadPlugins", result["held"]?.isTruthy != true, let plugins = result["plugins"], plugins.array != nil {
+            sessions[try index(id)].plugins = plugins
+            changed(id)
+        }
+        return result
+    }
+
     public func details(_ id: String, section: String) async throws -> JSON {
         let session = sessions[try index(id)]
         switch section {
@@ -660,6 +689,10 @@ public final class ChatEngine {
         case "context":
             guard session.remoteOwner != nil else { throw RemoteError("此历史会话尚未建立实时运行环境，无法获取准确的上下文占用。") }
             return try await control(id, action: "context")
+        case "commands": return try JSON.from(try await capabilities(id).commands)
+        case "models": return try JSON.from(try await capabilities(id).models)
+        case "tools": return session.tools ?? []
+        case "plugins": return session.plugins ?? []
         case "skills": return try JSON.from(try await capabilities(id).commands.filter { $0.builtin != true })
         case "agents": return try JSON.from(try await capabilities(id).agents ?? [])
         default:

@@ -26,7 +26,7 @@ struct ChatGallery: View {
                 Spacer()
                 Button("关闭") { dismiss() }
             }.padding(20)
-            Picker("状态", selection: $phase) { ForEach(phases, id: \.self) { Text($0) } }.pickerStyle(.segmented).padding(.horizontal, 20)
+            CapsulePicker(label: "状态", options: phases, selection: $phase) { $0 }.padding(.horizontal, 20)
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     MessageRow(message: ChatMessage(role: "user", text: "请检查聊天界面的展示效果。"), busy: false, actions: FileActions(open: { _, _ in }))

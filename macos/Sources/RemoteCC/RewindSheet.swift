@@ -29,7 +29,7 @@ struct RewindSheet: View {
                 Button("确认回退这些文件", role: .destructive) { perform(apply: true) }
                     .disabled(busy || preview?["canRewind"]?.bool != true || preview?["token"]?.string == nil)
             }
-        }.padding(24).frame(width: 580).background(WorkbenchTheme.canvas).interactiveDismissDisabled(busy)
+        }.padding(24).frame(width: 580).interactiveDismissDisabled(busy)
             .task { perform(apply: false) }
     }
     private func perform(apply: Bool) {
