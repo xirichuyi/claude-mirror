@@ -176,10 +176,15 @@ class ChatService extends EventEmitter {
   configure(id, patch) {
     const session = this.get(id);
     patch = preferencePatch(patch);
-    const defaults = { agent: '', selectedModel: '', effort: '', outputStyle: '', fastMode: false, permissionMode: 'default', additionalDirectories: [] };
+    const defaults = { agent: '', selectedModel: '', effort: '', outputStyle: '', promptCacheTtl: '', fastMode: false, permissionMode: 'default', additionalDirectories: [] };
     if (session.remoteOwner) patch = Object.fromEntries(Object.entries(patch).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(session.preferences?.[key] ?? defaults[key])));
     const live = session.remoteOwner && Object.keys(patch).every(key => ['selectedModel', 'effort', 'permissionMode', 'fastMode', 'outputStyle'].includes(key));
     if (this.runs.has(id) && !live) throw new Error('请等待当前回复完成后切换设置');
+    if (patch.promptCacheTtl) {
+      const version = session.capabilities?.version?.match(/^(\d+)\.(\d+)\.(\d+)/);
+      const supported = version && (Number(version[1]) > 2 || (Number(version[1]) === 2 && (Number(version[2]) > 1 || (Number(version[2]) === 1 && Number(version[3]) >= 242))));
+      if (!supported) throw new Error('缓存时长需要 Claude Code 2.1.242 或更新版本，请刷新远端能力');
+    }
     const next = { ...session.preferences, ...patch };
     if ('agent' in patch && patch.agent !== (session.preferences?.agent || '') && session.messages.length) throw new Error('请在新对话中选择 Agent，已有会话保留原生上下文');
     if (patch.agent && session.capabilities && !session.capabilities.agents?.some(agent => agent.name === patch.agent)) throw new Error('Agent 不在远端列表中，请刷新后选择');
@@ -262,6 +267,7 @@ class ChatService extends EventEmitter {
     const settings = {};
     if (preferences.fastMode !== undefined) settings.fastMode = preferences.fastMode;
     if (preferences.outputStyle) settings.outputStyle = preferences.outputStyle;
+    if (preferences.promptCacheTtl) settings.promptCacheTtl = preferences.promptCacheTtl;
     return {
       pathToClaudeCodeExecutable: this.claudeExecutable || 'claude',
       systemPrompt: { type: 'preset', preset: 'claude_code' },

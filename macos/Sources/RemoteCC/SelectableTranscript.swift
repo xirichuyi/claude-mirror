@@ -1,8 +1,6 @@
 #if canImport(AppKit)
 import AppKit
 import SwiftUI
-import cmark_gfm
-import cmark_gfm_extensions
 import RemoteCCCore
 
 /// One selection scope per conversation; text stays native and tool controls remain interactive.
@@ -59,7 +57,16 @@ import RemoteCCCore
         while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantFuture, inMode: .eventTracking, dequeue: true) {
             scope.select(from: self, anchor: anchor, to: next.locationInWindow)
             if next.type == .leftMouseUp { break }
-            enclosingScrollView?.contentView.autoscroll(with: next)
+            // Code and tables have their own horizontal scroller. Drag selection
+            // must still reach the outer conversation's vertical scroller.
+            var ancestor = superview
+            var vertical: NSScrollView?
+            while let view = ancestor {
+                if let scroll = view as? NSScrollView,
+                   (scroll.documentView?.bounds.height ?? 0) > scroll.contentView.bounds.height + 1 { vertical = scroll }
+                ancestor = view.superview
+            }
+            (vertical ?? enclosingScrollView)?.contentView.autoscroll(with: next)
         }
     }
 }
@@ -67,6 +74,7 @@ import RemoteCCCore
 struct SelectableTranscriptText: NSViewRepresentable {
     let text: String
     var markdown = true
+    var attributed: NSAttributedString?
     var scope: TranscriptSelection?
     var open: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
@@ -76,6 +84,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
         view.textContainerInset = .zero; view.textContainer?.lineFragmentPadding = 0
         view.isVerticallyResizable = true; view.isHorizontallyResizable = false
         view.textContainer?.widthTracksTextView = false
+        view.textContainer?.lineBreakMode = .byWordWrapping
         view.delegate = context.coordinator
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return view
@@ -83,11 +92,12 @@ struct SelectableTranscriptText: NSViewRepresentable {
     func updateNSView(_ view: TranscriptTextView, context: Context) {
         context.coordinator.open = open
         view.selectionScope = scope; scope?.register(view)
-        guard context.coordinator.source != text else { return }
+        guard context.coordinator.source != text || context.coordinator.attributed != attributed else { return }
+        context.coordinator.attributed = attributed
         context.coordinator.source = text
         context.coordinator.measuredWidth = nil
         let range = view.selectedRange()
-        view.textStorage?.setAttributedString(Self.render(text, markdown: markdown))
+        view.textStorage?.setAttributedString(attributed ?? Self.render(text, markdown: markdown))
         if NSMaxRange(range) <= (view.string as NSString).length { view.setSelectedRange(range) }
         view.invalidateIntrinsicContentSize()
     }
@@ -112,6 +122,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var source: String?
+        var attributed: NSAttributedString?
         var measuredWidth: CGFloat?
         var measuredSize: CGSize?
         var open: (URL) -> Void = { _ in }
@@ -121,49 +132,11 @@ struct SelectableTranscriptText: NSViewRepresentable {
             return true
         }
     }
-    static func html(_ text: String) -> String {
-        cmark_gfm_core_extensions_ensure_registered()
-        guard let parser = cmark_parser_new(CMARK_OPT_DEFAULT) else { return "" }
-        defer { cmark_parser_free(parser) }
-        for name in ["autolink", "strikethrough", "tagfilter", "tasklist", "table"] {
-            if let ext = cmark_find_syntax_extension(name) { cmark_parser_attach_syntax_extension(parser, ext) }
-        }
-        cmark_parser_feed(parser, text, text.utf8.count)
-        guard let document = cmark_parser_finish(parser) else { return "" }
-        defer { cmark_node_free(document) }
-        guard let result = cmark_render_html(document, CMARK_OPT_DEFAULT, cmark_parser_get_syntax_extensions(parser)) else { return "" }
-        defer { free(result) }
-        return String(cString: result)
+    static func render(_ text: String, markdown: Bool) -> NSAttributedString {
+        if markdown { return NativeMarkdown.document(text) }
+        return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor(WorkbenchTheme.ink)])
     }
 
-    private static let renderedCache: NSCache<NSString, NSAttributedString> = {
-        let cache = NSCache<NSString, NSAttributedString>()
-        cache.totalCostLimit = 4 * 1024 * 1024; cache.countLimit = 64
-        return cache
-    }()
-    static func render(_ text: String, markdown: Bool) -> NSAttributedString {
-        guard markdown else { return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor(WorkbenchTheme.ink)]) }
-        if let cached = renderedCache.object(forKey: text as NSString) { return cached }
-        // cmark's safe HTML renderer omits raw HTML. No remote resources are loaded
-        // by the native HTML importer: inline images become clickable text instead.
-        let body = Self.html(RemoteFileLinks.markdown(text))
-            .replacingOccurrences(of: #"<img[^>]*src="([^"]*)"[^>]*>"#, with: #"<a href="$1">[图片]</a>"#, options: .regularExpression)
-            .replacingOccurrences(of: #"href="((?![a-zA-Z][a-zA-Z0-9+.-]*:|#)[^"]+)""#, with: #"href="rcc-file:$1""#, options: .regularExpression)
-        let html = """
-        <html><head><meta charset="utf-8"><style>
-        body { font-family: -apple-system; font-size: 13px; line-height: 1.45; color: #35312e; }
-        p { margin: 0 0 12px; } h1 { font-size:23px; } h2 { font-size:19px; } h3 { font-size:16px; }
-        a { color: #61574e; } pre, code { font-family: Menlo; background-color: #f0eae3; }
-        pre { white-space: pre-wrap; margin: 10px 0; padding: 10px; } table { border-collapse: collapse; }
-        td, th { border: 1px solid #d9d2ca; padding: 8px; } th { background-color: #f0eae3; }
-        blockquote { color: #746d65; } </style></head><body>\(body)</body></html>
-        """
-        guard let data = html.data(using: .utf8), let rendered = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.html, .characterEncoding: String.Encoding.utf8.rawValue], documentAttributes: nil) else {
-            return NSAttributedString(string: text)
-        }
-        renderedCache.setObject(rendered, forKey: text as NSString, cost: rendered.length * 8)
-        return rendered
-    }
 }
 private struct TranscriptSelectionKey: EnvironmentKey {
     static let defaultValue: TranscriptSelection? = nil

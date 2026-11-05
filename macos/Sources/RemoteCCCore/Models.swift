@@ -136,6 +136,7 @@ public struct Preferences: Codable, Hashable, Sendable {
     public var permissionMode: String?
     public var fastMode: Bool?
     public var outputStyle: String?
+    public var promptCacheTtl: String?
     public var additionalDirectories: [String]?
     public init() {}
 }
@@ -310,9 +311,11 @@ public struct FilePreview: Codable, Hashable, Sendable {
     public var mime: String?
     public var reason: String?
     public var notModified: Bool?
+    public var thumbnail: Bool?
+    public var nextOffset: Int?
     /// Image and PDF bytes, read from the local content cache; never persisted.
     public var data: Data?
-    private enum CodingKeys: String, CodingKey { case path, name, size, version, kind, text, revision, truncated, mime, reason, notModified }
+    private enum CodingKeys: String, CodingKey { case path, name, size, version, kind, text, revision, truncated, mime, reason, notModified, thumbnail, nextOffset }
 }
 
 public struct GitFile: Codable, Hashable, Sendable, Identifiable {

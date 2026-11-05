@@ -60,6 +60,9 @@ function preferencePatch(patch) {
     } else if (key === 'permissionMode') {
       if (!['default', 'acceptEdits', 'plan', 'dontAsk', 'auto'].includes(value)) throw new Error('无效权限模式');
       result.permissionMode = value;
+    } else if (key === 'promptCacheTtl') {
+      if (!['', '5m', '1h'].includes(value)) throw new Error('无效缓存时长');
+      result.promptCacheTtl = value;
     } else if (key === 'fastMode') {
       if (typeof value !== 'boolean') throw new Error('无效快速模式');
       result.fastMode = value;

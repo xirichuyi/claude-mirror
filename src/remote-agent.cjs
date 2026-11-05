@@ -65,25 +65,98 @@ function imageType(magic) {
   return null;
 }
 
+// Optional Pillow support. Never install packages or block the agent event loop.
+let thumbnailUnavailableUntil = 0;
+const thumbnailJobs = new Map();
+async function thumbnail(filename, version) {
+  if (Date.now() < thumbnailUnavailableUntil) return null;
+  const key = filename + ':' + version;
+  if (thumbnailJobs.has(key)) return thumbnailJobs.get(key);
+  if (thumbnailJobs.size >= 2) return null;
+  const job = new Promise(done => {
+    const script = `import sys, io, warnings
+warnings.simplefilter('error')
+from PIL import Image, ImageOps
+Image.MAX_IMAGE_PIXELS = 40000000
+with Image.open(sys.argv[1]) as im:
+ im.thumbnail((1024,1024))
+ im = ImageOps.exif_transpose(im).convert('RGBA')
+ bg = Image.new('RGB', im.size, (250,246,242))
+ bg.paste(im, mask=im.getchannel('A'))
+ for edge, quality in [(1024,75),(768,65),(512,60),(384,55)]:
+  bg.thumbnail((edge,edge))
+  output = io.BytesIO()
+  bg.save(output, format='JPEG', quality=quality)
+  if output.tell() <= 96 * 1024: break
+ if output.tell() > 96 * 1024: raise ValueError('thumbnail too large')
+ sys.stdout.buffer.write(output.getvalue())
+`;
+    execFile('python3', ['-c', script, filename], { encoding: 'buffer', timeout: 5000, maxBuffer: 512 * 1024 }, (error, output, stderr) => {
+      if (error) {
+        if (error.code === 'ENOENT' || String(stderr || '').includes('No module named')) thumbnailUnavailableUntil = Date.now() + 60000;
+        done(null);
+      } else done(output);
+    });
+  }).finally(() => thumbnailJobs.delete(key));
+  thumbnailJobs.set(key, job);
+  return job;
+}
+
 async function preview(request) {
   const filename = resolve(request.path, request.base);
   const info = await regular(filename);
   if (request.knownVersion === info.version) return { ...info, notModified: true };
   const source = await fsp.open(filename, 'r');
   try {
-    const buffer = Buffer.alloc(Math.min(MEGABYTE, Math.max(info.size, 16)));
+    // Detect media before reading a full megabyte just to discover its type.
+    const header = Buffer.alloc(16);
+    await source.read(header, 0, header.length, 0);
+    const detected = imageType(header);
+    if (request.thumbnail === true && ['image/png', 'image/jpeg', 'image/webp'].includes(detected) && info.size > 256 * 1024 && info.size <= 20 * MEGABYTE) {
+      const small = await thumbnail(filename, info.version);
+      const current = await metadata(filename);
+      if (current.version !== info.version) throw new Error('远端文件已变化，请重试');
+      if (small && small.length < info.size) return { ...info, kind: 'image', mime: 'image/jpeg', thumbnail: true, inlineData: small.toString('base64') };
+    }
+    const inline = request.inlineMedia === true && info.size <= 256 * 1024;
+    if (detected && !inline) {
+      if (info.size > 20 * MEGABYTE) return { ...info, kind: 'binary', reason: '文件超过预览大小限制，请下载查看' };
+      return { ...info, kind: detected === 'application/pdf' ? 'pdf' : 'image', mime: detected };
+    }
+    const limit = Number.isInteger(request.textLimit) ? Math.max(4096, Math.min(MEGABYTE, request.textLimit)) : MEGABYTE;
+    const buffer = Buffer.alloc(Math.min(detected ? MEGABYTE : limit, Math.max(info.size, 16)));
     const { bytesRead } = await source.read(buffer, 0, buffer.length, 0);
     const data = buffer.subarray(0, bytesRead);
     const mime = imageType(data.subarray(0, 16));
     if (mime) {
       if (info.size > 20 * MEGABYTE) return { ...info, kind: 'binary', reason: '文件超过预览大小限制，请下载查看' };
-      return { ...info, kind: mime === 'application/pdf' ? 'pdf' : 'image', mime };
+      return { ...info, kind: mime === 'application/pdf' ? 'pdf' : 'image', mime,
+        ...(inline && bytesRead === info.size ? { inlineData: data.toString('base64') } : {}) };
     }
     try {
       const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(data, { stream: info.size > data.length });
       if (text.includes('\0')) throw new Error('binary');
-      return { ...info, kind: 'text', text, revision: crypto.createHash('sha256').update(data).digest('hex'), truncated: info.size > data.length };
+      return { ...info, kind: 'text', text, nextOffset: Buffer.byteLength(text), revision: crypto.createHash('sha256').update(data).digest('hex'), truncated: info.size > data.length };
     } catch { return { ...info, kind: 'binary', reason: '此格式请下载或在本地打开' }; }
+  } finally { await source.close(); }
+}
+
+async function textPage(request) {
+  const filename = resolve(request.path, request.base);
+  const info = await regular(filename);
+  if (request.version !== info.version) throw new Error('远端文件已变化，请重新打开');
+  const offset = request.offset;
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= info.size || offset >= MEGABYTE) throw new Error('无效预览位置');
+  const source = await fsp.open(filename, 'r');
+  try {
+    const buffer = Buffer.alloc(Math.min(64 * 1024, info.size - offset, MEGABYTE + 3 - offset));
+    const { bytesRead } = await source.read(buffer, 0, buffer.length, offset);
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(buffer.subarray(0, bytesRead), { stream: offset + bytesRead < info.size });
+    const nextOffset = offset + Buffer.byteLength(text);
+    const truncated = nextOffset < info.size;
+    const revision = !truncated && info.size <= MEGABYTE ? crypto.createHash('sha256').update(await fsp.readFile(filename)).digest('hex') : undefined;
+    if ((await metadata(filename)).version !== info.version) throw new Error('远端文件已变化，请重新打开');
+    return { text, nextOffset, truncated, revision };
   } finally { await source.close(); }
 }
 
@@ -348,7 +421,7 @@ async function attachmentLookup(request) {
 }
 
 const fileOperations = {
-  attachmentLookup, hello, list: listing, preview, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
+  attachmentLookup, hello, list: listing, preview, textPage, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
   diff: gitDiffText, gitStatus, gitFileDiff, createWorktree, create: createEntry, rename: renameEntry, remove: removeEntry,
 };
 

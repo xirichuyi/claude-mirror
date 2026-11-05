@@ -81,8 +81,8 @@ struct ComposerArea: View {
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
             .background {
-                FrostedBackground(material: .popover, blendingMode: .withinWindow)
-                    .clipShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
+                RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large)
+                    .fill(WorkbenchTheme.surface)
             }
             .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large).strokeBorder(dropTarget ? WorkbenchTheme.accent : WorkbenchTheme.border.opacity(0.6)))
             .shadow(color: .black.opacity(0.055), radius: 14, y: 4)

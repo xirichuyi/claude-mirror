@@ -262,6 +262,115 @@ final class AgentTests: XCTestCase {
         XCTAssertTrue(finished.allSatisfy { $0.config.directory.hasSuffix($0.config.host) })
     }
 
+    func testSmallMediaPreviewAvoidsTransferAndRevalidatesChanges() async throws {
+        let env = try AgentEnvironment(); defer { env.cleanup() }
+        let agents = AgentClient(launcher: BrokenTransferLauncher(home: env.home.path, command: "exit 42"),
+                                 resources: try ServerResources(directory: env.resourcesDirectory))
+        defer { agents.close(env.config) }
+        let files = RemoteFiles(agents: agents, cacheDirectory: env.home.appendingPathComponent("inline-cache"))
+        let file = env.home.appendingPathComponent("preview.png")
+        let header = Data([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+        let initial = header + Data(repeating: 1, count: 1024)
+        try initial.write(to: file)
+        let first = try await files.preview(env.config, file.path)
+        XCTAssertEqual(first.data, initial)
+        let cached = try await files.preview(env.config, file.path)
+        XCTAssertEqual(cached.data, initial)
+        let updated = header + Data(repeating: 2, count: 2048)
+        try updated.write(to: file, options: .atomic)
+        let changed = try await files.preview(env.config, file.path)
+        XCTAssertEqual(changed.data, updated)
+        XCTAssertNotEqual(first.version, changed.version)
+        try (header + Data(repeating: 3, count: 300_000)).write(to: file, options: .atomic)
+        do {
+            _ = try await files.preview(env.config, file.path)
+            XCTFail("Large media must still use the separate transfer channel")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("42")) }
+    }
+
+    func testPreviewCacheSurvivesRecreationAndDownloadReusesOriginal() async throws {
+        let env = try AgentEnvironment(); defer { env.cleanup() }
+        let agents = AgentClient(launcher: BrokenTransferLauncher(home: env.home.path, command: "exit 42"),
+                                 resources: try ServerResources(directory: env.resourcesDirectory))
+        defer { agents.close(env.config) }
+        let cache = env.home.appendingPathComponent("reuse-cache")
+        let files = RemoteFiles(agents: agents, cacheDirectory: cache)
+        let file = env.home.appendingPathComponent("cached.txt")
+        try "version one".write(to: file, atomically: true, encoding: .utf8)
+        _ = try await files.preview(env.config, file.path)
+        let recreated = RemoteFiles(agents: agents, cacheDirectory: cache)
+        let snapshot = await recreated.cachedPreview(env.config, file.path)
+        XCTAssertEqual(snapshot?.text, "version one")
+        let destination = env.home.appendingPathComponent("download.txt")
+        try await recreated.download(env.config, file.path, to: destination)
+        XCTAssertEqual(try String(contentsOf: destination), "version one")
+        try "version two".write(to: file, atomically: true, encoding: .utf8)
+        let fresh = try await recreated.preview(env.config, file.path)
+        XCTAssertEqual(fresh.text, "version two")
+        try FileManager.default.removeItem(at: file)
+        let offlineSnapshot = await recreated.cachedPreview(env.config, file.path)
+        XCTAssertEqual(offlineSnapshot?.text, "version two")
+        do { _ = try await recreated.preview(env.config, file.path); XCTFail("Deleted file must fail validation") } catch { }
+    }
+
+    @MainActor
+    func testTextPagesPreserveUnicodeAndRejectChangedVersion() async throws {
+        let env = try AgentEnvironment(); defer { env.cleanup() }
+        let file = env.home.appendingPathComponent("unicode.txt")
+        let text = String(repeating: "你好🌿\n", count: 20000)
+        try text.write(to: file, atomically: true, encoding: .utf8)
+        let workspace = Workspace(files: env.files, agents: env.agents, config: env.config)
+        await workspace.open(file.path)
+        let tab = try XCTUnwrap(workspace.activeTab)
+        XCTAssertLessThanOrEqual(tab.preview?.nextOffset ?? Int.max, 65536)
+        while tab.preview?.truncated == true, tab.error == nil { await workspace.loadMoreText(tab) }
+        XCTAssertNil(tab.error); XCTAssertEqual(tab.preview?.text, text)
+        workspace.beginEditing(tab)
+        tab.draft = "saved"
+        await workspace.save(tab)
+        XCTAssertEqual(try String(contentsOf: file), "saved")
+        try text.write(to: file, atomically: true, encoding: .utf8)
+        await workspace.open(file.path)
+        try "changed".write(to: file, atomically: true, encoding: .utf8)
+        await workspace.loadMoreText(tab)
+        XCTAssertNotNil(tab.error)
+    }
+
+    func testLargeUnicodePreviewMakesProgressAtDisplayLimit() async throws {
+        let env = try AgentEnvironment(); defer { env.cleanup() }
+        let file = env.home.appendingPathComponent("large-unicode.txt")
+        try String(repeating: "🌿", count: 300000).write(to: file, atomically: true, encoding: .utf8)
+        let info = try await env.files.preview(env.config, file.path)
+        var offset = try XCTUnwrap(info.nextOffset)
+        for _ in 0..<20 where offset < 1024 * 1024 {
+            let page = try await env.files.run(env.config, "textPage", ["path": .string(file.path), "version": .string(try XCTUnwrap(info.version)), "offset": .number(Double(offset))])
+            let next = try XCTUnwrap(page["nextOffset"]?.int)
+            XCTAssertGreaterThan(next, offset)
+            offset = next
+        }
+        XCTAssertGreaterThanOrEqual(offset, 1024 * 1024)
+    }
+
+    func testThumbnailIsSeparateFromOriginalDownload() async throws {
+        let env = try AgentEnvironment(); defer { env.cleanup() }
+        guard let python = AgentEnvironment.which("python3"), (try? RemoteCCCoreTests.run(python, ["-c", "import PIL"])) != nil else {
+            throw XCTSkip("Pillow is optional")
+        }
+        let file = env.home.appendingPathComponent("large.png")
+        _ = try RemoteCCCoreTests.run(python, ["-c", "from PIL import Image; import sys; Image.effect_noise((1600,1600),80).convert('RGB').save(sys.argv[1])", file.path])
+        let original = try Data(contentsOf: file)
+        XCTAssertGreaterThan(original.count, 256 * 1024)
+        let thumbnail = try await env.files.preview(env.config, file.path)
+        XCTAssertEqual(thumbnail.thumbnail, true)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(thumbnail.data).count, 96 * 1024)
+        let destination = env.home.appendingPathComponent("download.png")
+        try await env.files.download(env.config, file.path, to: destination)
+        XCTAssertEqual(try Data(contentsOf: destination), original)
+        let full = try await env.files.preview(env.config, file.path, original: true)
+        XCTAssertNotEqual(full.thumbnail, true); XCTAssertEqual(full.data, original)
+        print("MEDIA original=\(original.count) preview=\(thumbnail.data?.count ?? 0) bytes")
+    }
+
     func testTransferEditAndCache() async throws {
         let environment = try AgentEnvironment(); defer { environment.cleanup() }
         let files = environment.files, config = environment.config

@@ -19,8 +19,42 @@ final class TranscriptSelectionTests: XCTestCase {
             if let style = value as? NSParagraphStyle, !style.textBlocks.isEmpty { tableCells += 1 }
         }
         XCTAssertGreaterThanOrEqual(tableCells, 4)
-        XCTAssertTrue(SelectableTranscriptText.html("| a | b |\n| --- | --- |\n| c | d |").contains("<td>c</td>"))
     }
+    @MainActor func testLongCodePromptsWrapAtNarrowWidthsWithoutLosingText() {
+        _ = NSApplication.shared
+        let prompt = String(repeating: "young Chinese man, dark urban fantasy, 你好世界 ", count: 12)
+        let rendered = SelectableTranscriptText.render("1. **午夜都市** `" + prompt + "`\n\n```text\n" + prompt + "\n```", markdown: true)
+        XCTAssertTrue(rendered.string.contains(prompt))
+        let storage = NSTextStorage(attributedString: rendered)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: 320, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container); storage.addLayoutManager(layout)
+        layout.ensureLayout(for: container)
+        let narrow = layout.usedRect(for: container)
+        XCTAssertLessThanOrEqual(narrow.maxX, 321)
+        XCTAssertEqual(NSMaxRange(layout.glyphRange(for: container)), layout.numberOfGlyphs)
+        container.containerSize.width = 720
+        layout.ensureLayout(for: container)
+        XCTAssertGreaterThan(narrow.height, layout.usedRect(for: container).height)
+    }
+
+    @MainActor func testSelectionIncludesCodeInsideHorizontalScroller() {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        let scope = TranscriptSelection()
+        let top = TranscriptTextView(frame: NSRect(x: 0, y: 400, width: 450, height: 100))
+        let code = TranscriptTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 100))
+        let bottom = TranscriptTextView(frame: NSRect(x: 0, y: 0, width: 450, height: 100))
+        top.string = "正文"; code.string = "let value = 42"; bottom.string = "下一条消息"
+        let scroller = NSScrollView(frame: NSRect(x: 0, y: 200, width: 450, height: 100))
+        scroller.documentView = code; scroller.hasHorizontalScroller = true
+        window.contentView!.addSubview(top); window.contentView!.addSubview(scroller); window.contentView!.addSubview(bottom)
+        for view in [top, code, bottom] { scope.register(view); view.selectionScope = scope }
+        scope.select(from: top, anchor: 0, to: bottom.convert(NSPoint(x: 440, y: 50), to: nil))
+        XCTAssertEqual(scope.selectedText, "正文\n\nlet value = 42\n\n下一条消息")
+    }
+
     @MainActor func testSelectionCopiesAcrossMessageViewsInVisualOrder() {
         _ = NSApplication.shared
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)

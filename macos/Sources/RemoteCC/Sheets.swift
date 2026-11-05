@@ -15,6 +15,7 @@ struct PreferencesSheet: View {
     @State private var permissionMode = "default"
     @State private var fastMode = false
     @State private var outputStyle = ""
+    @State private var promptCacheTtl = ""
     @State private var directories = ""
     @State private var error = ""
     @State private var saving = false
@@ -75,6 +76,13 @@ struct PreferencesSheet: View {
                     Text("远端默认").tag("")
                     ForEach(capabilities.outputStyles ?? [], id: \.self) { Text($0).tag($0) }
                 }
+                Picker("上下文缓存", selection: $promptCacheTtl) {
+                    Text("远端默认").tag("")
+                    Text("5 分钟").tag("5m")
+                    Text("1 小时").tag("1h")
+                }
+                .disabled(session?.isBusy == true)
+                .help("需要 Claude Code 2.1.242+。1 小时适合间歇工作，缓存写入费率更高；远端环境变量优先。不会发送保活请求。")
                 VStack(alignment: .leading) {
                     Text("额外目录").help("每行一个远端绝对路径")
                     TextEditor(text: $directories).scrollContentBackground(.hidden).background(WorkbenchTheme.surface).font(.system(size: 12, design: .monospaced)).frame(height: 54).disabled(session?.isBusy == true)
@@ -101,6 +109,7 @@ struct PreferencesSheet: View {
                 permissionMode = preferences.permissionMode ?? "default"
                 fastMode = preferences.fastMode ?? false
                 outputStyle = preferences.outputStyle ?? ""
+                promptCacheTtl = preferences.promptCacheTtl ?? ""
                 directories = (preferences.additionalDirectories ?? []).joined(separator: "\n")
                 capabilities = result
             } catch { loadError = error.localizedDescription }
@@ -113,6 +122,7 @@ struct PreferencesSheet: View {
         next.agent = agent
         next.selectedModel = selectedModel == customTag ? customModel.trimmingCharacters(in: .whitespaces) : selectedModel
         next.effort = effort; next.permissionMode = permissionMode; next.fastMode = fastMode; next.outputStyle = outputStyle
+        next.promptCacheTtl = promptCacheTtl
         next.additionalDirectories = directories.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         saving = true; error = ""
         Task {

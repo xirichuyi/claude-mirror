@@ -643,13 +643,21 @@ public final class ChatEngine {
             if next.fastMode == true, model.supportsFastMode != true { throw RemoteError("此模型不支持快速模式，请先关闭快速模式") }
             if next.permissionMode == "auto", model.supportsAutoMode != true { throw RemoteError("此模型不支持自动权限模式") }
         }
+        let cacheChanged = (next.promptCacheTtl ?? "") != (current.promptCacheTtl ?? "")
+        if cacheChanged, let ttl = next.promptCacheTtl, !ttl.isEmpty {
+            guard ["5m", "1h"].contains(ttl) else { throw RemoteError("无效缓存时长") }
+            guard let version = session.capabilities?.version,
+                  version.compare("2.1.242", options: .numeric) != .orderedAscending else {
+                throw RemoteError("缓存时长需要 Claude Code 2.1.242 或更新版本，请刷新远端能力")
+            }
+        }
         var patch: [String: JSON] = [:]
         if (next.selectedModel ?? "") != (current.selectedModel ?? "") { patch["selectedModel"] = .string(next.selectedModel ?? "") }
         if (next.effort ?? "") != (current.effort ?? "") { patch["effort"] = .string(next.effort ?? "") }
         if (next.permissionMode ?? "default") != (current.permissionMode ?? "default") { patch["permissionMode"] = .string(next.permissionMode ?? "default") }
         if (next.fastMode ?? false) != (current.fastMode ?? false) { patch["fastMode"] = .bool(next.fastMode ?? false) }
         if (next.outputStyle ?? "") != (current.outputStyle ?? "") { patch["outputStyle"] = .string(next.outputStyle ?? "") }
-        let startup = (next.additionalDirectories ?? []) != (current.additionalDirectories ?? []) || (next.agent ?? "") != (current.agent ?? "")
+        let startup = cacheChanged || (next.additionalDirectories ?? []) != (current.additionalDirectories ?? []) || (next.agent ?? "") != (current.agent ?? "")
         if running.contains(id), session.remoteOwner == nil || startup { throw RemoteError("请等待当前回复完成后切换设置") }
         if session.remoteOwner != nil {
             if startup { try await release(id) }

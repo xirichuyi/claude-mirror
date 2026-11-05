@@ -392,7 +392,7 @@ struct EditorPane: View {
 
     private func tabButton(_ tab: EditorTab) -> some View {
         HStack(spacing: 4) {
-            Button { workspace.activeTabId = tab.id; model.objectWillChange.send() } label: {
+            Button { Task { await workspace.select(tab) } } label: {
                 Text((tab.isDirty ? "● " : "") + tab.title).font(.caption).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180)
                     .foregroundStyle(tab.id == workspace.activeTabId ? Color.primary : Color.secondary)
             }.buttonStyle(.plain).help(tab.path)
@@ -413,11 +413,18 @@ struct EditorPane: View {
                     if tab.draft != nil {
                         Button("保存到远端") { Task { await workspace.save(tab) } }
                     } else if preview.kind == "text", preview.truncated != true, preview.revision != nil {
-                        Button("编辑") { workspace.beginEditing(tab) }
+                        Button("编辑") { workspace.beginEditing(tab) }.disabled(tab.isValidating || tab.error != nil)
                     }
                     if isMarkdown(preview), tab.draft == nil {
                         Button(tab.showSource ? "预览" : "源码") { tab.showSource.toggle(); model.objectWillChange.send() }
                     }
+                    if preview.kind == "text", preview.truncated == true, (preview.nextOffset ?? 1048576) < 1048576 {
+                        Button("加载更多") { Task { await workspace.loadMoreText(tab) } }.disabled(tab.isValidating)
+                    }
+                    if preview.thumbnail == true {
+                        Button("查看原图") { Task { await workspace.open(preview.path, original: true) } }.disabled(tab.isValidating)
+                    }
+                    if tab.isValidating { ProgressView().controlSize(.mini).help("检查远端版本") }
                     Spacer(minLength: 0)
                     Menu {
                         Button("附加到对话") { model.attach(preview.path) }
@@ -435,7 +442,7 @@ struct EditorPane: View {
     private func info(_ tab: EditorTab) -> String {
         if tab.isDiff { return "Git 变更" }
         guard let preview = tab.preview else { return "读取中…" }
-        return byteText(preview.size) + (preview.truncated == true ? " · 仅预览前 1 MB" : "")
+        return byteText(preview.size) + (preview.truncated == true ? " · 已加载 " + byteText(preview.nextOffset ?? 1048576) : "")
     }
 }
 

@@ -1,6 +1,5 @@
 #if canImport(SwiftUI)
 import SwiftUI
-import MarkdownUI
 import AppKit
 import RemoteCCCore
 
@@ -9,27 +8,37 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let session = model.active, model.projectMissing(session) {
-                HStack {
-                    Label("远端目录已不存在，历史对话仍可查看", systemImage: "folder.badge.questionmark")
-                    Spacer()
-                    Button("选择项目") { model.showProjectPicker = true }
-                }.font(.callout).padding(12).background(Color.orange.opacity(0.08))
-            }
-            if model.active == nil {
-                MachineHomeView()
-            } else if let session = model.active, !session.messages.isEmpty || session.remoteHistoryRef != nil {
-                if model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil || session.historyLoaded == false {
-                    HistoryNotice(session: session).padding(.horizontal, 24).padding(.vertical, 10)
-                        .background(WorkbenchTheme.surface.opacity(0.5))
+            VStack(spacing: 0) {
+                if let session = model.active, model.projectMissing(session) {
+                    HStack {
+                        Label("远端目录已不存在，历史对话仍可查看", systemImage: "folder.badge.questionmark")
+                        Spacer()
+                        Button("选择项目") { model.showProjectPicker = true }
+                    }.font(.callout).padding(12).background(Color.orange.opacity(0.08))
                 }
-                MessagesList(session: session).id(session.id)
-            } else {
-                WelcomeView()
+                if model.active == nil {
+                    MachineHomeView()
+                } else if let session = model.active, !session.messages.isEmpty || session.remoteHistoryRef != nil {
+                    if model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil || session.historyLoaded == false {
+                        HistoryNotice(session: session).padding(.horizontal, 24).padding(.vertical, 10)
+                            .background(WorkbenchTheme.surface.opacity(0.5))
+                    }
+                    MessagesList(session: session).id(session.id)
+                } else {
+                    WelcomeView()
+                }
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if model.currentConfig != nil { ComposerArea() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+
+            // Reserve real layout space for the composer. A safe-area inset on the
+            // outer stack lets the nested native transcript draw behind the input.
+            if model.currentConfig != nil {
+                ComposerArea()
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                    .background(WorkbenchTheme.canvas)
+            }
         }
         .background(WorkbenchTheme.canvas)
     }
@@ -140,6 +149,7 @@ struct MessagesList: View {
                         value: ReplyGeometry(height: content.size.height, bottom: content.frame(in: .named("replyViewport")).maxY))
                 })
             }
+            .clipped()
             .defaultScrollAnchor(.bottom)
             .coordinateSpace(name: "replyViewport")
             .onPreferenceChange(ReplyBottomPreference.self) { geometry in
@@ -564,16 +574,4 @@ struct DiffView: View {
     }
 }
 
-struct MarkdownView: View {
-    let text: String
-    let actions: FileActions
-    @Environment(\.transcriptSelection) private var selection
-
-    var body: some View {
-        SelectableTranscriptText(text: text, scope: selection) { url in
-            if ["http", "https"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
-            else if let reference = RemoteFileLinks.reference(url) { actions.open(reference.path, reference.line) }
-        }
-    }
-}
 #endif

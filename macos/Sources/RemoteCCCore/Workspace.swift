@@ -5,6 +5,9 @@ public final class EditorTab: Identifiable {
     public var path: String
     public let isDiff: Bool
     public var preview: FilePreview?
+    public var isValidating = false
+    var loadID = UUID()
+    var loadTask: Task<FilePreview, Error>?
     public var diffText: String?
     public var error: String?
     /// Non-nil while editing; a difference from `preview.text` means unsaved work.
@@ -193,15 +196,66 @@ public final class Workspace {
         return tab
     }
 
-    public func open(_ file: String, line: Int? = nil) async {
+    public func select(_ tab: EditorTab) async {
+        guard tabs.contains(where: { $0 === tab }) else { return }
+        if tab.isDiff {
+            for other in tabs where other !== tab { other.loadTask?.cancel() }
+            activeTabId = tab.id; changed()
+        } else {
+            let original = tab.preview?.kind == "image" && tab.preview?.thumbnail != true
+            await open(tab.path, original: original)
+        }
+    }
+
+    public func open(_ file: String, line: Int? = nil, original: Bool = false) async {
         let existing = tabs.first { !$0.isDiff && ($0.path == file || $0.preview?.path == file) }
         let tab = addTab(existing?.id ?? "file:" + file, path: file, isDiff: false, line: line)
+        for other in tabs where other !== tab { other.loadTask?.cancel() }
+        tab.loadTask?.cancel()
+        let id = UUID()
+        tab.loadID = id; tab.isValidating = true; tab.error = nil
+        let files = self.files, config = self.config
+        let task = Task { try await files.preview(config, file, original: original) }
+        tab.loadTask = task
+        if tab.preview == nil, let snapshot = await files.cachedPreview(config, file, original: original), tab.loadID == id {
+            tab.preview = snapshot
+            changed()
+        }
         do {
-            let result = try await files.preview(config, file)
-            tab.preview = result; tab.path = result.path; tab.error = nil
+            let result = try await task.value
+            guard tab.loadID == id, tabs.contains(where: { $0 === tab }), !task.isCancelled else { return }
+            if tab.isDirty {
+                tab.conflict = result.version != tab.preview?.version
+            } else {
+                tab.preview = result; tab.path = result.path
+            }
+            tab.isValidating = false; tab.loadTask = nil
+            changed()
             await syncWatches()
-        } catch { tab.error = error.localizedDescription }
+        } catch {
+            guard tab.loadID == id else { return }
+            tab.isValidating = false; tab.loadTask = nil
+            if !(error is CancellationError) { tab.error = error.localizedDescription }
+        }
         changed()
+    }
+
+    public func loadMoreText(_ tab: EditorTab) async {
+        guard !tab.isValidating, var preview = tab.preview, preview.kind == "text",
+              preview.truncated == true, let offset = preview.nextOffset, offset < 1024 * 1024,
+              let version = preview.version else { return }
+        let id = tab.loadID
+        tab.isValidating = true; changed()
+        defer { if tab.loadID == id { tab.isValidating = false; changed() } }
+        do {
+            let page = try await files.run(config, "textPage", ["path": .string(preview.path), "offset": .number(Double(offset)), "version": .string(version)])
+            guard tab.loadID == id, tab.preview?.version == version, !tab.isDirty else { return }
+            preview.text = (preview.text ?? "") + (page["text"]?.string ?? "")
+            preview.nextOffset = page["nextOffset"]?.int
+            preview.truncated = page["truncated"]?.bool
+            preview.revision = page["revision"]?.string
+            tab.preview = preview; tab.error = nil
+        } catch { if tab.loadID == id { tab.error = error.localizedDescription } }
     }
 
     public func openDiff(_ file: String) async {
@@ -214,13 +268,15 @@ public final class Workspace {
     /// The caller confirms discarding unsaved edits first.
     public func close(_ tab: EditorTab) {
         guard let index = tabs.firstIndex(where: { $0 === tab }) else { return }
+        tab.loadTask?.cancel()
+        tab.loadID = UUID()
         tabs.remove(at: index)
         if activeTabId == tab.id { activeTabId = (tabs[safe: index] ?? tabs[safe: index - 1])?.id }
         changed()
         Task { await syncWatches() }
     }
 
-    public func beginEditing(_ tab: EditorTab) { if tab.preview?.kind == "text", tab.preview?.truncated != true { tab.draft = tab.preview?.text; changed() } }
+    public func beginEditing(_ tab: EditorTab) { if !tab.isValidating, tab.error == nil, tab.preview?.kind == "text", tab.preview?.truncated != true { tab.draft = tab.preview?.text; changed() } }
 
     public func save(_ tab: EditorTab) async {
         guard let draft = tab.draft, let preview = tab.preview, let revision = preview.revision else { return }

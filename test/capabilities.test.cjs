@@ -100,3 +100,32 @@ test('CLI result-only usage packet renders as command output without invoking mo
   assert.match(message.blocks[0].text, /Current week/);
   assert.equal(message.costUSD, 0);
 });
+
+test('cache TTL inherits remote defaults and changes only on an idle resumable session', async () => {
+  const service = new ChatService({ load: () => [], save() {} });
+  try {
+    const session = service.create({ host: 'axi', directory: '/tmp' });
+    session.remoteSessionId = 'preserved-history';
+    assert.equal(service.options(session, {}).settings, undefined);
+    assert.throws(() => preferencePatch({ promptCacheTtl: 'forever' }), /缓存时长/);
+    session.capabilities = { version: '2.1.241', models: [] };
+    assert.throws(() => service.configure(session.id, { promptCacheTtl: '1h' }), /2.1.242/);
+    session.capabilities.version = '2.1.312';
+    service.runs.set(session.id, {});
+    assert.throws(() => service.configure(session.id, { promptCacheTtl: '1h' }), /回复完成/);
+    service.runs.delete(session.id);
+    session.remoteOwner = 'old-worker';
+    let released = false;
+    service.persistent = { release: async current => { released = true; delete current.remoteOwner; } };
+    await service.configure(session.id, { promptCacheTtl: '1h' });
+    assert.equal(released, true);
+    const options = service.options(session, {});
+    assert.equal(options.settings.promptCacheTtl, '1h');
+    assert.equal(options.resume, 'preserved-history');
+    assert.deepEqual(options.settingSources, ['user', 'project', 'local']);
+    service.configure(session.id, { promptCacheTtl: '5m' });
+    assert.equal(service.options(session, {}).settings.promptCacheTtl, '5m');
+    service.configure(session.id, { promptCacheTtl: '' });
+    assert.equal(service.options(session, {}).settings, undefined);
+  } finally { service.persistent = null; await service.close(); }
+});

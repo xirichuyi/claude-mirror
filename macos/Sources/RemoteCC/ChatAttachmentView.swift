@@ -8,6 +8,7 @@ struct ChatAttachmentView: View {
     let file: Attachment
     @State private var thumbnail: NSImage?
     @State private var loading = false
+    @State private var loadTask: Task<Void, Never>?
     @State private var error = ""
     private var imageFile: Bool { ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains((file.name as NSString).pathExtension.lowercased()) }
     var body: some View {
@@ -29,17 +30,22 @@ struct ChatAttachmentView: View {
             if !error.isEmpty { Text(error).font(.caption2).foregroundStyle(.secondary).lineLimit(2) }
         }.padding(12).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
+            .onDisappear { loadTask?.cancel() }
     }
     private func load() {
         guard let session = model.active, let engine = model.engine else { return }
         loading = true; error = ""
-        Task {
+        loadTask?.cancel()
+        loadTask = Task {
             defer { loading = false }
+            if let cached = await engine.files.cachedPreview(session.config, file.path), let data = cached.data {
+                thumbnail = NSImage(data: data)
+            }
             do {
                 let preview = try await engine.files.preview(session.config, file.path)
                 guard let data = preview.data, let image = NSImage(data: data) else { error = "此文件无法生成图片预览"; return }
                 thumbnail = image
-            } catch { self.error = error.localizedDescription }
+            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }
 }

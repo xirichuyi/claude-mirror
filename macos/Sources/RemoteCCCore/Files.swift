@@ -33,6 +33,8 @@ public final class RemoteFiles: @unchecked Sendable {
     private let cacheDirectory: URL
     private let cacheLimit: Int
     private let lock = NSLock()
+    private let previewRequests = SharedFileRequests<FilePreview>()
+    private let contentRequests = SharedFileRequests<URL>()
     private var previews: [String: FilePreview] = [:]
     private var listings: [String: (time: Date, value: DirectoryListing)] = [:]
     public var onProgress: (@Sendable (TransferProgress) -> Void)?
@@ -66,18 +68,62 @@ public final class RemoteFiles: @unchecked Sendable {
         return value
     }
 
-    public func preview(_ config: ConnectionConfig, _ file: String) async throws -> FilePreview {
-        let key = "\(config.key)|\(config.directory)|\(file)"
-        let previous = lock.withLock { previews[key] }
-        var params: [String: JSON] = ["path": .string(file)]
-        if let version = previous?.version { params["knownVersion"] = .string(version) }
-        var info = try await run(config, "preview", params).decode(FilePreview.self)
-        if info.notModified == true, let previous { info = previous }
-        let stored = info
-        lock.withLock { previews[key] = stored }
+    private func previewKey(_ config: ConnectionConfig, _ file: String, original: Bool) -> String {
+        "\(config.key)|\(config.directory)|\(file)|\(original)"
+    }
+
+    private func contentURL(_ config: ConnectionConfig, _ info: FilePreview) -> URL {
+        cacheDirectory.appendingPathComponent(cacheName("\(config.key)|\(info.path)|\(info.version ?? "")|\(info.thumbnail == true)"))
+    }
+
+    /// Unvalidated snapshot for immediate display only. Saves still require a remote revision check.
+    public func cachedPreview(_ config: ConnectionConfig, _ file: String, original: Bool = false) async -> FilePreview? {
+        let key = previewKey(config, file, original: original)
+        let disk = cacheDirectory.appendingPathComponent(cacheName("preview:" + key))
+        guard var info = lock.withLock({ previews[key] }) ?? (try? JSONDecoder().decode(FilePreview.self, from: Data(contentsOf: disk))) else { return nil }
         if info.kind == "image" || info.kind == "pdf" {
-            info.data = try Data(contentsOf: try await cached(config, info), options: .mappedIfSafe)
+            guard let data = try? Data(contentsOf: contentURL(config, info), options: .mappedIfSafe) else { return nil }
+            info.data = data
         }
+        return info
+    }
+
+    public func preview(_ config: ConnectionConfig, _ file: String, original: Bool = false) async throws -> FilePreview {
+        let key = previewKey(config, file, original: original)
+        return try await previewRequests.value(for: key) {
+            try await self.fetchPreview(config, file, original: original)
+        }
+    }
+
+    private func fetchPreview(_ config: ConnectionConfig, _ file: String, original: Bool) async throws -> FilePreview {
+        let key = previewKey(config, file, original: original)
+        let previous = await cachedPreview(config, file, original: original)
+        var params: [String: JSON] = ["path": .string(file), "inlineMedia": .bool(true), "thumbnail": .bool(!original), "textLimit": .number(65536)]
+        if let version = previous?.version { params["knownVersion"] = .string(version) }
+        let response = try await run(config, "preview", params)
+        try Task.checkCancellation()
+        var info = try response.decode(FilePreview.self)
+        if info.notModified == true, let previous { return previous }
+        if info.kind == "image" || info.kind == "pdf" {
+            let inline = response["inlineData"]?.string.flatMap { Data(base64Encoded: $0) }
+            info.data = try Data(contentsOf: try await cached(config, info, inline: inline), options: .mappedIfSafe)
+        }
+        if info.kind == "text", info.truncated != true, let text = info.text {
+            _ = try? await cached(config, info, inline: Data(text.utf8))
+        }
+        try Task.checkCancellation()
+        var metadata = info
+        metadata.data = nil
+        lock.withLock {
+            if previews.count >= 32 { previews.removeAll() }
+            previews[key] = metadata
+        }
+        // Disk caching is best effort; a full disk must not hide a successful preview.
+        let target = cacheDirectory.appendingPathComponent(cacheName("preview:" + key))
+        try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? JSONEncoder().encode(metadata).write(to: target, options: [.atomic])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+        pruneCache(keeping: target)
         return info
     }
 
@@ -90,14 +136,29 @@ public final class RemoteFiles: @unchecked Sendable {
         try await run(config, "stat", ["path": .string(file)]).decode(FileEntry.self)
     }
 
-    private func cached(_ config: ConnectionConfig, _ info: FilePreview) async throws -> URL {
+    private func cached(_ config: ConnectionConfig, _ info: FilePreview, inline: Data? = nil) async throws -> URL {
+        let key = contentURL(config, info).path
+        return try await contentRequests.value(for: key) {
+            try await self.cacheContent(config, info, inline: inline)
+        }
+    }
+
+    private func cacheContent(_ config: ConnectionConfig, _ info: FilePreview, inline: Data?) async throws -> URL {
         try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let target = cacheDirectory.appendingPathComponent(cacheName("\(config.key)|\(info.path)|\(info.version ?? "")"))
+        let target = contentURL(config, info)
         if FileManager.default.fileExists(atPath: target.path) { return target }
         let temporary = cacheDirectory.appendingPathComponent(UUID().uuidString + ".tmp")
         defer { try? FileManager.default.removeItem(at: temporary) }
-        try await transferDown(config, path: info.path, version: info.version, name: info.name, size: info.size, to: temporary)
-        try FileManager.default.moveItem(at: temporary, to: target)
+        if let inline, inline.count == info.size || (info.thumbnail == true && inline.count <= 512 * 1024) {
+            try inline.write(to: temporary, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
+        } else {
+            guard info.thumbnail != true else { throw RemoteError("缩略图数据不完整，请重试") }
+            try await transferDown(config, path: info.path, version: info.version, name: info.name, size: info.size, to: temporary)
+        }
+        if rename(temporary.path, target.path) != 0 {
+            throw RemoteError("无法写入预览缓存：" + String(cString: strerror(errno)))
+        }
         pruneCache(keeping: target)
         return target
     }
@@ -106,7 +167,7 @@ public final class RemoteFiles: @unchecked Sendable {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         guard let files = try? FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: keys) else { return }
         let items = files.compactMap { url -> (URL, Date, Int)? in
-            guard let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
+            guard !url.lastPathComponent.hasSuffix(".tmp"), let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
             return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
         }.sorted { $0.1 < $1.1 }
         var total = items.reduce(0) { $0 + $1.2 }
@@ -153,7 +214,15 @@ public final class RemoteFiles: @unchecked Sendable {
         let info = try await stat(config, file)
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".remotecc-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: temporary) }
-        try await transferDown(config, path: info.path, version: info.version, name: info.name, size: info.size, to: temporary)
+        let preview = try JSONDecoder().decode(FilePreview.self, from: JSONEncoder().encode(info))
+        let local = contentURL(config, preview)
+        if FileManager.default.fileExists(atPath: local.path),
+           (try? FileManager.default.copyItem(at: local, to: temporary)) != nil {
+            onProgress?(TransferProgress(config: config, name: info.name, bytes: info.size, total: info.size, finished: true))
+        } else {
+            try await transferDown(config, path: info.path, version: info.version, name: info.name, size: info.size, to: temporary)
+        }
+
         // Same-filesystem rename is atomic and refuses to replace a directory.
         // Never remove the previous destination before the replacement succeeds.
         guard rename(temporary.path, destination.path) == 0 else {
