@@ -4,45 +4,24 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>claude-mirror</title>
         <item>
-            <title>0.21.3</title>
-            <pubDate>Fri, 06 Nov 2026 01:48:57 +0800</pubDate>
-            <sparkle:version>9</sparkle:version>
-            <sparkle:shortVersionString>0.21.3</sparkle:shortVersionString>
+            <title>0.21.4</title>
+            <pubDate>Fri, 06 Nov 2026 02:03:21 +0800</pubDate>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>0.21.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# claude-mirror v0.21.3
+            <description sparkle:format="markdown"><![CDATA[# claude-mirror v0.21.4
 
-本次包含尚未发布的 v0.21.2 更新，以及最新的远端文件预览、Markdown 渲染与缓存设置。
+- 更换为深灰底、白色斜杠与方块的新图标。
+- 同步 macOS 应用图标、Windows 程序与安装程序图标、应用内品牌图及 README 展示图。
+- 功能与 v0.21.3 一致，包含远端预览加速、原生 Markdown 渲染、用量与额度保护、上下文缓存设置。
 
-## macOS
-
-- 远端文件优先显示缓存，再校验版本；合并重复请求，大图优先缩略图，文本分段加载，减少等待和传输量。
-- 使用独立原生 Markdown 渲染，改善列表、表格、代码块、链接与跨段选中复制；代码块收紧留白，悬停显示复制按钮。
-- 修复底部输入框遮挡消息、内容穿透与聊天区域裁剪问题。
-- 对话选项新增上下文缓存时长：远端默认、5 分钟、1 小时。需要远端 Claude Code 2.1.242 或更新版本；不会自动发送保活请求，一小时缓存写入成本更高。
-- 账号菜单显示五小时、本周用量、重置倒计时与本地重置时间；不必进入某个会话查询。
-- 改善侧栏宽度记忆、搜索、弹窗与异步状态，修复旧缓存回显及部分布局崩溃。
-
-## 远端运行环境
-
-- 同一远端登录下，订阅周期用量达到 90% 后限制并行；任一周期达到 95% 后拒绝新请求并停止正在运行的 worker。
-- 用量统计有延迟，不能保证精确保留 5%，也无法限制其他主机或客户端。API Key 等缺少完整订阅用量数据的账号会被保护逻辑暂停。
-- 保留空闲 worker 休眠及会话恢复机制；新逻辑随新启动的 worker 生效。
-
-## Windows
-
-提供同版本原生预览版安装程序及便携包，共享远端逻辑更新。上述原生 Markdown 与界面调整属于 macOS，Windows 暂未完全对齐。
-
-## 安装
-
-macOS：Apple Silicon，macOS 14+。安装包仍为 ad-hoc 签名，尚未经过 Apple 公证。已经支持应用内更新的版本可检查更新。
-
-安装包附 SHA-256 校验文件；应用内更新使用签名校验。
+macOS 安装包适用于 Apple Silicon、macOS 14+，仍为 ad-hoc 签名，尚未经过 Apple 公证。Windows 为原生预览版。
 ]]></description>
-            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.3/claude-mirror-0.21.3-macOS-arm64.dmg" length="8178809" type="application/octet-stream" sparkle:edSignature="JXF0VkCBnU64ixrSiAuhW//r/e7bkzJXKi9HiDjc8uHc/JBJvsixl24GaoGzKi4l20QVu5BAhDdTtAu0ZWRIBA=="></enclosure>
+            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.4/claude-mirror-0.21.4-macOS-arm64.dmg" length="6656293" type="application/octet-stream" sparkle:edSignature="6PUtmYNXtlTwQBij98HBhwm/gVDwIvwJeA0MUb3OtMXVNesHM7q8BA4Hsc3aNe2JUIFFlXs4IHLq4c+PxRvoDQ=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: zALdK5uTbObqjqPc000Vg5YiCTot9u0pxwG17rda2jwfu3zqCkD+2J+S09kQ1sQTEmYYflN2xKY6Ws+H2vSuAg==
-length: 3055
+edSignature: TzMMESW2WdWqdWmqmn45clZiYV5hCsy5u1jv7UJ3oPlxjrg6GakKcnov994Ky7Q9yuIEFe20qRTI+w51BrkMBQ==
+length: 1691
 -->
