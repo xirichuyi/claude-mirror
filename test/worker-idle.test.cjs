@@ -10,7 +10,7 @@ test('worker exits after quiescence and retains the resumable Claude session', {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),'mirror-idle-worker-'));
   let child;
   try {
-    for (const file of ['task-worker.cjs','session-input.cjs','account-quota.cjs','quota-coordinator.cjs', 'runtime-controls.cjs']) fs.copyFileSync(path.join(__dirname,'../src',file),path.join(dir,file));
+    for (const file of ['task-worker.cjs','session-input.cjs','steers.cjs','account-quota.cjs','quota-coordinator.cjs', 'runtime-controls.cjs']) fs.copyFileSync(path.join(__dirname,'../src',file),path.join(dir,file));
     const policy = path.resolve(__dirname,'../src/idle-policy.cjs');
     fs.writeFileSync(path.join(dir,'idle-policy.cjs'), `const {IdlePolicy:Base}=require(${JSON.stringify(policy)});exports.IdlePolicy=class extends Base{constructor(){super(50)}};`);
     const workerPath = path.join(dir, 'task-worker.cjs');

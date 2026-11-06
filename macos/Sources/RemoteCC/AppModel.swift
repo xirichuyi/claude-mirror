@@ -504,7 +504,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func submit(text: String) {
+    /// `queue` sends after the current reply (Tab); otherwise a running reply takes it now (Enter).
+    func submit(text: String, queue: Bool = false) {
         guard let engine, let id = activeId else { return }
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let files = attachments[id] ?? []
@@ -516,7 +517,8 @@ final class AppModel: ObservableObject {
                 return
             }
             if let session = engine.session(id) { try await engine.requireProject(session.config) }
-            try engine.submit(id, text: value, attachments: files)
+            if queue, engine.isRunning(id) { try engine.enqueue(id, text: value, attachments: files) }
+            else { try engine.submit(id, text: value, attachments: files) }
             self.attachments[id] = nil
             self.drafts[id] = ""
         }

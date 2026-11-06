@@ -401,6 +401,18 @@ struct BlockView: View {
                     .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 10))
             } else { MarkdownView(text: block.text ?? "", actions: actions) }
+        case "user":
+            // A message sent while Claude was replying, shown where Claude read it.
+            VStack(alignment: .trailing, spacing: 3) {
+                Text("回复中发送").font(.caption2).foregroundStyle(.secondary)
+                Text(block.text ?? "")
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.leading, 60).padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
         case "thinking": ThinkingCard(text: block.text ?? "", active: thinkingActive)
         case "tool": ToolCard(block: block, actions: actions)
         case "notice":

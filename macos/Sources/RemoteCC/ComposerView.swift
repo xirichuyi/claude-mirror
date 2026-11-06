@@ -75,7 +75,7 @@ struct ComposerArea: View {
                         Button("移除") { model.failedUploads[id]?.removeAll { $0 == url } }
                     }.font(.caption).foregroundStyle(.secondary)
                 }
-                PromptEditor(text: text, caret: $caret, placeholder: "发送消息，或输入 / 使用命令", handler: handleKey, onPasteImage: { model.pasteImage($0) }, onDropFiles: { model.upload($0) }, acceptsFileDrops: model.isConnected, onFileDrag: { dropTarget = $0 }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
+                PromptEditor(text: text, caret: $caret, placeholder: model.active?.isBusy == true ? "Enter 插入当前回复 · Tab 回复完成后发送" : "发送消息，或输入 / 使用命令", handler: handleKey, onPasteImage: { model.pasteImage($0) }, onDropFiles: { model.upload($0) }, acceptsFileDrops: model.isConnected, onFileDrag: { dropTarget = $0 }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
                     .frame(height: editorHeight)
                 toolbarRow
             }
@@ -133,6 +133,20 @@ struct ComposerArea: View {
     }
 
     @ViewBuilder private func queue(_ session: ChatSession) -> some View {
+        if let steers = session.steers, !steers.isEmpty {
+            // Codex-style: these join the running reply once Claude finishes its current step.
+            VStack(alignment: .leading, spacing: 3) {
+                Text("下一次工具调用后提交（按 Esc 中断并立即发送）").foregroundStyle(.secondary)
+                ForEach(steers) { item in
+                    Label { Text(item.text).lineLimit(1) } icon: {
+                        Image(systemName: item.accepted == true ? "arrow.turn.down.right" : "arrow.up.circle.dotted")
+                    }
+                    .help(item.accepted == true ? "等待 Claude 读取" : "正在发送到远端")
+                }
+            }
+            .font(.caption).controlSize(.small)
+            .accessibilityElement(children: .combine)
+        }
         if let queue = session.queue, !queue.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
@@ -268,15 +282,15 @@ struct ComposerArea: View {
             if session == nil { Spacer() }
             HStack(spacing: 8) {
                 if busy && canSend {
-                    Button { send() } label: { Image(systemName: "text.badge.plus") }
+                    Button { send(queue: true) } label: { Image(systemName: "text.badge.plus") }
                         .buttonStyle(ComposerActionStyle())
-                        .help("加入队列").accessibilityLabel("加入队列")
+                        .help("回复完成后发送 · Tab").accessibilityLabel("加入队列")
                 }
                 Button { if busy { model.stop() } else { send() } } label: {
                     Image(systemName: busy ? "stop.fill" : "arrow.up")
                 }
                 .buttonStyle(ComposerActionStyle())
-                .help(busy ? "停止生成" : "发送消息 · Enter 发送，Shift + Enter 换行")
+                .help(busy ? "停止生成 · Esc（已插入的消息随后立即发送）" : "发送消息 · Enter 发送，Shift + Enter 换行")
                 .accessibilityLabel(busy ? "停止生成" : "发送消息")
                 .disabled(busy ? session?.status == "stopping" || !model.isConnected : !canSend)
             }
@@ -284,7 +298,8 @@ struct ComposerArea: View {
         }
     }
 
-    private func send() {
+    /// While replying, Enter inserts into the running turn and `queue` (Tab) waits for it to end.
+    private func send(queue: Bool = false) {
         guard canSend else { return }
         if model.active == nil {
             let draft = text.wrappedValue
@@ -298,7 +313,7 @@ struct ComposerArea: View {
                 model.select(session.id)
                 model.submit(text: draft)
             }
-        } else { model.submit(text: text.wrappedValue) }
+        } else { model.submit(text: text.wrappedValue, queue: queue) }
     }
 
     private func handleKey(_ key: PromptKey) -> Bool {
@@ -321,6 +336,7 @@ struct ComposerArea: View {
         }
         switch key {
         case .enter: send(); return true
+        case .tab where model.active?.isBusy == true && canSend: send(queue: true); return true
         case .escape:
             if model.active?.isBusy == true { model.stop(); return true }
             return false

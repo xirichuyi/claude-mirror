@@ -8,6 +8,7 @@ const { ChatService } = require('./chat-service.cjs');
 const { Transcript } = require('./transcript.cjs');
 const { catalogue, preferencePatch } = require('./capabilities.cjs');
 const { SessionInput } = require('./session-input.cjs');
+const { Steers } = require('./steers.cjs');
 const { IdlePolicy } = require('./idle-policy.cjs');
 const { readAccountQuota, requireQuota } = require('./account-quota.cjs');
 const { runtimeStatus, updateRuntime } = require('./runtime-controls.cjs');
@@ -29,9 +30,11 @@ function snapshot() {
     status: session.status, permissions: session.permissions, message: session.messages.at(-1),
     remoteSessionId: session.remoteSessionId, model: session.model, preferences: session.preferences,
     capabilities: session.capabilities, tools: session.tools, plugins: session.plugins,
-    terminalCommands: session.terminalCommands, usage: session.usage, tasks: session.tasks, forkPending: session.forkPending });
+    terminalCommands: session.terminalCommands, usage: session.usage, tasks: session.tasks, forkPending: session.forkPending,
+    steers: session.steers });
 }
 session.tasks = []; // Background task membership belongs to this SDK process.
+const steers = new Steers(session); // Pending messages belong to this SDK process too.
 const service = new ChatService({ load: () => [session], save: snapshot });
 service.closing = true;
 service.spawn = (_session, options, onError) => {
@@ -82,6 +85,18 @@ async function control(command) {
     Object.assign(run, { message: command.message, stopped: false, stderr: '', transcript: new Transcript(command.message) });
     service.runs.set(session.id, run); session.status = 'working'; snapshot();
     input.push(command.prompt, command.message.id, session.remoteSessionId);
+    return {};
+  }
+  if (command.kind === 'steer') {
+    // The client falls back to its end-of-turn queue when no reply is running.
+    if (!service.runs.has(session.id)) throw new Error('远端会话未在回复');
+    await checkQuota();
+    // Registering and pushing stay synchronous after the await, so a turn held open for this
+    // steer always receives it.
+    if (ended || !service.runs.has(session.id)) throw new Error('远端会话未在回复');
+    if (!steers.add(command, run.message)) return {}; // Replay after an uncertain transport ACK.
+    input.push(command.prompt, command.id, session.remoteSessionId, 'next');
+    snapshot();
     return {};
   }
   if (command.kind === 'stop') {
@@ -192,9 +207,18 @@ try { commandWatcher = fs.watch(path.join(folder, 'commands'), runCommands); com
   input.push(request.prompt, run.message.id, session.remoteSessionId);
   session.capabilities = await catalogue(query); snapshot();
   for await (const event of query) {
+    if (event.type === 'command_lifecycle') {
+      // A steer that arrived just after a turn ended runs as its own turn: reopen the same reply.
+      if (event.state === 'started' && !service.runs.has(session.id) && session.steers.some(item => item.id === event.command_uuid)) {
+        Object.assign(run, { stopped: false }); service.runs.set(session.id, run); session.status = 'working';
+      }
+      if (steers.lifecycle(event, service.runs.has(session.id) ? run : null)) snapshot();
+      continue;
+    }
     if (service.runs.has(session.id)) {
       service.consumeEvent(session, event, run);
-      if (event.type === 'result') service.finish(session, run, true);
+      if (event.type === 'result' && !steers.holdTurn(run)) service.finish(session, run, true);
+      else if (event.type === 'result') snapshot();
     } else if (event.type === 'system' && event.subtype === 'commands_changed') {
       session.capabilities.commands = event.commands; snapshot();
     } else if (event.type === 'system' && (event.task_id || event.subtype === 'background_tasks_changed')) {

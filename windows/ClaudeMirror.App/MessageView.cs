@@ -57,6 +57,10 @@ public sealed partial class MainWindow
                         var section=new Expander {Header=type=="thinking"?"思考":((string?)b?["name"]??"工具调用"),Content=Code(details??""),IsExpanded=expanded.Contains(i),HorizontalAlignment=HorizontalAlignment.Stretch,HorizontalContentAlignment=HorizontalAlignment.Stretch};
                         int index=i;section.Expanding+=(_,_)=>expanded.Add(index);section.Collapsed+=(_,_)=>expanded.Remove(index);
                         body.Children.Add(section);
+                    } else if(type=="user" && (string?)b?["text"] is string sent) {
+                        // A message the user sent while Claude was replying, at the point Claude read it.
+                        body.Children.Add(Label("你（回复中发送）",12,window.muted));
+                        body.Children.Add(Label(sent,15,window.ink));
                     } else if((string?)b?["text"] is string text) AddText(text);
                 }
             }

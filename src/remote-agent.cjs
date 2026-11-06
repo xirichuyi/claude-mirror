@@ -655,6 +655,12 @@ async function forEachLine(source, start, limit, visit, chunkSize = MEGABYTE) {
   }
 }
 
+// A message sent while Claude was replying is stored as a queued_command attachment when it
+// joined the running turn; history shows it as the user's message at that point.
+const steeredPrompt = row => row?.type === 'attachment' && row.attachment?.type === 'queued_command' && typeof row.attachment.prompt === 'string' && row.attachment.prompt.trim() ? row.attachment.prompt : null;
+// Bump when the visibility rules change, so cached indexes are rebuilt instead of extended.
+const HISTORY_INDEX_FORMAT = 2;
+
 async function indexedHistory(reference, source) {
   const key = crypto.createHash('sha256').update(reference).digest('hex');
   const filename = path.join(INDEX_DIRECTORY(), key + '.json');
@@ -665,6 +671,7 @@ async function indexedHistory(reference, source) {
     const saved = await readJSON(filename).catch(() => null);
     if (saved) index = { ...saved, nodes: new Map(saved.nodes.map(node => [node[0], node])) };
   }
+  if (index && index.format !== HISTORY_INDEX_FORMAT) index = null;
   if (index?.signature === signature) { rememberIndex(key, index); return index; }
   const size = Number(info.size);
   // Reuse only complete lines, checking both ends of the previously indexed prefix.
@@ -677,13 +684,13 @@ async function indexedHistory(reference, source) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) { index.skipped++; return; }
     index.cwd = row.cwd || index.cwd;
     if (typeof row.uuid === 'string' && !row.isSidechain) {
-      const visible = (row.type === 'user' || row.type === 'assistant') && !row.isMeta ? 1 : 0;
+      const visible = ((row.type === 'user' || row.type === 'assistant') && !row.isMeta) || steeredPrompt(row) ? 1 : 0;
       index.nodes.set(row.uuid, [row.uuid, row.parentUuid ?? null, position, visible]);
       if (visible) index.leaf = row.uuid;
     }
   });
   if (index.nodes.size > 500000) throw new Error('历史记录过大，当前预览最多索引 50 万条记录');
-  Object.assign(index, { signature, inode: String(info.ino), size, fingerprint: await prefixFingerprint(source, index.end) });
+  Object.assign(index, { format: HISTORY_INDEX_FORMAT, signature, inode: String(info.ino), size, fingerprint: await prefixFingerprint(source, index.end) });
   rememberIndex(key, index);
   await fsp.mkdir(INDEX_DIRECTORY(), { recursive: true, mode: 0o700 });
   await atomicJSON(filename, { ...index, nodes: [...index.nodes.values()] });
@@ -707,6 +714,8 @@ function resultText(result) {
 }
 
 function safeRecord(row) {
+  const steered = steeredPrompt(row);
+  if (steered) return { type: 'user', uuid: row.uuid, timestamp: row.timestamp, steered: true, message: { id: row.uuid, content: [{ type: 'text', text: steered.slice(0, 40000) }] } };
   const message = row.message || {};
   let content = message.content ?? [];
   if (typeof content === 'string') content = [{ type: 'text', text: content.slice(0, 40000) }];

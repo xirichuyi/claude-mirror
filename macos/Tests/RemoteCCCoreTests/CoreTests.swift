@@ -50,6 +50,8 @@ setInterval(()=>{for(const name of fs.readdirSync(path.join(folder,'commands')))
  if(c.kind==='send'){message=c.message;status='working';answer('reply:'+c.prompt);}
  if(c.kind==='stop'){permissions=[];status='stopped';message.interrupted=true;write();}
  if(c.kind==='control'&&c.action==='catalogue')value={commands:[{name:'live',builtin:true}],models:[]};
+ if(c.kind==='steer'&&c.text.includes('reject')){fs.writeFileSync(file+'.result',JSON.stringify({ok:false,error:'未知会话请求'}));fs.renameSync(file,file+'.done');continue;}
+ if(c.kind==='steer'){message.blocks.push({type:'user',id:c.id,text:c.text});write();}
  fs.writeFileSync(file+'.result',JSON.stringify({ok:true,value}));fs.renameSync(file,file+'.done');
  if(c.kind==='close'){status='idle';write(true);process.exit(0);}}},15);
 """#
@@ -464,8 +466,21 @@ final class AgentTests: XCTestCase {
         XCTAssertNotNil(current.remoteOwner); XCTAssertNotNil(current.remoteTask)
         XCTAssertEqual(current.capabilities?.commands.first?.name, "usage")
 
-        // Queued while busy; delivered automatically once the turn ends.
-        try engine.submit(id, text: "second")
+        // Enter while busy joins the running reply (Codex steering), shown where Claude read it.
+        try engine.submit(id, text: "steer now")
+        XCTAssertEqual(engine.session(id)?.steers?.first?.text, "steer now")
+        try await eventually { engine.session(id)?.messages.last?.blocks?.last?.type == "user" }
+        XCTAssertEqual(engine.session(id)?.messages.last?.blocks?.last?.text, "steer now")
+        XCTAssertNil(engine.session(id)?.steers)
+        XCTAssertEqual(engine.session(id)?.messages.count, 2)
+        // A worker that cannot take steers falls back to sending after the turn.
+        try engine.submit(id, text: "reject me")
+        try await eventually { engine.session(id)?.queue?.first?.text == "reject me" }
+        XCTAssertNil(engine.session(id)?.steers)
+        try engine.cancelQueued(id, item: try XCTUnwrap(engine.session(id)?.queue?.first?.id))
+
+        // Tab while busy queues; delivered automatically once the turn ends.
+        try engine.enqueue(id, text: "second")
         XCTAssertEqual(engine.session(id)?.queue?.count, 1)
         try await engine.respond(id, permission: "p1", answer: ["allow": true])
         try await eventually { engine.session(id)?.messages.last?.blocks?.first?.text == "reply:second" }

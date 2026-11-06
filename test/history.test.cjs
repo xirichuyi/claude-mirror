@@ -157,3 +157,25 @@ test('project history trash matches exact cwd and preserves recovery copies and 
     await assert.rejects(f.call({ operation: 'trashProject', directory: '../test' }), /绝对目录/);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
+test('a message sent while Claude was replying shows in history where it joined the turn', async () => {
+  const f = fixture();
+  try {
+    const ids = Array.from({ length: 6 }, () => randomUUID());
+    const row = (index, value) => ({ uuid: ids[index], parentUuid: index ? ids[index - 1] : null, cwd: '/tmp/test', timestamp: new Date(Date.UTC(2026, 10, 6, 0, 0, index)).toISOString(), ...value });
+    // Shape recorded by Claude Code 2.1.316 for a priority 'next' message taken at a tool boundary.
+    const rows = [
+      row(0, { type: 'user', message: { content: 'run sleep then say ALPHA' } }),
+      row(1, { type: 'assistant', message: { id: 'a1', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'sleep 6' } }] } }),
+      row(2, { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'first-done' }] } }),
+      row(3, { type: 'attachment', attachment: { type: 'queued_command', prompt: 'also say BETA', source_uuid: randomUUID(), commandMode: 'prompt' } }),
+      row(4, { type: 'attachment', attachment: { type: 'date', date: '2026-11-06' } }),
+      row(5, { type: 'assistant', message: { id: 'a2', content: [{ type: 'text', text: 'ALPHA\nBETA' }] } }),
+    ];
+    fs.writeFileSync(f.file, rows.map(item => JSON.stringify(item)).join('\n') + '\n');
+    const page = await f.call({ operation: 'messages', reference: f.reference });
+    const messages = historyMessages(page.records);
+    assert.deepEqual(messages.map(message => message.role + ':' + (message.text ?? message.blocks.map(block => block.text ?? block.type).join('|'))),
+      ['user:run sleep then say ALPHA', 'assistant:tool', 'user:also say BETA', 'assistant:ALPHA\nBETA']);
+    assert.equal(messages[1].blocks[0].output, 'first-done');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});

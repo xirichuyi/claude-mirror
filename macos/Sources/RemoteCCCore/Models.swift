@@ -186,6 +186,17 @@ public struct QueuedMessage: Codable, Hashable, Sendable, Identifiable {
     public var attachments: [Attachment]
 }
 
+/// A message sent while Claude is replying. It joins the running turn at the next tool boundary;
+/// until Claude reads it, it is shown above the composer rather than in the transcript.
+public struct PendingSteer: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var text: String
+    public var prompt: String
+    public var attachments: [Attachment]
+    /// The worker accepted it; only unaccepted steers fall back to the end-of-turn queue.
+    public var accepted: Bool?
+}
+
 public struct RemoteTask: Codable, Hashable, Sendable {
     public var id: String
     public var prompt: String?
@@ -226,6 +237,7 @@ public struct ChatSession: Codable, Hashable, Sendable, Identifiable {
     public var forkPending: Bool?
     public var queue: [QueuedMessage]?
     public var queuePaused: Bool?
+    public var steers: [PendingSteer]?
     public var pinned: Bool?
     public var archived: Bool?
     public var localName: Bool?
@@ -248,7 +260,7 @@ public struct ChatSession: Codable, Hashable, Sendable, Identifiable {
         return host + ":" + (port.map(String.init) ?? "") + ":" + folder
     }
     private enum CodingKeys: String, CodingKey {
-        case id, name, host, port, directory, createdAt, updatedAt, messages, status, permissions, preferences, capabilities, remoteSessionId, remoteTask, remoteOwner, transportError, model, usage, tasks, tools, plugins, forkPending, queue, queuePaused, pinned, archived, localName, remoteHistoryRef, historyLoaded, historyBefore, historySummary, localMessagesLoaded
+        case id, name, host, port, directory, createdAt, updatedAt, messages, status, permissions, preferences, capabilities, remoteSessionId, remoteTask, remoteOwner, transportError, model, usage, tasks, tools, plugins, forkPending, queue, queuePaused, steers, pinned, archived, localName, remoteHistoryRef, historyLoaded, historyBefore, historySummary, localMessagesLoaded
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -271,6 +283,7 @@ public struct ChatSession: Codable, Hashable, Sendable, Identifiable {
         tools = try c.decodeIfPresent(JSON.self, forKey: .tools); plugins = try c.decodeIfPresent(JSON.self, forKey: .plugins)
         forkPending = try c.decodeIfPresent(Bool.self, forKey: .forkPending)
         queue = try c.decodeIfPresent([QueuedMessage].self, forKey: .queue); queuePaused = try c.decodeIfPresent(Bool.self, forKey: .queuePaused)
+        steers = try c.decodeIfPresent([PendingSteer].self, forKey: .steers)
         pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned); archived = try c.decodeIfPresent(Bool.self, forKey: .archived)
         localName = try c.decodeIfPresent(Bool.self, forKey: .localName)
         remoteHistoryRef = try c.decodeIfPresent(String.self, forKey: .remoteHistoryRef)

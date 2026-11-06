@@ -10,7 +10,7 @@ async function runWorker(mode) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-quota-'));
   let child;
   try {
-    for (const file of ['task-worker.cjs', 'session-input.cjs', 'account-quota.cjs','quota-coordinator.cjs', 'runtime-controls.cjs', 'idle-policy.cjs'])
+    for (const file of ['task-worker.cjs', 'session-input.cjs', 'steers.cjs', 'account-quota.cjs','quota-coordinator.cjs', 'runtime-controls.cjs', 'idle-policy.cjs'])
       fs.copyFileSync(path.join(__dirname, '../src', file), path.join(dir, file));
     // Accelerate only the monitor clock; exercise the real worker and quota policy.
     const worker = path.join(dir, 'task-worker.cjs');
