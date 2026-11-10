@@ -5,7 +5,7 @@ import RemoteCCCore
 
 struct PreferencesSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     @State private var capabilities: Capabilities?
     @State private var loadError = ""
     @State private var agent = ""
@@ -46,41 +46,23 @@ struct PreferencesSheet: View {
     private func form(_ capabilities: Capabilities) -> some View {
         let session = model.active
         return VStack(alignment: .leading, spacing: 16) {
-            Picker("模型", selection: $selectedModel) {
-                Text("远端默认").tag("")
-                ForEach(capabilities.models.filter { $0.value != "default" }) { Text($0.displayName ?? $0.value).tag($0.value) }
-                Text("自定义模型 ID").tag(customTag)
-            }
+            WorkbenchSelect(title: "模型", selection: $selectedModel, options:
+                [WorkbenchOption("", "远端默认")] + capabilities.models.filter { $0.value != "default" }.map { WorkbenchOption($0.value, $0.displayName ?? $0.value) } + [WorkbenchOption(customTag, "自定义模型 ID")])
             if selectedModel == customTag { TextField("模型 ID", text: $customModel) }
-            Picker("思考强度", selection: $effort) {
-                Text("自动").tag("")
-                ForEach(["low", "medium", "high", "xhigh", "max"].filter { currentModel == nil || currentModel?.supportedEffortLevels?.contains($0) == true }, id: \.self) { Text($0).tag($0) }
-            }
-            Picker("权限", selection: $permissionMode) {
-                Text("默认 · 请求时确认").tag("default")
-                Text("计划 · 不执行修改").tag("plan")
-                Text("自动接受文件编辑").tag("acceptEdits")
-                Text("拒绝未授权操作").tag("dontAsk")
-                if currentModel == nil || currentModel?.supportsAutoMode == true { Text("自动判断权限").tag("auto") }
-            }
+            WorkbenchSelect(title: "思考强度", selection: $effort, options:
+                [WorkbenchOption("", "自动")] + ["low", "medium", "high", "xhigh", "max"].filter { currentModel == nil || currentModel?.supportedEffortLevels?.contains($0) == true }.map { WorkbenchOption($0, $0) })
+            WorkbenchSelect(title: "权限", selection: $permissionMode, options: permissionOptions)
             DisclosureGroup("高级选项", isExpanded: $advanced) {
-                Picker("Agent", selection: $agent) {
-                    Text("远端默认").tag("")
-                    ForEach(capabilities.agents ?? []) { Text($0.name).tag($0.name) }
-                    if !agent.isEmpty, capabilities.agents?.contains(where: { $0.name == agent }) != true { Text(agent + "（远端已不可用）").tag(agent) }
-                }
+                WorkbenchSelect(title: "Agent", selection: $agent, options:
+                    [WorkbenchOption("", "远端默认")] + (capabilities.agents ?? []).map { WorkbenchOption($0.name, $0.name) } +
+                    (!agent.isEmpty && capabilities.agents?.contains(where: { $0.name == agent }) != true ? [WorkbenchOption(agent, agent + "（不可用）")] : []))
                 .disabled(session?.messages.isEmpty == false)
                 .help(session?.messages.isEmpty == false ? "请在新对话中选择 Agent" : capabilities.agents?.first { $0.name == agent }?.description ?? "")
                 Toggle("快速模式", isOn: $fastMode).help("需要模型与账户支持").disabled(currentModel != nil && currentModel?.supportsFastMode != true)
-                Picker("输出样式", selection: $outputStyle) {
-                    Text("远端默认").tag("")
-                    ForEach(capabilities.outputStyles ?? [], id: \.self) { Text($0).tag($0) }
-                }
-                Picker("上下文缓存", selection: $promptCacheTtl) {
-                    Text("远端默认").tag("")
-                    Text("5 分钟").tag("5m")
-                    Text("1 小时").tag("1h")
-                }
+                WorkbenchSelect(title: "输出样式", selection: $outputStyle, options:
+                    [WorkbenchOption("", "远端默认")] + (capabilities.outputStyles ?? []).map { WorkbenchOption($0, $0) })
+                WorkbenchSelect(title: "上下文缓存", selection: $promptCacheTtl, options:
+                    [WorkbenchOption("", "远端默认"), WorkbenchOption("5m", "5 分钟"), WorkbenchOption("1h", "1 小时")])
                 .disabled(session?.isBusy == true)
                 .help("需要 Claude Code 2.1.242+。1 小时适合间歇工作，缓存写入费率更高；远端环境变量优先。不会发送保活请求。")
                 VStack(alignment: .leading) {
@@ -92,6 +74,13 @@ struct PreferencesSheet: View {
         }
         .padding(.horizontal, 24).padding(.bottom, 20)
         .scrollContentBackground(.hidden)
+    }
+
+    private var permissionOptions: [WorkbenchOption<String>] {
+        var options = [WorkbenchOption("default", "默认 · 请求时确认"), WorkbenchOption("plan", "计划 · 不执行修改"),
+                       WorkbenchOption("acceptEdits", "自动接受文件编辑"), WorkbenchOption("dontAsk", "拒绝未授权操作")]
+        if currentModel == nil || currentModel?.supportsAutoMode == true { options.append(WorkbenchOption("auto", "自动判断权限")) }
+        return options
     }
 
     private func load(refresh: Bool) {
@@ -135,7 +124,7 @@ struct PreferencesSheet: View {
 
 struct CommandPickerSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     let interaction: CommandInteraction
     @State private var value = ""
     @State private var custom = ""
@@ -151,9 +140,8 @@ struct CommandPickerSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("/" + interaction.command).font(.headline)
-            Picker(interaction.kind == .model ? "选择模型" : "选择参数", selection: $value) {
-                ForEach(options) { Text($0.label).tag($0.value) }
-            }
+            WorkbenchSelect(title: interaction.kind == .model ? "选择模型" : "选择参数", selection: $value,
+                            options: options.map { WorkbenchOption($0.value, $0.label) })
             if interaction.kind == .model { TextField("或输入自定义模型 ID", text: $custom).textFieldStyle(WorkbenchTextFieldStyle()) }
             if let description = options.first(where: { $0.value == value })?.description ?? interaction.description {
                 Text(description).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
@@ -176,7 +164,7 @@ struct CommandPickerSheet: View {
 
 struct SessionToolsSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     @State private var localPort = ""
     @State private var remotePort = ""
     @State private var tunnels: [Tunnel] = []
@@ -190,21 +178,20 @@ struct SessionToolsSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SheetHeading(title: "扩展与配置") { dismiss() }.padding(20)
+            SheetHeading(title: destinations.first { $0.0 == model.sessionToolsSection }?.1 ?? "扩展与配置") { dismiss() }
+                .padding(.horizontal, 20).frame(height: 52)
             Divider()
             HStack(spacing: 0) {
                 VStack(spacing: 3) {
                     ForEach(destinations, id: \.0) { item in
                         Button { model.sessionToolsSection = item.0 } label: {
-                            Label(item.1, systemImage: item.2).frame(maxWidth: .infinity, alignment: .leading)
+                            Label { Text(item.1) } icon: { WorkbenchIcon(symbol: item.2) }.frame(maxWidth: .infinity, alignment: .leading)
                         }.buttonStyle(SidebarNavigationStyle(selected: model.sessionToolsSection == item.0))
                     }
                     Spacer()
                 }.padding(12).frame(width: 160).background(WorkbenchTheme.sidebar)
                 Divider()
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(destinations.first { $0.0 == model.sessionToolsSection }?.1 ?? "扩展")
-                        .font(.title3.weight(.semibold))
                     if let session = model.active {
                         if model.sessionToolsSection == "ssh" { portForwarding(session) }
                         else { ClaudeToolsView(sessionID: session.id, section: SessionToolSection(rawValue: model.sessionToolsSection) ?? .skills).id(session.id + ":" + model.sessionToolsSection) }
@@ -220,7 +207,6 @@ struct SessionToolsSheet: View {
 
     private func portForwarding(_ session: ChatSession) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("将远端服务转发到本机，在浏览器中访问。").foregroundStyle(WorkbenchTheme.inkMuted)
             HStack {
                 TextField("本地端口", text: $localPort).frame(width: 110)
                 TextField("远端端口", text: $remotePort).frame(width: 110)

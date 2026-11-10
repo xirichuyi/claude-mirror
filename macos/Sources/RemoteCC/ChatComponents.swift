@@ -68,11 +68,18 @@ struct ScrollReadingDetector: NSViewRepresentable {
     final class ReadingView: NSView {
         var onReadEarlier: (() -> Void)?
         private var monitor: Any?
+        private var liveScrollObserver: NSObjectProtocol?
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             removeMonitor()
             guard window != nil else { return }
+            liveScrollObserver = NotificationCenter.default.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: nil, queue: .main) { [weak self] notification in
+                guard let self, let scroll = notification.object as? NSScrollView,
+                      scroll.window === self.window else { return }
+                let rect = self.convert(scroll.bounds, from: scroll)
+                if rect.intersects(self.bounds), rect.height > self.bounds.height / 2 { self.onReadEarlier?() }
+            }
             monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDown]) { [weak self] event in
                 guard let self, let window = self.window, event.window === window else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
@@ -84,8 +91,34 @@ struct ScrollReadingDetector: NSViewRepresentable {
                 return event
             }
         }
-        func removeMonitor() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
-        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+        func removeMonitor() {
+            if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil
+            if let liveScrollObserver { NotificationCenter.default.removeObserver(liveScrollObserver) }; liveScrollObserver = nil
+        }
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            if let liveScrollObserver { NotificationCenter.default.removeObserver(liveScrollObserver) }
+        }
     }
 }
 #endif
+
+/// Publish scroll-state boundaries, never per-pixel geometry. macOS owns wheel momentum.
+struct TranscriptScrollTracking: ViewModifier {
+    @Binding var farFromBottom: Bool
+    @Binding var following: Bool
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentSize.height - geometry.visibleRect.maxY > 180
+                } action: { _, far in farFromBottom = far }
+                .onScrollPhaseChange { _, phase in
+                    if phase == .tracking || phase == .interacting { following = false }
+                }
+        } else {
+            content.background(ScrollReadingDetector { if following { following = false } }
+                .frame(maxWidth: .infinity, maxHeight: .infinity))
+        }
+    }
+}

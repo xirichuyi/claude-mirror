@@ -76,7 +76,7 @@ struct FileIcon: View {
     var body: some View {
         Group {
             if directory {
-                Image(systemName: expanded ? "folder" : "folder").font(.system(size: 12.5, weight: .regular))
+                WorkbenchIcon(symbol: expanded ? "folder.open" : "folder").font(.system(size: 12.5, weight: .regular))
                     .foregroundStyle(WorkbenchTheme.inkMuted)
             } else {
                 let kind = FileKind.of(name)
@@ -86,7 +86,7 @@ struct FileIcon: View {
                     Text(text).font(.system(size: text.count > 2 ? 6.5 : 8, weight: .heavy, design: .rounded))
                         .foregroundStyle(color).lineLimit(1).minimumScaleFactor(0.6)
                 case .symbol(let symbol):
-                    Image(systemName: symbol).font(.system(size: 11)).foregroundStyle(color)
+                    WorkbenchIcon(symbol: symbol).font(.system(size: 11)).foregroundStyle(color)
                 }
             }
         }

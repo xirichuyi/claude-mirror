@@ -4,11 +4,16 @@ import RemoteCCCore
 /// Only one application sheet can be presented at a time.
 enum AppPresentation: Identifiable {
     case account
+    case confirmation(WorkbenchConfirmation)
+    case rename(WorkbenchRename)
+    case fileName(NamePrompt, Workspace)
+    case rewind(session: String, checkpoint: String)
     case accountUsage
     case worktree
     case usage
     case activity
     case connect
+    case editMachine(ConnectionConfig)
     case projectPicker
     case settings
     case preferences
@@ -18,11 +23,16 @@ enum AppPresentation: Identifiable {
     case command(CommandInteraction)
     var id: String {
         switch self {
+        case .fileName(let prompt, _): return "file:" + prompt.id.uuidString
+        case .rewind(let session, let checkpoint): return "rewind:" + session + checkpoint
+        case .confirmation(let request): return "confirm:" + request.id.uuidString
+        case .rename(let request): return "rename:" + request.id.uuidString
         case .account: return "account"
         case .accountUsage: return "accountUsage"
         case .worktree: return "worktree"
         case .usage: return "usage"
         case .activity: return "activity"
+        case .editMachine(let config): return "editMachine:" + config.key
         case .connect: return "connect"
         case .projectPicker: return "projectPicker"
         case .settings: return "settings"
@@ -122,12 +132,17 @@ struct AppSheet: View {
     var body: some View {
         Group {
             switch destination {
+            case .fileName(let prompt, let workspace): NameSheet(prompt: prompt, workspace: workspace)
+            case .rewind(let session, let checkpoint): RewindSheet(sessionId: session, checkpoint: checkpoint)
+            case .confirmation(let request): ConfirmationSheet(request: request)
+            case .rename(let request): RenameSheet(request: request)
             case .account: AccountStatusSheet(store: model.accountStore)
             case .accountUsage: AccountUsageSheet()
             case .worktree: WorktreeSheet()
             case .usage: UsageSheet()
             case .activity: ActivitySheet()
             case .connect: ConnectSheet()
+            case .editMachine(let config): ConnectSheet(machine: config)
             case .projectPicker: ProjectPickerSheet()
             case .settings: SettingsSheet()
             case .preferences: PreferencesSheet()
@@ -142,5 +157,37 @@ struct AppSheet: View {
             case .command(let value): CommandPickerSheet(interaction: value)
             }
         }.workbenchPanel()
+    }
+}
+
+/// Application modals share the same scrim, border and motion. Native file/password dialogs
+/// remain native; their security and file-selection behavior belongs to macOS.
+struct WorkbenchPresentationLayer: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geometry in
+            if let destination = model.presentation {
+                ZStack {
+                    WorkbenchTheme.scrim.ignoresSafeArea().contentShape(Rectangle())
+                        .onTapGesture { } // Do not discard an in-progress form on an outside click.
+                    ScrollView(.vertical) {
+                        AppSheet(destination: destination).id(destination.id)
+                            .background(WorkbenchTheme.popup)
+                            .clipShape(RoundedRectangle(cornerRadius: WorkbenchMetrics.dialogRadius))
+                            .overlay(RoundedRectangle(cornerRadius: WorkbenchMetrics.dialogRadius).strokeBorder(WorkbenchTheme.popupBorder))
+                            .shadow(color: WorkbenchTheme.shadow, radius: 24, y: 10)
+                            .padding(24)
+                            .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                    }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .scrollBounceBehavior(.basedOnSize)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.95)))
+                }
+                .accessibilityAddTraits(.isModal)
+            }
+        }
+        .animation(Motion.animation(Motion.dialogIn, reduce: reduceMotion), value: model.presentation?.id)
     }
 }

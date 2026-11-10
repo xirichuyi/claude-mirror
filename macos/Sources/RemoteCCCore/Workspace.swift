@@ -1,6 +1,7 @@
 import Foundation
+import Observation
 
-public final class EditorTab: Identifiable {
+@Observable public final class EditorTab: Identifiable {
     public let id: String
     public var path: String
     public let isDiff: Bool
@@ -28,12 +29,13 @@ public struct TreeRow: Identifiable, Equatable {
     public var expanded: Bool
     public var gitCode: String?
     public var touched: Bool
+    public var loading = false
     public var id: String { entry.path }
 }
 
 /// The file panel and editor tabs for one conversation; views only render this.
 @MainActor
-public final class Workspace {
+@Observable public final class Workspace {
     public private(set) var root: String?
     public private(set) var rows: [TreeRow] = []
     public private(set) var error: String?
@@ -46,11 +48,17 @@ public final class Workspace {
     public var touchedFiles: () -> Set<String> = { [] }
     public var onChange: (() -> Void)?
 
+    /// Use this workspace's host even if the user switches conversations during transfer.
+    public func downloadPreview(_ path: String, to destination: URL) async throws {
+        try await files.download(config, path, to: destination)
+    }
+
     private let files: RemoteFiles
     private let agents: AgentClient
     private let config: ConnectionConfig
     private var directories: [String: DirectoryListing] = [:]
     private var expanded = Set<String>()
+    private var directoryLoads: [String: UUID] = [:]
     private var git: [String: String] = [:]
     private var generation = 0
 
@@ -63,6 +71,7 @@ public final class Workspace {
     private func changed() { onChange?() }
 
     public func browse(_ folder: String, force: Bool = false) async {
+        directoryLoads.removeAll()
         generation += 1
         let current = generation
         error = nil; footer = "读取中…"; changed()
@@ -111,24 +120,75 @@ public final class Workspace {
         func walk(_ directory: String, _ depth: Int) {
             for entry in directories[directory]?.entries ?? [] {
                 let open = expanded.contains(entry.path)
-                result.append(TreeRow(entry: entry, depth: depth, expanded: open, gitCode: git[entry.path], touched: touched.contains(entry.path)))
+                result.append(TreeRow(entry: entry, depth: depth, expanded: open, gitCode: git[entry.path], touched: touched.contains(entry.path), loading: directoryLoads[entry.path] != nil))
                 if entry.directory, open, directories[entry.path] != nil { walk(entry.path, depth + 1) }
             }
         }
         walk(root, 0)
-        rows = result
+        if rows != result { rows = result }
         let listing = directories[root]
         footer = "\(listing?.entries.count ?? 0) 项" + (listing?.truncated == true ? " · 仅显示前 5000 项" : "") + (watchFailed ? " · 未能实时监听，回复结束后刷新" : "")
         changed()
     }
 
     public func toggle(_ directory: String) async {
-        if expanded.remove(directory) != nil { rebuild(); await syncWatches(); return }
+        if expanded.remove(directory) != nil {
+            directoryLoads[directory] = nil
+            rebuild()
+            await syncWatches()
+            return
+        }
         expanded.insert(directory)
-        do { directories[directory] = try await files.list(config, directory, hidden: showHidden) }
-        catch { expanded.remove(directory); self.error = error.localizedDescription }
+        let request = UUID()
+        let version = generation
+        directoryLoads[directory] = request
+        error = nil
+        rebuild() // Chevron and cached children respond before the network round trip.
+        do {
+            let listing = try await files.list(config, directory, hidden: showHidden)
+            guard generation == version, directoryLoads[directory] == request else { return }
+            directories[directory] = listing
+        } catch {
+            guard generation == version, directoryLoads[directory] == request else { return }
+            expanded.remove(directory)
+            self.error = error.localizedDescription
+        }
+        directoryLoads[directory] = nil
         rebuild()
         await syncWatches()
+    }
+
+    public func collapseAll() async {
+        directoryLoads.removeAll()
+        expanded.removeAll()
+        rebuild()
+        await syncWatches()
+    }
+
+    /// Reveal the selected file without changing the browser root or collapsing other folders.
+    public func revealActiveFile() async -> String? {
+        guard let root, let path = activeTab?.path else { return nil }
+        let prefix = root == "/" ? "/" : root + "/"
+        guard path.hasPrefix(prefix) else { return nil }
+        let version = generation
+        let components = path.dropFirst(prefix.count).split(separator: "/").dropLast()
+        var directory = root == "/" ? "" : root
+        for component in components {
+            directory += "/" + component
+            guard !Task.isCancelled, generation == version, activeTab?.path == path else { return nil }
+            if !expanded.contains(directory) {
+                do {
+                    let listing = try await files.list(config, directory, hidden: showHidden)
+                    guard !Task.isCancelled, generation == version, activeTab?.path == path else { return nil }
+                    directories[directory] = listing
+                    expanded.insert(directory)
+                    rebuild()
+                } catch { return nil }
+            }
+        }
+        await syncWatches()
+        guard !Task.isCancelled, generation == version, activeTab?.path == path else { return nil }
+        return path
     }
 
     /// Only what is on screen is watched: the root, expanded folders and folders of open files.
@@ -198,13 +258,27 @@ public final class Workspace {
 
     public func select(_ tab: EditorTab) async {
         guard tabs.contains(where: { $0 === tab }) else { return }
-        if tab.isDiff {
-            for other in tabs where other !== tab { other.loadTask?.cancel() }
+        if tab.isDiff || tab.preview != nil || tab.loadTask != nil {
+            // Open tabs already receive remote changes through filesChanged.
+            // Selecting them must not restart downloads or discard their scroll state.
             activeTabId = tab.id; changed()
         } else {
             let original = tab.preview?.kind == "image" && tab.preview?.thumbnail != true
             await open(tab.path, original: original)
         }
+    }
+
+    /// Chat links can refer to either files or folders. Resolve before creating an editor tab.
+    @discardableResult
+    public func openReference(_ path: String, line: Int? = nil) async throws -> Bool {
+        let entry = try await files.run(config, "pathInfo", ["path": .string(path)]).decode(FileEntry.self)
+        if entry.directory {
+            await browse(entry.path)
+            if let error { throw RemoteError(error) }
+            return true
+        }
+        await open(entry.path, line: line)
+        return false
     }
 
     public func open(_ file: String, line: Int? = nil, original: Bool = false) async {

@@ -46,6 +46,15 @@ final class SplitDiffTests: XCTestCase {
         XCTAssertEqual(diff.rows[8].left.changed, NSRange(location: 0, length: 1))
     }
 
+    func testHeaderLikeContentIsNotDiscardedInsideAHunk() {
+        let diff = SplitDiff("--- a/x\n+++ b/x\n@@ -1 +1 @@\n--- old\n+++ new\n")
+        XCTAssertEqual(diff.removed, 1)
+        XCTAssertEqual(diff.added, 1)
+        XCTAssertEqual(diff.rows.last?.left.text, "-- old")
+        XCTAssertEqual(diff.rows.last?.right.text, "++ new")
+        XCTAssertNil(SplitDiff.hunkStarts("@@ - + @@"))
+    }
+
     func testEmptyAndHeaderOnlyPatches() {
         XCTAssertTrue(SplitDiff("").rows.isEmpty)
         XCTAssertTrue(SplitDiff("diff --git a/x b/x\nindex 1..2\n").rows.isEmpty)

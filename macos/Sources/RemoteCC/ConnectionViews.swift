@@ -16,11 +16,11 @@ struct HistorySyncButton: View {
             if let config = model.currentConfig { Task { await model.discoverHistory(config) } }
         } label: {
             ZStack {
-                Image(systemName: "arrow.clockwise").opacity(syncing ? 0 : 1)
+                WorkbenchIcon(symbol: "arrow.clockwise").opacity(syncing ? 0 : 1)
                 if syncing { ProgressView().controlSize(.mini) }
             }.frame(width: 16, height: 16)
         }
-        .buttonStyle(QuietButtonStyle())
+        .buttonStyle(WorkbenchIconButtonStyle())
         .disabled(!model.isConnected || syncing)
         .accessibilityLabel(syncing ? "正在同步会话" : "同步会话")
         .help("同步会话 · " + (model.connectionState.error.isEmpty ? model.historyStatus : model.connectionState.error))
@@ -39,8 +39,9 @@ struct ServerFooter: View {
 }
 
 struct ConnectSheet: View {
+    var machine: ConnectionConfig? = nil
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     @State private var host = ""
     @State private var port = ""
     @State private var name = ""
@@ -54,9 +55,9 @@ struct ConnectSheet: View {
     @FocusState private var focusedField: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("添加机器").font(.title2.weight(.semibold))
+                SheetHeading(title: machine == nil ? "添加 SSH 主机" : "编辑 SSH 主机") { dismiss() }.disabled(connecting)
                 Text("通过 SSH 连接远端 Claude Code。")
                     .font(.body).foregroundStyle(WorkbenchTheme.inkMuted)
             }
@@ -67,16 +68,13 @@ struct ConnectSheet: View {
                     connectionField("用户名", text: $username, prompt: "留空使用 SSH 配置")
                     connectionField("端口", text: $port, prompt: "默认使用 SSH 配置")
                 }
-                Picker("认证方式", selection: $authentication) {
-                    Text("SSH 配置 / Agent").tag(SSHAuthentication.automatic)
-                    Text("密码").tag(SSHAuthentication.password)
-                    Text("私钥文件").tag(SSHAuthentication.keyFile)
-                }
+                WorkbenchSelect(title: "认证方式", selection: $authentication, options: [
+                    WorkbenchOption(.automatic, "SSH 配置 / Agent"), WorkbenchOption(.password, "密码"), WorkbenchOption(.keyFile, "私钥文件")])
                 if authentication == .password {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("密码").font(.callout.weight(.medium))
                         SecureField("服务器密码", text: $password)
-                            .textFieldStyle(.plain).font(.body).padding(12)
+                            .textFieldStyle(.plain).font(WorkbenchMetrics.ui).padding(8)
                             .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 8))
                             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(WorkbenchTheme.border))
                     }
@@ -110,13 +108,22 @@ struct ConnectSheet: View {
                 Spacer()
                 Button("取消") { dismiss() }.buttonStyle(WorkbenchButtonStyle())
                     .keyboardShortcut(.cancelAction).disabled(connecting)
-                Button(connecting ? "连接并同步中…" : "连接机器") { connect() }
+                Button(connecting ? "连接中…" : machine == nil ? "连接机器" : "保存并重连") { connect() }
                     .buttonStyle(WorkbenchButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
                     .disabled(connecting || host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (authentication == .keyFile && identityFile.isEmpty))
             }
         }
-        .padding(28).frame(width: 460)
+        .padding(24).frame(width: 500)
         .interactiveDismissDisabled(connecting)
+        .onAppear {
+            guard let machine else { return }
+            host = machine.host
+            port = machine.port.map(String.init) ?? ""
+            name = machine.name ?? ""
+            identityFile = machine.identityFile ?? ""
+            authentication = machine.authentication ?? .automatic
+            reverseAccess = machine.reverseAccess == true
+        }
         .task { await Task.yield(); focusedField = "SSH 主机" }
         .onChange(of: authentication) { _, _ in password = "" }
         .onDisappear { password = "" }
@@ -126,7 +133,7 @@ struct ConnectSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(label).font(.callout.weight(.medium))
             TextField(label, text: text, prompt: Text(prompt)).labelsHidden().textFieldStyle(.plain).focused($focusedField, equals: label)
-                .font(.body).padding(12)
+                .font(WorkbenchMetrics.ui).padding(8)
                 .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(WorkbenchTheme.border))
         }
@@ -145,7 +152,8 @@ struct ConnectSheet: View {
                                               reverseAccess: reverseAccess ? true : nil)
                 let credential = authentication == .password && !password.isEmpty ? password : nil
                 password = ""
-                try await model.connect(config, password: credential)
+                if let machine { try await model.updateMachine(machine, with: config, password: credential) }
+                else { try await model.connect(config, password: credential) }
                 dismiss()
             } catch { self.error = error.localizedDescription }
             connecting = false

@@ -4,6 +4,7 @@ import AppKit
 
 struct SidebarResizeHandle: View {
     @Binding var width: Double
+    var onCommit: () -> Void = {}
     @State private var dragOrigin: Double?
     @State private var hovered = false
 
@@ -21,9 +22,9 @@ struct SidebarResizeHandle: View {
                 .onChanged { value in
                     if dragOrigin == nil { dragOrigin = width }
                     // Global coordinates stay stable while the divider itself moves.
-                    width = min(360, max(200, (dragOrigin ?? width) + value.translation.width))
+                    width = min(360, max(200, (dragOrigin ?? width) + value.translation.width)).rounded()
                 }
-                .onEnded { _ in dragOrigin = nil })
+                .onEnded { _ in dragOrigin = nil; onCommit() })
             .onHover { inside in
                 guard hovered != inside else { return }
                 hovered = inside
@@ -42,6 +43,7 @@ struct SidebarResizeHandle: View {
                 case .decrement: width = max(200, width - 20)
                 @unknown default: break
                 }
+                onCommit()
             }
     }
 }

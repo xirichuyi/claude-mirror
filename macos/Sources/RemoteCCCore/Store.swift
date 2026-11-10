@@ -39,6 +39,15 @@ public final class ChatStore: @unchecked Sendable {
         return try JSONDecoder().decode([ChatMessage].self, from: try Data(contentsOf: file(id)))
     }
 
+    /// Serialize with pending saves, but never decode transcripts on the UI thread.
+    public func messagesAsync(_ id: String) async throws -> [ChatMessage] {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async { [self] in
+                continuation.resume(with: Result { try messages(id) })
+            }
+        }
+    }
+
     /// Unloaded conversations keep their message file untouched.
     public func save(_ sessions: [ChatSession], changed: Set<String>? = nil) {
         let index = sessions.map { session -> ChatSession in

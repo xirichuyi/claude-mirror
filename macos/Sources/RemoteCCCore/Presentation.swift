@@ -247,15 +247,17 @@ public func parseMarkdown(_ source: String) -> [MarkdownBlock] {
 
 /// Recognises `src/app.js:12`, `/etc/hosts` and `report.pdf`, but not `e.g.` or `v1.2`.
 public func remotePathReference(_ text: String) -> (path: String, line: Int?)? {
-    guard !text.contains(" "), !text.contains("\n"), text.count < 1024 else { return nil }
+    guard !text.contains("\n"), !text.contains("\r"), !text.contains("\t"), text.count < 1024 else { return nil }
     var path = text, line: Int?
     if let range = text.range(of: ":[0-9]+(:[0-9]+)?$", options: .regularExpression) {
         path = String(text[..<range.lowerBound])
         line = Int(text[range].dropFirst().prefix { $0.isNumber })
     }
     if path.hasPrefix("http:") || path.hasPrefix("https:") { return nil }
-    if path.hasPrefix("/") || path.hasPrefix("~/") || path.hasPrefix("./") || path.hasPrefix("../") { return path.count > 1 ? (path, line) : nil }
+    if path.hasPrefix("/") || path.hasPrefix("~/") || path.hasPrefix("./") || path.hasPrefix("../") { return (path, line) }
+    if path == "~" { return (path, line) }
+    if path.hasSuffix("/"), path.dropLast().range(of: "^[\\w.@-]+(/[\\w.@-]+)*$", options: .regularExpression) != nil { return (path, line) }
     if path.range(of: "^[\\w.@-]+(/[\\w.@-]+)+$", options: .regularExpression) != nil { return (path, line) }
-    if path.range(of: "^[\\w.@-]+\\.(js|cjs|mjs|ts|tsx|jsx|py|go|rs|java|c|h|cpp|cs|rb|php|swift|sh|md|txt|json|yaml|yml|toml|html|css|sql|csv|png|jpg|jpeg|gif|webp|pdf|log)$", options: [.regularExpression, .caseInsensitive]) != nil { return (path, line) }
+    if path.range(of: "^[\\w.@-]+\\.(js|cjs|mjs|ts|tsx|jsx|py|go|rs|java|c|h|cpp|cs|rb|php|swift|sh|md|txt|json|yaml|yml|toml|html|css|sql|csv|png|jpg|jpeg|gif|webp|svg|pdf|xlsx|xls|tsv|docx|pptx|mp4|mov|mp3|log)$", options: [.regularExpression, .caseInsensitive]) != nil { return (path, line) }
     return nil
 }

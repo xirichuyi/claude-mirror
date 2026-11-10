@@ -19,7 +19,7 @@ struct SessionDetailsView: View {
                 HStack {
                     Text("会话详情").font(.headline)
                     Spacer()
-                    Button { model.showSessionDetails = false } label: { Image(systemName: "xmark") }
+                    Button { model.showSessionDetails = false } label: { WorkbenchIcon(symbol: "xmark") }
                         .buttonStyle(QuietButtonStyle()).help("收起会话详情").accessibilityLabel("收起会话详情")
                 }
                 if let session = model.active {
@@ -36,7 +36,7 @@ struct SessionDetailsView: View {
                         HStack {
                             Label("上下文", systemImage: "gauge.with.dots.needle.33percent").font(.subheadline.weight(.semibold))
                             Spacer()
-                            Button { revision += 1 } label: { Image(systemName: "arrow.clockwise") }
+                            Button { revision += 1 } label: { WorkbenchIcon(symbol: "arrow.clockwise") }
                                 .buttonStyle(QuietButtonStyle()).disabled(loading || !model.isConnected).help("刷新上下文").accessibilityLabel("刷新上下文")
                         }
                         if loading { ProgressView().controlSize(.small) }

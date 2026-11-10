@@ -5,17 +5,23 @@ import RemoteCCCore
 
 struct MachineSwitcher: View {
     @EnvironmentObject private var model: AppModel
+    var compact = false
     @State private var choosing = false
     var body: some View {
         Button { choosing.toggle() } label: {
             // Keep the current host visible beside its connection status.
             HStack(spacing: 7) {
                 Circle().fill(model.isConnected ? WorkbenchTheme.sage : WorkbenchTheme.inkMuted.opacity(0.5)).frame(width: 7, height: 7)
-                Text(model.currentConfig?.displayName ?? "选择机器").font(.headline).lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
+                if compact {
+                    WorkbenchIcon(symbol: "desktopcomputer").font(.system(size: 18))
+                } else {
+                    Text(model.currentConfig?.displayName ?? "选择机器").font(.headline).lineLimit(1)
+                    WorkbenchIcon(symbol: "chevron.up.chevron.down").font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
+                }
             }
             .padding(.horizontal, 6).padding(.vertical, 4).contentShape(Rectangle())
         }.buttonStyle(.plain).help("当前机器：" + (model.currentConfig?.displayName ?? "未连接") + " · 切换或添加机器")
+        .accessibilityLabel("切换主机")
         .popover(isPresented: $choosing, arrowEdge: .trailing) {
             VStack(alignment: .leading, spacing: 6) {
                 Button { choosing = false; model.activeId = nil } label: { Label("返回首页", systemImage: "house") }.buttonStyle(QuietButtonStyle())
@@ -27,26 +33,22 @@ struct MachineSwitcher: View {
                         model.selectMachine(machine)
                     } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "desktopcomputer")
+                            WorkbenchIcon(symbol: "desktopcomputer")
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(machine.displayName)
                                 Text(machine.host + (machine.port.map { ":\($0)" } ?? "")).font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
                             }
                             Spacer()
-                            if model.currentConfig?.key == machine.key { Image(systemName: "checkmark") }
+                            if model.currentConfig?.key == machine.key { WorkbenchIcon(symbol: "checkmark") }
                             Circle().fill(model.engine?.connectionState(machine).status == .connected ? WorkbenchTheme.added : WorkbenchTheme.inkMuted).frame(width: 6, height: 6)
                         }.font(.body).padding(4).contentShape(Rectangle())
                     }.buttonStyle(QuietButtonStyle())
                     .contextMenu {
+                        Button("编辑机器…") { choosing = false; model.presentation = .editMachine(machine) }
+
                         Button("重命名…") {
-                            let alert = NSAlert()
-                            alert.messageText = "主机名称"
-                            let field = NSTextField(string: machine.displayName)
-                            field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
-                            alert.accessoryView = field
-                            alert.addButton(withTitle: "保存")
-                            alert.addButton(withTitle: "取消")
-                            if alert.runModal() == .alertFirstButtonReturn { model.renameMachine(machine, name: field.stringValue) }
+                            choosing = false
+                            model.presentation = .rename(WorkbenchRename(title: "主机名称", initial: machine.displayName) { model.renameMachine(machine, name: $0) })
                         }
                         Divider()
                         Toggle("允许此服务器反向连接本机", isOn: Binding(

@@ -4,7 +4,7 @@ import RemoteCCCore
 
 struct UsageSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     @State private var context: JSON?
     @State private var error = ""
     @State private var loading = false

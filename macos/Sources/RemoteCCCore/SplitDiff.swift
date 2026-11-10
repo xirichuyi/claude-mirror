@@ -29,6 +29,7 @@ public struct SplitDiff: Sendable, Equatable {
 
     public init(_ unified: String) {
         var oldLine = 0, newLine = 0
+        var inHunk = false
         var removedLines: [String] = [], addedLines: [String] = []
 
         func append(_ kind: Kind, _ left: Side, _ right: Side, change: Int? = nil) {
@@ -57,9 +58,12 @@ public struct SplitDiff: Sendable, Equatable {
         }
 
         for line in unified.components(separatedBy: "\n") {
-            if ["diff --git", "index ", "--- ", "+++ ", "new file", "deleted file", "similarity", "rename ", "\\ No newline"].contains(where: line.hasPrefix) { continue }
+            if line.hasPrefix("diff --git") { flush(); inHunk = false }
+            if line.hasPrefix("\\ No newline") { continue }
+            if !inHunk, ["diff --git", "index ", "--- ", "+++ ", "new file", "deleted file", "similarity", "rename ", "\\ No newline"].contains(where: line.hasPrefix) { continue }
             if line.hasPrefix("@@") {
                 flush()
+                inHunk = true
                 if let (old, new) = SplitDiff.hunkStarts(line) { oldLine = old - 1; newLine = new - 1 }
                 append(.hunk, Side(text: line), Side(text: line))
             } else if line.hasPrefix("-") {
@@ -83,8 +87,9 @@ public struct SplitDiff: Sendable, Equatable {
     static func hunkStarts(_ header: String) -> (Int, Int)? {
         let parts = header.split(separator: " ")
         guard parts.count >= 3, parts[1].hasPrefix("-"), parts[2].hasPrefix("+"),
-              let old = Int(parts[1].dropFirst().split(separator: ",")[0]),
-              let new = Int(parts[2].dropFirst().split(separator: ",")[0]) else { return nil }
+              let oldText = parts[1].dropFirst().split(separator: ",").first,
+              let newText = parts[2].dropFirst().split(separator: ",").first,
+              let old = Int(oldText), let new = Int(newText) else { return nil }
         return (old, new)
     }
 

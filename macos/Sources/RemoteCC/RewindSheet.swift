@@ -4,7 +4,7 @@ import RemoteCCCore
 
 struct RewindSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     let sessionId: String
     let checkpoint: String
     @State private var preview: JSON?

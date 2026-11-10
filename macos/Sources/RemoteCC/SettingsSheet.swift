@@ -5,47 +5,70 @@ import RemoteCCCore
 /// Global preferences remain available without an active conversation.
 struct SettingsSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     @State private var section = "主机"
-    @State private var renaming: ConnectionConfig?
-    @State private var name = ""
     @AppStorage(ThemeStore.modeKey) private var themeMode = ThemeStore.Mode.system.rawValue
     @AppStorage(ThemeStore.darkKey) private var darkTheme = ThemePalette.midnight.id
     @AppStorage(ThemeStore.lightKey) private var lightTheme = ThemePalette.daylight.id
 
     var body: some View {
-        VStack(spacing: 0) {
-            SheetHeading(title: "设置") { dismiss() }.padding(24)
-            HStack(alignment: .top, spacing: 24) {
-                VStack(spacing: 4) {
-                    ForEach(["主机", "对话", "外观", "关于"], id: \.self) { title in
-                        Button(title) { section = title }.buttonStyle(SidebarNavigationStyle(selected: section == title))
-                    }
-                }.frame(width: 100)
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack { Image(systemName: "slider.horizontal.3"); Text("设置").fontWeight(.semibold) }
+                    .foregroundStyle(WorkbenchTheme.inkMuted).frame(height: 52).padding(.horizontal, 12)
+                ForEach(sections, id: \.title) { item in
+                    Button { section = item.title } label: {
+                        Label { Text(item.title) } icon: { WorkbenchIcon(symbol: item.icon) }.frame(height: 24)
+                    }.buttonStyle(SidebarNavigationStyle(selected: section == item.title))
+                }
+                Spacer()
+            }.padding(.horizontal, 10).frame(width: 180).background(WorkbenchTheme.frame)
+            VStack(spacing: 0) {
+                SheetHeading(title: section) { dismiss() }
+                    .padding(.horizontal, 24).frame(height: 52)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         if section == "主机" { hosts }
                         else if section == "对话" { conversation }
                         else if section == "外观" { appearance }
-                        else {
-                            Text("claude mirror").font(.title2.weight(.semibold))
-                            Text("版本 " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"))
-                                .foregroundStyle(WorkbenchTheme.inkMuted)
-                            Button(model.checkingForUpdates ? "正在检查…" : "检查更新") { Task { await model.checkForUpdates(manual: true) } }
-                                .disabled(model.checkingForUpdates)
-                                .buttonStyle(WorkbenchButtonStyle())
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                        else if section == "快捷键" { shortcuts }
+                        else { about }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(24).padding(.top, 4)
+                    .id(section)
                 }
-            }.padding(.horizontal, 24).padding(.bottom, 24)
-        }.frame(width: 640, height: 460)
-        .alert("主机名称", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("名称", text: $name)
-            Button("保存") {
-                if let machine = renaming { model.renameMachine(machine, name: name) }
-                renaming = nil
+            }.frame(maxWidth: .infinity)
+        }.frame(width: 720, height: 520)
+    }
+
+    private let sections = [(title: "主机", icon: "server.rack"), (title: "对话", icon: "bubble.left.and.bubble.right"),
+                            (title: "外观", icon: "paintpalette"), (title: "快捷键", icon: "keyboard"), (title: "关于", icon: "info.circle")]
+
+    private var about: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) { BrandIcon(size: 32); Text("Claude Mirror").font(.system(size: 20, weight: .semibold)) }
+            Text("版本 " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"))
+                .foregroundStyle(WorkbenchTheme.inkMuted)
+            Text("通过 SSH 连接你的代码与 Claude。").foregroundStyle(WorkbenchTheme.inkMuted)
+            Button(model.checkingForUpdates ? "正在检查…" : "检查更新") { Task { await model.checkForUpdates(manual: true) } }
+                .disabled(model.checkingForUpdates)
+            Divider().padding(.vertical, 8)
+            Text("界面设计改编自 Winc").fontWeight(.medium)
+            Text("Copyright 2026 Chenyme and DEEIX AI · Apache License 2.0")
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+            Link("Winc 源码与许可证", destination: URL(string: "https://github.com/DEEIX-AI/Winc")!)
+        }
+    }
+
+    private var shortcuts: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("工作区").font(.headline).padding(.bottom, 12)
+            ForEach([("新建对话", "⌘ N"), ("快速打开 / 命令", "⌘ P"), ("保存文件", "⌘ S"),
+                     ("关闭文件标签", "⌘ W"), ("在项目中搜索", "⇧ ⌘ F"), ("切换侧边栏", "⌘ B"), ("显示文件面板", "⇧ ⌘ E"),
+                     ("设置", "⌘ ,")], id: \.0) { action, keys in
+                HStack { Text(action); Spacer(); WorkbenchShortcut(keys: keys) }
+                    .padding(.horizontal, 12).frame(height: 38)
+                Divider()
             }
-            Button("取消", role: .cancel) { renaming = nil }
         }
     }
 
@@ -64,7 +87,7 @@ struct SettingsSheet: View {
                             Text(machine.host).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                         }
                         Spacer()
-                        Button("重命名") { name = machine.displayName; renaming = machine }
+                        Button("编辑") { model.presentation = .editMachine(machine) }
                         if model.currentConfig?.key == machine.key && model.isConnected {
                             Button("断开") { model.disconnect() }
                         } else {
@@ -75,7 +98,7 @@ struct SettingsSheet: View {
                         get: { model.savedMachines.first { $0.key == machine.key }?.reverseAccess == true },
                         set: { model.setReverseAccess(machine, enabled: $0) }))
                         .help("允许这台服务器通过 SSH 以你的用户身份访问本机")
-                        .toggleStyle(.switch).controlSize(.mini)
+                        .toggleStyle(WorkbenchToggleStyle()).controlSize(.mini)
                     if machine.reverseAccess == true {
                         HStack {
                             Text(model.reverseStatus(machine)).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
@@ -92,7 +115,6 @@ struct SettingsSheet: View {
 
     private var appearance: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("外观").font(.headline)
             CapsulePicker(label: "外观模式", options: ThemeStore.Mode.allCases, selection: Binding(
                 get: { ThemeStore.Mode(rawValue: themeMode) ?? .system },
                 set: { themeMode = $0.rawValue; ThemeStore.apply() })) { mode in
@@ -100,8 +122,6 @@ struct SettingsSheet: View {
             }.frame(maxWidth: 320)
             themeRow("深色主题", palettes: ThemePalette.all.filter(\.dark), selection: $darkTheme)
             themeRow("浅色主题", palettes: ThemePalette.all.filter { !$0.dark }, selection: $lightTheme)
-            Text("配色改编自 winc（Apache-2.0）：正文对比度不低于 7:1，次要文字不低于 4.5:1。")
-                .font(.caption).foregroundStyle(WorkbenchTheme.inkDim)
         }
     }
 
@@ -124,6 +144,7 @@ struct SettingsSheet: View {
                 Button("模型与权限") { dismiss(); model.showPreferences = true }
                 Button("上下文与用量") { dismiss(); model.showUsage = true }
                 Button("扩展与配置") { dismiss(); model.openTools("config") }
+                Button("会话详情") { dismiss(); model.showSessionDetails = true }
             } else {
                 Text("打开对话后可调整模型和权限。").foregroundStyle(WorkbenchTheme.inkMuted)
             }

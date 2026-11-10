@@ -11,8 +11,6 @@ struct ProjectGroup: View {
     var initiallyExpanded = false
     @State private var showAll = false
     @State private var expanded: Bool?
-    @State private var renaming: ChatSession?
-    @State private var name = ""
 
     private var isExpanded: Binding<Bool> {
         Binding(get: { searching || (expanded ?? (initiallyExpanded || sessions.contains { $0.id == model.activeId })) }, set: { expanded = $0 })
@@ -31,7 +29,7 @@ struct ProjectGroup: View {
 
     private func sessionLabel(_ session: ChatSession) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: session.pinned == true ? "pin" : "bubble.left")
+            WorkbenchIcon(symbol: session.pinned == true ? "pin" : "bubble.left")
                 .font(.system(size: 11)).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 16)
             Text(historyDisplayTitle(session.name)).font(.system(size: 13)).lineLimit(1)
             Spacer(minLength: 0)
@@ -53,7 +51,11 @@ struct ProjectGroup: View {
             .accessibilityValue(state)
             .help(session.directory + " · " + session.name + (state.isEmpty ? "" : " · " + state))
             .contextMenu {
-                Button("重命名…") { name = session.name; renaming = session }
+                Button("重命名…") {
+                    model.presentation = .rename(WorkbenchRename(title: "重命名对话", initial: session.name) { value in
+                        model.perform { try model.engine?.rename(session.id, value) }
+                    })
+                }
                 Button(session.pinned == true ? "取消固定" : "固定") { model.perform { try model.engine?.setPinned(session.id, session.pinned != true) } }
                 Button(session.archived == true ? "恢复" : "归档") { model.perform { try model.engine?.setArchived(session.id, session.archived != true) } }
                 Button("导出…") { model.exportConversation(session) }
@@ -84,16 +86,16 @@ struct ProjectGroup: View {
             else if let first = sessions.first {
                 SidebarDisclosure(expanded: isExpanded) { hovered in
                     HStack(spacing: 6) {
-                        Image(systemName: "folder").font(.system(size: 12)).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 16)
+                        WorkbenchIcon(symbol: "folder").font(.system(size: 12)).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 16)
                         Text(first.directory == "/" ? "/" : (first.directory as NSString).lastPathComponent).font(.system(size: 13, weight: .medium)).lineLimit(1)
                         Spacer(minLength: 4)
                         Button { model.newConversation(in: first) } label: {
-                            Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18)
+                            WorkbenchIcon(symbol: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18)
                         }.buttonStyle(.plain).foregroundStyle(WorkbenchTheme.inkMuted).help("在此项目中新建对话")
                             .accessibilityLabel("在此项目中新建对话")
                             .disabled(model.projectMissing(first))
                             .opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
-                        Menu { projectActions(first) } label: { Image(systemName: "ellipsis").font(.system(size: 11)) }
+                        WorkbenchMenu { projectActions(first) } label: { WorkbenchIcon(symbol: "ellipsis").font(.system(size: 11)) }
                             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                             .help("项目操作").accessibilityLabel("项目操作")
                             .opacity(hovered ? 1 : 0)
@@ -116,15 +118,6 @@ struct ProjectGroup: View {
         .onChange(of: model.activeId) {
             if sessions.contains(where: { $0.id == model.activeId }) { expanded = true }
         }
-        .alert("重命名对话", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("对话名称", text: $name)
-            Button("取消", role: .cancel) { renaming = nil }
-            Button("保存") {
-                if let session = renaming { model.perform { try model.engine?.rename(session.id, name) } }
-                renaming = nil
-            }
-            .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80)
-        } message: { Text("输入 1–80 个字符的名称。") }
     }
 }
 #endif

@@ -422,6 +422,7 @@ async function attachmentLookup(request) {
 
 const fileOperations = {
   attachmentLookup, hello, list: listing, preview, textPage, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
+  pathInfo: request => metadata(resolve(request.path, request.base)),
   diff: gitDiffText, gitStatus, gitFileDiff, createWorktree, create: createEntry, rename: renameEntry, remove: removeEntry,
 };
 

@@ -42,7 +42,11 @@ public enum RemoteFileLinks {
         switch url.scheme?.lowercased() {
         case "file": raw = url.path
         case "rcc-file": raw = String(url.absoluteString.dropFirst("rcc-file:".count)).removingPercentEncoding ?? ""
-        case nil: raw = url.absoluteString.removingPercentEncoding ?? url.absoluteString
+        case nil:
+            raw = url.absoluteString.removingPercentEncoding ?? url.absoluteString
+            // Explicit Markdown links may name a relative folder without a slash or extension.
+            guard !raw.isEmpty, !raw.hasPrefix("#"), !raw.contains("\n"), !raw.contains("\r") else { return nil }
+            return remotePathReference(raw) ?? (raw, nil)
         default: return nil
         }
         return remotePathReference(raw)

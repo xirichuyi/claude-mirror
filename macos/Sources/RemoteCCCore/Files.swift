@@ -50,6 +50,15 @@ public final class RemoteFiles: @unchecked Sendable {
         return try await agents.call(config, "file", .object(request), timeout: timeout)
     }
 
+    public func createFolder(_ config: ConnectionConfig, in parent: String, name: String) async throws -> FileEntry {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != ".", name != "..", !name.contains("/"),
+              !name.unicodeScalars.contains(where: { $0.value < 0x20 }) else { throw RemoteError("请输入有效的文件夹名称") }
+        let entry = try await run(config, "create", ["directory": .string(parent), "name": .string(name), "folder": .bool(true)]).decode(FileEntry.self)
+        invalidate(config)
+        return entry
+    }
+
     public func invalidate(_ config: ConnectionConfig? = nil) {
         lock.withLock {
             if let config { listings = listings.filter { !$0.key.hasPrefix(config.key + "|") } }

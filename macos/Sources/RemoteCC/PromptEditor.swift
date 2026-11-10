@@ -121,7 +121,7 @@ final class PasteAwareTextView: NSTextView {
     func measureContentHeight() {
         guard let layoutManager, let textContainer else { return }
         layoutManager.ensureLayout(for: textContainer)
-        let height = min(200, max(40, ceil(layoutManager.usedRect(for: textContainer).height + textContainerInset.height * 2)))
+        let height = min(180, max(32, ceil(layoutManager.usedRect(for: textContainer).height + textContainerInset.height * 2)))
         guard abs(height - lastContentHeight) > 0.5 else { return }
         lastContentHeight = height
         DispatchQueue.main.async { [weak self] in self?.onContentHeight?(height) }

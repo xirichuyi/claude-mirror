@@ -164,7 +164,7 @@ struct FlowOptions: View {
             HStack(spacing: 5) {
                 ForEach(options, id: \.0) { option in
                     Button(option.0) { toggle(option.0) }
-                        .buttonStyle(.bordered).controlSize(.small)
+                        .buttonStyle(WorkbenchButtonStyle(prominent: selected.contains(option.0)))
                         .tint(selected.contains(option.0) ? WorkbenchTheme.accent : WorkbenchTheme.inkMuted)
                         .help(option.1)
                 }
@@ -184,10 +184,8 @@ struct SchemaFieldView: View {
                 Toggle(field.label, isOn: Binding(get: { values[field.name]?.bool ?? field.defaultValue?.bool ?? false }, set: { values[field.name] = .bool($0) }))
                     .onAppear { if values[field.name] == nil { values[field.name] = .bool(field.defaultValue?.bool ?? false) } }
             case .choice:
-                Picker(field.label, selection: Binding(get: { values[field.name]?.string ?? "" }, set: { values[field.name] = .string($0) })) {
-                    Text("请选择").tag("")
-                    ForEach(field.options) { Text($0.label).tag($0.value) }
-                }
+                WorkbenchSelect(title: field.label, selection: Binding(get: { values[field.name]?.string ?? "" }, set: { values[field.name] = .string($0) }),
+                                options: [WorkbenchOption("", "请选择")] + field.options.map { WorkbenchOption($0.value, $0.label) })
                 .onAppear { if let value = field.defaultValue, values[field.name] == nil { values[field.name] = value } }
             case .multiChoice:
                 Text(field.label)

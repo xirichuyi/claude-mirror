@@ -18,7 +18,7 @@ struct RemoteCCApp: App {
                 .onAppear { delegate.model = model; model.startUpdateChecks() }
         }
         .defaultSize(width: 1160, height: 760)
-        .windowToolbarStyle(.unifiedCompact)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("检查更新…") { Task { await model.checkForUpdates(manual: true) } }
@@ -35,8 +35,9 @@ struct RemoteCCApp: App {
                 Button("保存到远端") { model.saveActiveTab() }.keyboardShortcut("s")
             }
             CommandMenu("工作区") {
-                Button("在文件中搜索") { model.panel = .search; model.showFiles = true }.keyboardShortcut("f", modifiers: [.command, .shift])
-                Button("显示 / 隐藏文件面板") { model.showFiles.toggle() }.keyboardShortcut("b")
+                Button("显示文件") { model.openPanel(.files) }.keyboardShortcut("e", modifiers: [.command, .shift])
+                Button("在文件中搜索") { model.openPanel(.search) }.keyboardShortcut("f", modifiers: [.command, .shift])
+                Button("显示 / 隐藏侧栏") { model.sidebarVisible.toggle() }.keyboardShortcut("b")
                 Divider()
                 Button("模型与会话设置…") { model.showPreferences = true }
                 Button("连接 SSH…") { model.showConnect = true }
@@ -86,6 +87,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             case "connect": self?.model?.showConnect = true
             case "home": self?.model?.activeId = nil
             case "settings": self?.model?.presentation = .settings
+            case "palette":
+                if let workspace = self?.model?.activeWorkspace { DemoData.seed(workspace) }
+                self?.model?.presentation = .quickOpen
+            case "tools": self?.model?.presentation = .sessionTools
+            case "account": self?.model?.presentation = .account
+            case "activity": self?.model?.presentation = .activity
+            case "diff":
+                self?.model?.showFiles = false
+                if let workspace = self?.model?.activeWorkspace {
+                    DemoData.seed(workspace)
+                    workspace.activeTabId = workspace.tabs.first { $0.isDiff }?.id
+                    workspace.onChange?()
+                }
             case "files":
                 self?.model?.showFiles = true
                 if let workspace = self?.model?.activeWorkspace { DemoData.seed(workspace) }

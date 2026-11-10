@@ -39,8 +39,44 @@ final class AppModel: ObservableObject {
     @Published var searchText = ""
     @Published var toast: String?
     @Published var panel: SidePanel = .files
-    @Published var showFiles = false
+    @Published var sidebarVisible = true {
+        didSet {
+            if sidebarVisible { sidebarFocus = UUID() }
+            else { focusWorkspace() }
+        }
+    }
+    @Published var editorFocus = UUID()
+    @Published var sidebarFocus = UUID()
+
+    func focusWorkspace() {
+        if showingChat || activeWorkspace?.activeTab == nil { composerFocus = UUID() }
+        else { editorFocus = UUID() }
+    }
+
+    func openPanel(_ value: SidePanel) {
+        panel = value; showFiles = true; sidebarVisible = true
+        sidebarFocus = UUID()
+    }
+    @Published var showFiles = false {
+        didSet { if showFiles { sidebarVisible = true } }
+    }
     var proposedProject: String?
+    @Published var showingChat = true
+    private var workspaceSearches: [String: WorkspaceSearchState] = [:]
+
+    func searchState(for workspace: Workspace) -> WorkspaceSearchState {
+        guard let key = activeId else { return WorkspaceSearchState() }
+        if let state = workspaceSearches[key] { return state }
+        let state = WorkspaceSearchState()
+        workspaceSearches[key] = state
+        return state
+    }
+
+    func focusChat() {
+        showingChat = true
+        composerFocus = UUID()
+    }
+
     @Published var composerFocus = UUID()
     @Published var sessionToolsSection = "skills"
     @Published var showSessionDetails = false
@@ -187,6 +223,37 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func updateMachine(_ original: ConnectionConfig, with input: ConnectionConfig, password: String?) async throws {
+        guard let engine, let connections else { throw RemoteError("连接服务尚未就绪") }
+        let config = try input.validated()
+        guard !syncingMachines.contains(original.key), !syncingMachines.contains(config.key) else { throw RemoteError("正在同步机器，请稍后再试") }
+        guard !engine.sessions.contains(where: { $0.config.key == original.key && $0.isBusy && $0.status != "detached" }) else { throw RemoteError("请等待这台机器的任务结束后再修改连接") }
+        guard !engine.sessions.contains(where: { $0.config.key == original.key && workspaces[$0.id]?.hasUnsavedEdits == true }) else { throw RemoteError("请先保存这台机器上正在编辑的文件") }
+        guard original.key == config.key || !savedMachines.contains(where: { $0.key == config.key }) else { throw RemoteError("该主机和端口已存在") }
+        syncingMachines.insert(original.key)
+        syncingMachines.insert(config.key)
+        defer { syncingMachines.remove(original.key); syncingMachines.remove(config.key) }
+        engine.detach(original)
+        engine.agents.close(original)
+        await connections.disconnect(original)
+        reverseStates[original.key] = nil
+        do { try await connections.connect(config, password: password) }
+        catch {
+            await connections.disconnect(config)
+            throw error
+        }
+        let affected = engine.sessions.filter { $0.config.key == original.key }.map(\.id)
+        try engine.replaceMachine(original, with: config)
+        for id in affected { workspaces[id] = nil }
+        savedMachines.removeAll { $0.key == original.key }
+        rememberMachine(config)
+        if let activeId, !affected.contains(activeId) { self.activeId = nil }
+        selectedMachine = config
+        lastConnection = config
+        await discoverHistory(config)
+        await engine.restore(config)
+    }
+
     func renameMachine(_ config: ConnectionConfig, name: String) {
         var renamed = config
         renamed.name = name
@@ -260,7 +327,6 @@ final class AppModel: ObservableObject {
         let key = session.id
         if let existing = workspaces[key] { return existing }
         let workspace = Workspace(files: engine.files, agents: engine.agents, config: session.config)
-        workspace.onChange = { [weak self] in self?.objectWillChange.send() }
         workspace.touchedFiles = { [weak self] in self?.touchedFiles(session.id) ?? [] }
         workspaces[key] = workspace
         return workspace
@@ -397,21 +463,39 @@ final class AppModel: ObservableObject {
 
     // MARK: Conversations
 
+    private var selectionRefresh: Task<Void, Never>?
+    private var historyRefreshedAt: [String: Date] = [:]
+
     func select(_ id: String) {
-        guard let engine else { return }
+        guard let engine, let session = engine.session(id), activeId != id else { return }
+        selectionRefresh?.cancel()
         activeId = id
         unreadSessions.remove(id)
         NSApp.dockTile.badgeLabel = unreadSessions.isEmpty ? nil : String(unreadSessions.count)
-        do { try engine.hydrate(id) } catch { show(error.localizedDescription) }
-        guard let session = engine.session(id) else { return }
         selectedMachine = savedMachines.first(where: { $0.key == session.config.key }) ?? session.config
-        if session.historyLoaded == false, isConnected { perform { try await engine.loadHistory(id) } }
-        if engine.connectionState(session.config).status == .connected {
-            let workspace = workspace(for: session)
-            if workspace?.root == nil { Task { await workspace?.browse(session.directory) } }
-            Task { try? await engine.refreshProjects(session.config, directories: [session.directory]) }
-            refreshCapabilities()
-            Task { await refreshVisibleHistory(id, report: false) }
+        selectionRefresh = Task {
+            do {
+                try await engine.hydrateAsync(id)
+                try Task.checkCancellation()
+                // Let selection and cached content paint before starting background RPCs.
+                try await Task.sleep(for: .milliseconds(150))
+                guard activeId == id, let current = engine.session(id),
+                      engine.connectionState(current.config).status == .connected else { return }
+                let workspace = workspace(for: current)
+                if workspace?.root == nil { Task { await workspace?.browse(current.directory) } }
+                if current.historyLoaded == false {
+                    try await engine.loadHistory(id)
+                    historyRefreshedAt[id] = Date()
+                }
+                try Task.checkCancellation()
+                guard activeId == id else { return }
+                refreshCapabilities()
+                if Date().timeIntervalSince(historyRefreshedAt[id] ?? .distantPast) >= 30 {
+                    await refreshVisibleHistory(id, report: false)
+                }
+            } catch is CancellationError {} catch {
+                if activeId == id { show(error.localizedDescription) }
+            }
         }
     }
 
@@ -419,6 +503,7 @@ final class AppModel: ObservableObject {
         guard let engine, !refreshingHistory.contains(id), let session = engine.session(id),
               engine.connectionState(session.config).status == .connected else { return }
         refreshingHistory.insert(id)
+        historyRefreshedAt[id] = Date()
         defer { refreshingHistory.remove(id) }
         do {
             try await engine.refreshHistory(id)
@@ -463,18 +548,26 @@ final class AppModel: ObservableObject {
     }
 
     func chooseProject(_ directory: String) async throws {
-        guard let engine, let source = active, isConnected else { throw RemoteError("请先连接服务器") }
-        let listing = try await engine.files.list(source.config, directory, hidden: false, force: true)
-        guard listing.path != source.directory else { return }
-        var config = source.config
+        guard let engine, var config = currentConfig, isConnected else { throw RemoteError("请先连接服务器") }
+        let source = active
+        let listing = try await engine.files.list(config, directory, hidden: false, force: true)
+        guard listing.path != source?.directory else { return }
         config.directory = listing.path
-        let session = try engine.create(config, preferences: source.preferences)
+        let session = try engine.create(config, preferences: source?.preferences)
         // Move only the unsent draft; the old conversation and its running task remain bound to their project.
-        drafts[session.id] = drafts.removeValue(forKey: source.id)
-        attachments[session.id] = attachments.removeValue(forKey: source.id)
+        if let source {
+            drafts[session.id] = drafts.removeValue(forKey: source.id)
+            attachments[session.id] = attachments.removeValue(forKey: source.id)
+        }
         searchText = ""; showArchived = false
         select(session.id)
         composerFocus = UUID()
+    }
+
+    func createProject(in parent: String, name: String) async throws -> String {
+        guard let engine, let config = currentConfig, isConnected else { throw RemoteError("请先连接服务器") }
+        let entry = try await engine.files.createFolder(config, in: parent, name: name)
+        return entry.path
     }
 
     func createWorktree(_ branch: String) async throws {
@@ -580,19 +673,17 @@ final class AppModel: ObservableObject {
         try await engine.respond(id, permission: permission.id, answer: answer)
     }
 
-    func archiveProject(_ project: ChatSession, archived: Bool) {
+    func archiveProject(_ project: ChatSession, archived: Bool, confirmed: Bool = false) {
         guard let engine else { return }
         let sessions = machineSessions.filter { $0.projectKey == project.projectKey }
         guard !sessions.contains(where: { $0.isBusy || $0.queue?.isEmpty == false }) else {
             show("请先完成或停止此项目中的任务"); return
         }
-        if archived {
-            let alert = NSAlert()
-            alert.messageText = "从侧栏移除项目？"
-            alert.informativeText = "\(project.directory)\n将归档该项目的 \(sessions.count) 条对话，可从已归档列表恢复。远端文件夹和聊天历史不会删除。"
-            alert.addButton(withTitle: "取消")
-            alert.addButton(withTitle: "移除项目")
-            guard alert.runModal() == .alertSecondButtonReturn else { return }
+        if archived && !confirmed {
+            presentation = .confirmation(WorkbenchConfirmation(title: "从侧栏移除项目？",
+                detail: "\(project.directory)\n将归档该项目的 \(sessions.count) 条对话，可从已归档列表恢复。远端文件夹和聊天历史不会删除。",
+                actionTitle: "移除项目") { [weak self] in self?.archiveProject(project, archived: true, confirmed: true) })
+            return
         }
         perform {
             for session in sessions { try engine.setArchived(session.id, archived) }
@@ -600,14 +691,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func deleteProjectHistory(_ project: ChatSession) {
+    func deleteProjectHistory(_ project: ChatSession, confirmed: Bool = false) {
         guard let engine else { return }
-        let alert = NSAlert()
-        alert.messageText = "删除此项目的远端聊天记录？"
-        alert.informativeText = project.directory + "\n所有匹配此目录的聊天记录将移入远端回收目录，本地列表同步移除。项目文件不受影响。请先关闭其他客户端中此目录的 Claude 会话。"
-        alert.addButton(withTitle: "取消")
-        alert.addButton(withTitle: "移入远端回收目录")
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        if !confirmed {
+            presentation = .confirmation(WorkbenchConfirmation(title: "删除此项目的远端聊天记录？",
+                detail: project.directory + "\n所有匹配此目录的聊天记录将移入远端回收目录，本地列表同步移除。项目文件不受影响。请先关闭其他客户端中此目录的 Claude 会话。",
+                actionTitle: "移入远端回收目录", destructive: true) { [weak self] in self?.deleteProjectHistory(project, confirmed: true) })
+            return
+        }
         perform {
             let trash = try await engine.trashProjectHistory(project.id)
             if let active = self.activeId, engine.session(active) == nil { self.activeId = nil }
@@ -617,20 +708,20 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func deleteConversation(_ session: ChatSession) {
+    func deleteConversation(_ session: ChatSession, confirmed: Bool = false) {
         guard let engine else { return }
-        let alert = NSAlert()
-        alert.messageText = "删除这条本地聊天记录？"
-        alert.informativeText = "远端 Claude 的历史不会被删除。"
-        alert.addButton(withTitle: "删除")
-        alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if !confirmed {
+            presentation = .confirmation(WorkbenchConfirmation(title: "删除这条本地聊天记录？",
+                detail: "远端 Claude 的历史不会被删除。", actionTitle: "删除", destructive: true) { [weak self] in self?.deleteConversation(session, confirmed: true) })
+            return
+        }
         perform {
             try await engine.remove(session.id)
             self.workspaces[session.id] = nil
+            self.workspaceSearches[session.id] = nil
             if self.activeId == session.id {
-                self.activeId = self.sortedSessions.first?.id
-                if let next = self.activeId { self.select(next) }
+                self.activeId = nil
+                if let next = self.sortedSessions.first?.id { self.select(next) }
             }
         }
     }
@@ -647,7 +738,21 @@ final class AppModel: ObservableObject {
 
     func open(_ file: String, line: Int? = nil) {
         guard isConnected else { show("请先连接 SSH 服务器"); return }
-        Task { await activeWorkspace?.open(file, line: line) }
+        guard let workspace = activeWorkspace else { return }
+        Task {
+            do {
+                let directory = try await workspace.openReference(file, line: line)
+                guard workspace === activeWorkspace else { return }
+                if directory {
+                    openPanel(.files)
+                } else {
+                    showingChat = false
+                    editorFocus = UUID()
+                }
+            } catch {
+                if workspace === activeWorkspace { show(error.localizedDescription) }
+            }
+        }
     }
 
     func closeActiveTab() {
@@ -655,13 +760,11 @@ final class AppModel: ObservableObject {
         close(tab, in: workspace)
     }
 
-    func close(_ tab: EditorTab, in workspace: Workspace) {
-        if tab.isDirty {
-            let alert = NSAlert()
-            alert.messageText = "文件有未保存的修改，放弃修改？"
-            alert.addButton(withTitle: "继续编辑")
-            alert.addButton(withTitle: "放弃修改")
-            if alert.runModal() == .alertFirstButtonReturn { return }
+    func close(_ tab: EditorTab, in workspace: Workspace, confirmed: Bool = false) {
+        if tab.isDirty && !confirmed {
+            presentation = .confirmation(WorkbenchConfirmation(title: "放弃未保存的修改？", detail: tab.path,
+                actionTitle: "放弃修改", cancelTitle: "继续编辑", destructive: true) { [weak self] in self?.close(tab, in: workspace, confirmed: true) })
+            return
         }
         workspace.close(tab)
     }
@@ -808,8 +911,13 @@ final class AppModel: ObservableObject {
         guard let engine, let session = active else { return }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = (file as NSString).lastPathComponent
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        perform { try await engine.files.download(session.config, file, to: url) }
+        perform {
+            try await engine.files.download(session.config, file, to: url)
+            self.show("已下载到 " + url.path)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
     }
 
     /// A private copy in the cache, so outside edits never change what the server holds.
@@ -830,6 +938,7 @@ final class AppModel: ObservableObject {
             UserDefaults.standard.set(data, forKey: "composer-attachments")
         }
         historyPoll?.cancel()
+        selectionRefresh?.cancel()
         engine?.shutdown()
         let connections = self.connections
         let semaphore = DispatchSemaphore(value: 0)

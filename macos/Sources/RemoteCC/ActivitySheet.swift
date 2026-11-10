@@ -4,12 +4,12 @@ import RemoteCCCore
 
 struct ActivitySheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     @State private var stopping = Set<String>()
     @State private var stopErrors: [String: String] = [:]
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            SheetHeading(title: "所有机器的任务", subtitle: "查看进行中的工作、待确认操作与新结果") { dismiss() }
+            SheetHeading(title: "任务") { dismiss() }
             Toggle("任务完成或等待确认时通知我", isOn: Binding(get: { model.notificationsEnabled }, set: { model.setNotifications($0) }))
                 .font(.caption)
             HStack {
@@ -40,7 +40,7 @@ struct ActivitySheet: View {
                                                 .font(.caption).foregroundStyle(WorkbenchTheme.accent)
                                             Image(systemName: "chevron.right").font(.caption)
                                         }.contentShape(Rectangle())
-                                    }.buttonStyle(.plain)
+                                    }.buttonStyle(SidebarNavigationStyle())
                                     ForEach(Array((session.tasks?.array ?? []).enumerated()), id: \.offset) { _, task in
                                         HStack(alignment: .top) {
                                             Image(systemName: task["status"]?.string == "running" ? "circle.dotted" : "checkmark.circle")
@@ -72,8 +72,6 @@ struct ActivitySheet: View {
                         VStack(spacing: 12) {
                             Image(systemName: "checkmark.circle").font(.largeTitle.weight(.light)).foregroundStyle(WorkbenchTheme.accent.opacity(0.7))
                             Text("暂时没有需要处理的任务").font(.body.weight(.medium))
-                            Text(model.savedMachines.isEmpty ? "连接机器后，任务会汇总在这里。" : "正在运行、等待确认和未读的结果都会出现在这里。")
-                                .font(.callout).foregroundStyle(WorkbenchTheme.inkMuted).multilineTextAlignment(.center)
                         }.frame(maxWidth: .infinity).padding(.vertical, 40)
                     }
                 }

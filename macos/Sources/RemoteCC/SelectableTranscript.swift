@@ -103,7 +103,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
     }
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: TranscriptTextView, context: Context) -> CGSize? {
         let proposed = proposal.width ?? 600
-        let available = max(1, proposed.isFinite ? proposed : 600)
+        let available = max(1, floor(proposed.isFinite ? proposed : 600))
         if context.coordinator.measuredWidth == available { return context.coordinator.measuredSize }
         let width: CGFloat
         if markdown { width = available }

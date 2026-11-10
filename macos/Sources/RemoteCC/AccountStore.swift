@@ -45,7 +45,8 @@ final class AccountStore: ObservableObject {
             failure = value["quotaError"]?.string ?? (value["quota"]?["available"]?.isTruthy == true ? nil : "无法确认订阅额度，远端将暂停新请求")
         } catch {
             guard generation == request else { return }
-            status = nil
+            // Retain account identity during a transient network failure. Quota views
+            // use failure to hide stale percentages until a successful refresh.
             failure = "额度读取失败：" + error.localizedDescription
         }
     }

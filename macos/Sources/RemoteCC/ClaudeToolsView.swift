@@ -5,7 +5,7 @@ import RemoteCCCore
 /// Project/session controls use the resident owner, never a disposable inspector for mutations.
 struct ClaudeToolsView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     let sessionID: String
     let section: SessionToolSection
     @StateObject private var state = SessionToolsStore()
@@ -28,15 +28,17 @@ struct ClaudeToolsView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 TextField("搜索名称或说明", text: $search).textFieldStyle(WorkbenchTextFieldStyle())
-                Button("刷新") { revision += 1 }.disabled(busy || !model.isConnected)
+                Button { revision += 1 } label: {
+                    ZStack {
+                        WorkbenchIcon(symbol: "arrow.clockwise").opacity(busy ? 0 : 1)
+                        if busy { ProgressView().controlSize(.small) }
+                    }
+                }.buttonStyle(WorkbenchIconButtonStyle()).help("刷新").accessibilityLabel("刷新")
+                    .disabled(busy || !model.isConnected)
             }
-            if busy { ProgressView("正在读取远端…") }
             if let message { Text(message).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled) }
-            if session?.remoteOwner == nil {
-                Text("可查看项目环境；重载和连接控制需先建立实时会话。").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
-            }
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if section == .config { configuration }
                     else if section == .status {
                         if let session {
@@ -55,7 +57,7 @@ struct ClaudeToolsView: View {
                     } else {
                         if section == .skills || section == .plugins { reloadButton }
                         if items.isEmpty && !busy && message == nil {
-                            InterfaceState(title: search.isEmpty ? "暂无相关项目" : "没有匹配结果", detail: search.isEmpty ? "远端尚未报告此类项目，可刷新重新读取。" : "清除搜索或试试其他关键词。", symbol: "square.stack")
+                            InterfaceState(title: search.isEmpty ? "暂无相关项目" : "没有匹配结果", detail: "", symbol: "square.stack")
                         }
                         ForEach(items, id: \.self) { item in itemView(item) }
                     }
@@ -110,7 +112,8 @@ struct ClaudeToolsView: View {
                 Button("停止任务") { stopTask(id) }.disabled(busy || !model.isConnected)
             }
             DisclosureGroup("详细信息") { CodeBlock(text: item.text(pretty: true)) }
-        }.padding(12).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+        }.padding(.vertical, 10).padding(.horizontal, 8)
+            .overlay(alignment: .bottom) { WorkbenchTheme.separator.frame(height: 1) }
     }
 
     private var configuration: some View {

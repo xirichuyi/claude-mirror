@@ -9,10 +9,10 @@ struct MachineHomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(model.currentConfig == nil ? "连接服务器" : "新对话")
-                        .font(.largeTitle.weight(.semibold))
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(WorkbenchTheme.ink)
                     Text(model.currentConfig == nil ? "使用服务器上的 Claude Code。" : model.currentConfig!.displayName)
                         .font(.body).foregroundStyle(WorkbenchTheme.inkMuted).lineSpacing(6)
@@ -26,12 +26,14 @@ struct MachineHomeView: View {
                         } else {
                             Button { model.showConnect = true } label: { Label("添加服务器", systemImage: "plus") }
                                 .buttonStyle(WorkbenchButtonStyle(prominent: true))
-                            Text("支持 SSH 别名与 user@host").font(.subheadline).foregroundStyle(WorkbenchTheme.inkDim)
+                            Text("支持 SSH 别名与 user@host").font(WorkbenchMetrics.caption).foregroundStyle(WorkbenchTheme.inkDim)
                         }
                     }.padding(.top, 4)
                     }
                 }
                 if model.currentConfig != nil {
+                    Button { model.openProjectPicker() } label: { Label("打开或新建项目", systemImage: "folder.badge.plus") }
+                        .buttonStyle(WorkbenchButtonStyle()).disabled(!model.isConnected)
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Text("最近对话").font(.callout.weight(.medium)).foregroundStyle(WorkbenchTheme.inkMuted)
@@ -44,7 +46,7 @@ struct MachineHomeView: View {
                         }
                         if recent.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(syncing ? "正在读取远端历史…" : "还没有对话").font(.body.weight(.medium))
+                                Text(syncing ? "正在读取远端历史…" : "还没有对话").font(WorkbenchMetrics.ui)
                                 Text(model.historyStatus)
                                     .font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
                             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
@@ -53,16 +55,16 @@ struct MachineHomeView: View {
                             VStack(spacing: 4) {
                                 ForEach(recent) { session in
                                     Button { model.select(session.id) } label: {
-                                        HStack(spacing: 14) {
+                                        HStack(spacing: 10) {
                                                                                         VStack(alignment: .leading, spacing: 5) {
-                                                Text(historyDisplayTitle(session.name)).font(.body.weight(.medium)).lineLimit(1)
-                                                Text(session.directory).font(.subheadline).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1).truncationMode(.middle)
+                                                Text(historyDisplayTitle(session.name)).font(WorkbenchMetrics.ui).lineLimit(1)
+                                                Text(session.directory).font(WorkbenchMetrics.caption).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1).truncationMode(.middle)
                                             }
                                             Spacer()
                                             Text(Date(timeIntervalSince1970: session.updatedAt / 1000), format: .dateTime.month().day())
                                                 .font(.caption2).foregroundStyle(WorkbenchTheme.inkDim)
                                             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(WorkbenchTheme.inkDim)
-                                        }.padding(.vertical, 8).padding(.horizontal, 4).contentShape(Rectangle())
+                                        }.padding(.vertical, 4).padding(.horizontal, 4).contentShape(Rectangle())
                                     }.buttonStyle(SidebarNavigationStyle())
                                 }
                             }
@@ -70,7 +72,7 @@ struct MachineHomeView: View {
                     }
                 }
             }
-            .frame(maxWidth: 620).padding(.horizontal, 44).padding(.top, 40).padding(.bottom, 48)
+            .frame(maxWidth: 580).padding(.horizontal, 32).padding(.top, 36).padding(.bottom, 32)
             .frame(maxWidth: .infinity, alignment: .center)
         }
     }

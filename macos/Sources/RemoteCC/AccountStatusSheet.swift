@@ -4,7 +4,7 @@ import RemoteCCCore
 
 struct AccountStatusSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     @ObservedObject var store: AccountStore
     private var status: JSON? { store.status }
     @State private var environment: JSON?
@@ -16,7 +16,7 @@ struct AccountStatusSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SheetHeading(title: "账号与 Claude Code") { dismiss() }.padding(24)
+            SheetHeading(title: "账户信息") { dismiss() }.padding(24)
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(model.currentConfig?.displayName ?? "未选择机器").font(.headline)
@@ -25,7 +25,9 @@ struct AccountStatusSheet: View {
                     if let failure { Text(failure).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled) }
                     if let status { accountSection(status) }
                     if let session = model.active { sessionSection(session) }
-                    if let environment { environmentSection(environment) }
+                    if let environment {
+                        DisclosureGroup("Claude Code 环境") { environmentSection(environment) }
+                    }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.bottom, 24)
             }
             HStack {
@@ -55,14 +57,7 @@ struct AccountStatusSheet: View {
             row("默认输出样式", displayValue(value["outputStyle"]?.string))
             row("快速模式", displayValue(value["fastMode"]?.string))
             if let reason = value["fastModeDisabledReason"]?.string { row("快速模式不可用原因", displayValue(reason)) }
-            ForEach(value["quota"]?["windows"]?.array ?? [], id: \.self) { window in
-                if let used = window["used"]?.double {
-                    row(window["id"]?.string == "five_hour" ? "五小时已用" : "本周已用", String(format: "%.0f%%", used))
-                    if let reset = window["resetsAt"]?.string { row("重置时间", resetTime(reset)) }
-                }
-            }
-            if let error = value["quotaError"]?.string { Text("额度：" + error).foregroundStyle(WorkbenchTheme.inkMuted) }
-            Text("检测到任一周期已用达到 95% 时停止。同一远端登录已用达到 90% 后限制并行任务；用量反馈有延迟，无法保证精确保留 5%。").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+            QuotaOverview(store: store)
         }
     }
 

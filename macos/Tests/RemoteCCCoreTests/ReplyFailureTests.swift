@@ -2,6 +2,16 @@ import XCTest
 @testable import RemoteCCCore
 
 final class ReplyFailureTests: XCTestCase {
+    func testQuotaProtectionIsCompactAndPreservesDiagnostic() {
+        let raw = "额度保护：五小时已用 96%，保留 5% 额度，已暂停请求；重置时间 2026-11-10T17:39:59Z"
+        let failure = ReplyFailure(raw)
+        XCTAssertTrue(failure.isQuotaProtection)
+        XCTAssertEqual(failure.title, "额度保护 · 请求已暂停")
+        XCTAssertFalse(failure.summary.contains("2026-"))
+        XCTAssertEqual(failure.raw, raw)
+        XCTAssertFalse(ReplyFailure("Connection closed: quota status unknown").isQuotaProtection)
+    }
+
     func testSafetyMessageKeepsDiagnostics() {
         let raw = "API Error: Opus 5.5's safeguards flagged this session\nDetails: `[cyber]`\nRequest ID: req_123"
         let failure = ReplyFailure(raw)

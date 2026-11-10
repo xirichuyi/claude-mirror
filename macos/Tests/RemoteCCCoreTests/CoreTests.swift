@@ -704,7 +704,8 @@ final class LogicTests: XCTestCase {
         XCTAssertEqual(blocks[5], .table([["h", "i"], ["1", "2"]])); XCTAssertEqual(blocks[6], .rule); XCTAssertEqual(blocks[7], .paragraph("end"))
         XCTAssertEqual(remotePathReference("src/app.js:12")?.path, "src/app.js"); XCTAssertEqual(remotePathReference("src/app.js:12")?.line, 12)
         XCTAssertEqual(remotePathReference("/etc/hosts")?.path, "/etc/hosts"); XCTAssertEqual(remotePathReference("a.pdf")?.path, "a.pdf")
-        for text in ["e.g.", "v1.2", "npm install", "https://x.y/z", "/"] { XCTAssertNil(remotePathReference(text), text) }
+        XCTAssertEqual(remotePathReference("/")?.path, "/") // Root is a navigable folder.
+        for text in ["e.g.", "v1.2", "npm install", "https://x.y/z"] { XCTAssertNil(remotePathReference(text), text) }
     }
 
     func testSchemaFields() throws {

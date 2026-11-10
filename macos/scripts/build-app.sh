@@ -3,12 +3,15 @@
 set -eu
 cd "$(dirname "$0")/.."
 node scripts/prepare-server.cjs Resources/server
+cargo build --release --locked --manifest-path Helpers/WincPreview/Cargo.toml
 swift build -c "${BUILD_CONFIGURATION:-release}" --product RemoteCC
 STAGING=$(mktemp -d "${TMPDIR:-/tmp}/remotecc-build.XXXXXX")
 trap 'rm -rf "$STAGING"' EXIT HUP INT TERM
 APP="$STAGING/claude-mirror.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c "${BUILD_CONFIGURATION:-release}" --show-bin-path)/RemoteCC" "$APP/Contents/MacOS/RemoteCC"
+cp Helpers/WincPreview/target/release/winc-preview-bridge "$APP/Contents/MacOS/WincPreview"
+codesign --force --sign - "$APP/Contents/MacOS/WincPreview"
 mkdir -p "$APP/Contents/Frameworks"
 ditto .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
 swiftc Helpers/ClaudockAskpass.swift -o "$APP/Contents/MacOS/ClaudockAskpass"

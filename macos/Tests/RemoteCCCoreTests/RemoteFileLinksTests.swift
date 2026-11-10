@@ -2,6 +2,17 @@ import XCTest
 @testable import RemoteCCCore
 
 final class RemoteFileLinksTests: XCTestCase {
+    func testDirectoryLinksWithSpacesUnicodeAndRoot() {
+        XCTAssertEqual(RemoteFileLinks.reference(URL(string: "docs")!)?.path, "docs")
+        XCTAssertNil(RemoteFileLinks.reference(URL(string: "#section")!))
+        for path in ["/opt/claude- mirror", "/root/图片/", "/", "~/Documents/", "./docs/", "docs/"] {
+            XCTAssertEqual(remotePathReference(path)?.path, path)
+            let markdown = RemoteFileLinks.markdown("`" + path + "`")
+            XCTAssertTrue(markdown.contains("rcc-file:"))
+        }
+        XCTAssertEqual(RemoteFileLinks.reference(URL(string: "file:///opt/claude-%20mirror/")!)?.path, "/opt/claude- mirror")
+    }
+
     func testInlineImagePathsAndLineNumbersBecomeLinks() {
         let text = "图片：`/root/claude-mirror-icons/round1-abc.png`。代码 `src/app.swift:12`"
         let result = RemoteFileLinks.markdown(text)

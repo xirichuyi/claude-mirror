@@ -20,10 +20,15 @@ struct ChatView: View {
                     MachineHomeView()
                 } else if let session = model.active, !session.messages.isEmpty || session.remoteHistoryRef != nil {
                     if model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil || session.historyLoaded == false {
-                        HistoryNotice(session: session).padding(.horizontal, 24).padding(.vertical, 10)
-                            .background(WorkbenchTheme.surface.opacity(0.5))
+                        HistoryNotice(session: session)
+                            .id(session.id)
+                            .padding(.horizontal, 24).padding(.vertical, 4)
+                            .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
+                            .frame(maxWidth: .infinity)
                     }
-                    MessagesList(session: session).id(session.id)
+                    MessagesList(session: session, model: model,
+                        historyError: model.historyRefreshErrors[session.id], refreshing: model.refreshingHistory.contains(session.id))
+                        .id(session.id)
                 } else {
                     WelcomeView()
                 }
@@ -82,12 +87,15 @@ struct WelcomeView: View {
 }
 
 struct MessagesList: View {
-    @EnvironmentObject private var model: AppModel
     let session: ChatSession
+    // Actions use the model, but unrelated toolbar/draft changes must not invalidate the transcript.
+    let model: AppModel
+    let historyError: String?
+    let refreshing: Bool
+
     @StateObject private var selection = TranscriptSelection()
     @State private var followsReply = true
-    @State private var bottomDistance: CGFloat = 0
-    @State private var contentHeight: CGFloat = 0
+    @State private var farFromBottom = false
     @State private var visibleMessageLimit = 50
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -95,7 +103,7 @@ struct MessagesList: View {
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if session.messages.count > visibleMessageLimit {
                         Button("加载更早消息") {
                             let anchor = session.messages.suffix(visibleMessageLimit).first?.id
@@ -109,7 +117,9 @@ struct MessagesList: View {
                             .font(.caption)
                     }
                     if session.remoteHistoryRef != nil,
-                       session.historyBefore != nil && session.historyLoaded != false {
+                       session.historyBefore != nil && session.historyLoaded != false,
+                       historyError == nil,
+                       !refreshing {
                         HistoryNotice(session: session) {
                             followsReply = false
                             let anchor = session.messages.first?.id
@@ -139,34 +149,28 @@ struct MessagesList: View {
                             .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 12))
                     }
                     Color.clear.frame(height: 1).id("bottom")
+                        .onAppear { if #unavailable(macOS 15) { farFromBottom = false } }
+                        .onDisappear { if #unavailable(macOS 15) { farFromBottom = true } }
                 }
                 .environment(\.transcriptSelection, selection)
-                .padding(.horizontal, 28).padding(.vertical, 24)
+                .padding(.horizontal, 24).padding(.vertical, 20)
                 .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
-                .background(GeometryReader { content in
-                    Color.clear.preference(key: ReplyBottomPreference.self,
-                        value: ReplyGeometry(height: content.size.height, bottom: content.frame(in: .named("replyViewport")).maxY))
-                })
             }
             .clipped()
             .defaultScrollAnchor(.bottom)
             .coordinateSpace(name: "replyViewport")
-            .onPreferenceChange(ReplyBottomPreference.self) { geometry in
-                // Offset changes only update the jump button. Never scroll from an offset
-                // callback: scrolling changes the offset again and creates a layout loop.
-                bottomDistance = max(0, geometry.bottom - viewport.size.height)
-                contentHeight = geometry.height
-            }
-            .task(id: contentHeight) {
-                // Coalesce streamed text and wait for native text measurement to settle.
-                do { try await Task.sleep(for: .milliseconds(40)) } catch { return }
+            .task(id: session.messages.last) {
+                // Follow actual message updates, never height estimates produced by scrolling.
+                do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
                 guard followsReply else { return }
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
-            .background(ScrollReadingDetector { followsReply = false })
+            .modifier(TranscriptScrollTracking(farFromBottom: $farFromBottom, following: $followsReply))
             .overlay(alignment: .bottomTrailing) {
-                if ReplyScrollPolicy.showsJump(distance: Double(bottomDistance), following: followsReply) {
+                // AX scrolling does not necessarily emit wheel events. The return
+                // control is available whenever the latest message is off screen.
+                if farFromBottom {
                     Button {
                         followsReply = true
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -179,8 +183,6 @@ struct MessagesList: View {
                         .shadow(color: .black.opacity(0.06), radius: 5, y: 2).padding(16)
                 }
             }
-            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
-            .onChange(of: followsReply) { if followsReply { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: session.messages.count) { oldCount, newCount in
                 // New replies must not evict the messages the user is reading.
                 visibleMessageLimit += max(0, newCount - oldCount)
@@ -190,19 +192,11 @@ struct MessagesList: View {
     }
 }
 
-private struct ReplyGeometry: Equatable {
-    var height: CGFloat = 0
-    var bottom: CGFloat = 0
-}
-private struct ReplyBottomPreference: PreferenceKey {
-    static var defaultValue = ReplyGeometry()
-    static func reduce(value: inout ReplyGeometry, nextValue: () -> ReplyGeometry) { value = nextValue() }
-}
-
 struct HistoryNotice: View {
     @EnvironmentObject private var model: AppModel
     let session: ChatSession
     var loadEarlier: (() -> Void)? = nil
+    @State private var showsError = false
     private var refreshing: Bool { model.refreshingHistory.contains(session.id) }
 
     var body: some View {
@@ -211,10 +205,37 @@ struct HistoryNotice: View {
                 ProgressView().controlSize(.mini)
                 Text(session.historyLoaded == false ? "正在加载历史消息…" : "正在同步最新消息…")
             } else if let error = model.historyRefreshErrors[session.id] {
-                Label("消息同步失败", systemImage: "exclamationmark.circle")
-                Text(error).lineLimit(1).help(error)
-                Spacer()
-                Button("重试") { Task { await model.refreshVisibleHistory(session.id) } }.disabled(!model.isConnected)
+                HStack(spacing: 2) {
+                    Button { showsError.toggle() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.circle")
+                                .foregroundStyle(WorkbenchTheme.warning)
+                            Text("同步失败")
+                        }
+                        .padding(.leading, 8).padding(.trailing, 6)
+                        .frame(height: 28)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("查看同步详情")
+                    .popover(isPresented: $showsError, arrowEdge: .bottom) {
+                        Text(error)
+                            .font(.callout)
+                            .foregroundStyle(WorkbenchTheme.inkMuted)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(width: 300, alignment: .leading)
+                            .padding(16)
+                    }
+                    Button { Task { await model.refreshVisibleHistory(session.id) } } label: {
+                        WorkbenchIcon(symbol: "arrow.clockwise")
+                    }
+                    .buttonStyle(WorkbenchIconButtonStyle())
+                    .help("重试同步").accessibilityLabel("重试同步")
+                    .disabled(!model.isConnected)
+                    .padding(.trailing, 2)
+                }
+                .background(WorkbenchTheme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
             } else if session.historyLoaded == false {
                 Text(model.isConnected ? "历史消息尚未加载" : "连接服务器后加载历史消息")
                 Spacer()
@@ -242,24 +263,24 @@ struct MessageRow: View, Equatable {
     let actions: FileActions
     @EnvironmentObject private var model: AppModel
     @State private var copied = false
+    @State private var hovered = false
     @Environment(\.transcriptSelection) private var selection
-    @State private var showRewind = false
+
 
     static func == (a: MessageRow, b: MessageRow) -> Bool { a.busy == b.busy && a.sessionStatus == b.sessionStatus && a.showHeader == b.showHeader && a.message == b.message }
 
     var body: some View {
         Group { if message.role == "user" { userBody } else { assistantBody } }
-            .sheet(isPresented: $showRewind) {
-                if let checkpoint = message.checkpointId, let id = model.activeId { RewindSheet(sessionId: id, checkpoint: checkpoint).workbenchPanel() }
-            }
+            .onHover { hovered = $0 }
+
     }
 
     private var userBody: some View {
         VStack(alignment: .trailing, spacing: 6) {
             if let text = message.text, !text.isEmpty {
             SelectableTranscriptText(text: text, markdown: false, scope: selection)
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(WorkbenchTheme.ink.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
             }
             if let files = message.attachments {
                 ForEach(files) { file in
@@ -296,7 +317,7 @@ struct MessageRow: View, Equatable {
                 }.padding(.vertical, 8).accessibilityElement(children: .combine)
             }
             if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
-            if !busy { footer }
+            if !busy { footer.opacity(hovered || copied ? 1 : 0.25) }
         }
     }
 
@@ -339,12 +360,12 @@ struct MessageRow: View, Equatable {
                 if !text.isEmpty {
                     Button { copyToPasteboard(text); copied = true } label: {
                         Label(copied ? "已复制" : "复制回复", systemImage: copied ? "checkmark" : "doc.on.doc")
-                    }.labelStyle(.iconOnly).help(copied ? "已复制" : "复制回复").buttonStyle(QuietButtonStyle()).task(id: copied) {
+                    }.labelStyle(.iconOnly).help(copied ? "已复制" : "复制回复").buttonStyle(WorkbenchIconButtonStyle()).task(id: copied) {
                         if copied { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
                     }
                 }
                 if message.checkpointId != nil && message.error == nil && !isUsageReport {
-                    Button { showRewind = true } label: { Label("回退文件", systemImage: "arrow.uturn.backward") }.buttonStyle(QuietButtonStyle()).disabled(model.active?.isBusy == true || !model.isConnected)
+                    Button { if let checkpoint = message.checkpointId, let id = model.activeId { model.presentation = .rewind(session: id, checkpoint: checkpoint) } } label: { Label("回退文件", systemImage: "arrow.uturn.backward") }.buttonStyle(QuietButtonStyle()).disabled(model.active?.isBusy == true || !model.isConnected)
                 }
                 Text(parts.joined(separator: " · ")).lineLimit(1).truncationMode(.middle)
             }
@@ -366,23 +387,30 @@ struct ReplyFailureView: View {
 
     var body: some View {
         let failure = ReplyFailure(error)
-        VStack(alignment: .leading, spacing: 10) {
-            Label(failure.title, systemImage: "exclamationmark.circle")
-                .font(.callout.weight(.medium)).foregroundStyle(WorkbenchTheme.warning)
-            Text(failure.summary).font(.callout).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(expanded ? nil : 2)
-            HStack(spacing: 12) {
-                Button("编辑请求", action: edit).disabled(!canEdit)
-                Button(expanded ? "收起详情" : "查看详情") { expanded.toggle() }
-                if expanded { Button("复制错误") { copyToPasteboard(error) } }
-            }.buttonStyle(.borderless).font(.caption)
-            if expanded {
-                Text(error).font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled).foregroundStyle(WorkbenchTheme.inkMuted)
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "exclamationmark.circle").foregroundStyle(WorkbenchTheme.warning).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(failure.title).font(.system(size: 12, weight: .medium))
+                if !failure.isQuotaProtection {
+                    Text(failure.summary).font(.system(size: 12)).foregroundStyle(WorkbenchTheme.inkMuted)
+                        .lineLimit(expanded ? nil : 2)
+                }
+                HStack(spacing: 12) {
+                    Button(expanded ? "收起" : "详情") { expanded.toggle() }
+                    Button("编辑请求", action: edit).disabled(!canEdit)
+                    if expanded { Button("复制错误") { copyToPasteboard(error) } }
+                }.buttonStyle(.borderless).font(.system(size: 11))
+                if expanded {
+                    Text(error).font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled).foregroundStyle(WorkbenchTheme.inkMuted)
+                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                }
             }
         }
-        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
-        .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
+        .padding(.vertical, 8).padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(WorkbenchTheme.ink.opacity(0.025), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -401,7 +429,10 @@ struct BlockView: View {
                     .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 10))
             } else { MarkdownView(text: block.text ?? "", actions: actions) }
-        case "thinking": ThinkingCard(text: block.text ?? "", active: thinkingActive)
+        case "thinking":
+            if thinkingActive || !(block.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                ThinkingCard(text: block.text ?? "", active: thinkingActive)
+            }
         case "tool": ToolCard(block: block, actions: actions)
         case "notice":
             Text(block.text ?? "").font(.caption)

@@ -39,49 +39,44 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                HStack(spacing: 4) {
-                    MachineSwitcher()
-                    Spacer()
+            VStack(spacing: 6) {
+                HStack(spacing: 2) {
+                    Button { model.newConversation() } label: { WorkbenchIcon(symbol: "square.and.pencil") }
+                        .buttonStyle(WorkbenchIconButtonStyle()).help("新建对话（⌘N）").accessibilityLabel("新建对话")
+                        .disabled(model.currentConfig == nil)
+                    Button { model.openProjectPicker() } label: { WorkbenchIcon(symbol: "folder.badge.plus") }
+                        .buttonStyle(WorkbenchIconButtonStyle()).help("选择项目").accessibilityLabel("选择项目")
+                        .disabled(!model.isConnected)
+                    HistorySyncButton()
+                    Spacer(minLength: 0)
                     Button { model.showActivity = true } label: {
-                        Image(systemName: "bell")
+                        WorkbenchIcon(symbol: "bell")
                             .overlay(alignment: .topTrailing) {
                                 if !model.attentionSessions.isEmpty { Circle().fill(WorkbenchTheme.accent).frame(width: 5, height: 5).offset(x: 3, y: -2) }
                             }
-                    }.buttonStyle(QuietButtonStyle()).help("所有机器的任务").accessibilityLabel("所有机器的任务")
+                    }.buttonStyle(WorkbenchIconButtonStyle()).help("所有机器的任务").accessibilityLabel("所有机器的任务")
                     Button {
                         if searchExpanded { closeSearch() }
                         else { searchExpanded = true }
-                    } label: { Image(systemName: "magnifyingglass") }
-                        .buttonStyle(QuietButtonStyle()).help("搜索对话")
+                    } label: { WorkbenchIcon(symbol: "magnifyingglass") }
+                        .buttonStyle(WorkbenchIconButtonStyle()).help("搜索对话")
                         .accessibilityLabel("搜索对话")
-                }
-                HStack(spacing: 4) {
-                    Button { model.newConversation() } label: {
-                        HStack {
-                            Label("新建对话", systemImage: "square.and.pencil")
-                            Spacer()
-                            Text("⌘ N").font(.caption).opacity(0.65)
-                        }
-                    }
-                    .buttonStyle(QuietButtonStyle()).help("新对话（⌘N）").disabled(model.currentConfig == nil)
-                    HistorySyncButton()
                 }
                 if searchExpanded {
                     HStack(spacing: 7) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(WorkbenchTheme.inkMuted)
+                        WorkbenchIcon(symbol: "magnifyingglass").foregroundStyle(WorkbenchTheme.inkMuted)
                         TextField("搜索对话", text: $model.searchText)
                             .textFieldStyle(.plain).focused($searchFocused)
                             .task { await Task.yield(); searchFocused = true }
                             .onExitCommand { closeSearch() }
-                        Button { closeSearch() } label: { Image(systemName: "xmark") }
+                        Button { closeSearch() } label: { WorkbenchIcon(symbol: "xmark") }
                             .buttonStyle(.plain).help("关闭搜索").accessibilityLabel("关闭搜索")
                     }
                     .font(.callout).padding(9)
                     .background(WorkbenchTheme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
-            .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 12)
+            .padding(.horizontal, 10).padding(.vertical, 4)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
                 if !groups.isEmpty {
@@ -99,7 +94,7 @@ struct SidebarView: View {
                         Section {
                         SidebarDisclosure(expanded: $recentExpanded) { _ in
                             HStack(spacing: 6) {
-                                Image(systemName: "clock").font(.system(size: 11.5)).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 16)
+                                WorkbenchIcon(symbol: "clock").font(.system(size: 11.5)).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 16)
                                 Text("最近对话").font(.system(size: 13, weight: .medium))
                             }
                         } content: {
@@ -124,16 +119,12 @@ struct SidebarView: View {
                 if groups.isEmpty && unavailableSessions.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(model.searchText.isEmpty ? (model.showArchived ? "还没有归档的对话" : "暂无历史对话") : "没有找到匹配的对话")
-                        Text(model.searchText.isEmpty ? "连接后自动同步这台机器的对话" : "试试其他关键词")
-                            .foregroundStyle(WorkbenchTheme.inkDim)
                     }
                     .font(.subheadline).foregroundStyle(WorkbenchTheme.inkMuted)
                     .padding(.horizontal, 20).padding(.top, 20).allowsHitTesting(false)
                 }
             }
             ServerFooter()
-            Divider().padding(.horizontal, 12)
-            AccountQuotaView(store: model.accountStore)
         }
         .background { FrostedBackground() }
         .foregroundStyle(WorkbenchTheme.sidebarInk)

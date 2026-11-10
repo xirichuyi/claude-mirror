@@ -16,7 +16,7 @@ struct QuotaOverview: View {
                     .font(.caption.weight(.semibold))
                 Spacer()
                 Button { Task { await refresh() } } label: {
-                    Image(systemName: "arrow.clockwise")
+                    WorkbenchIcon(symbol: "arrow.clockwise")
                 }
                 .buttonStyle(.plain)
                 .disabled(refreshing || !model.isConnected || model.currentConfig == nil)
@@ -69,11 +69,15 @@ struct QuotaOverview: View {
 
 struct AccountUsageSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             SheetHeading(title: "订阅用量", subtitle: "五小时与本周 · 已用额度") { dismiss() }
             QuotaOverview(store: model.accountStore)
+            if model.active != nil {
+                Button("对话用量与上下文") { model.showUsage = true }
+                    .buttonStyle(WorkbenchButtonStyle())
+            }
         }.padding(24).frame(width: 380)
             .task { await model.accountStore.refresh() }
     }

@@ -30,6 +30,7 @@ enum WorkbenchTheme {
     static let selected = token(\.selected)
     static let selection = token(\.selection)
     static let shadow = token(\.shadow)
+    static let scrim = token(\.scrim)
     static let sidebarInk = token(\.text)
     static let sage = token(\.gitAdded)
     static let error = token(\.error)
@@ -40,7 +41,7 @@ enum WorkbenchTheme {
 
     /// One spacing and corner scale for the whole app instead of per-view numbers.
     enum Space { static let xs: CGFloat = 4, s: CGFloat = 8, m: CGFloat = 12, l: CGFloat = 16, xl: CGFloat = 24 }
-    static let conversationWidth: CGFloat = 800
+    static let conversationWidth: CGFloat = 680
 
     /// Rows 6, tabs and popups 8, cards 10, pill controls 14.
     enum Radius { static let small: CGFloat = 6, medium: CGFloat = 8, card: CGFloat = 10, large: CGFloat = 14 }
@@ -100,6 +101,10 @@ extension View {
         self
             .foregroundStyle(WorkbenchTheme.ink)
             .tint(WorkbenchTheme.accent)
+            .font(WorkbenchMetrics.ui)
+            .buttonStyle(WorkbenchButtonStyle())
+            .toggleStyle(WorkbenchToggleStyle())
+            .textFieldStyle(WorkbenchTextFieldStyle())
             .scrollContentBackground(.hidden)
             .presentationBackground { FrostedBackground(material: .windowBackground) }
     }
@@ -121,23 +126,23 @@ struct CapsulePicker<Value: Hashable>: View {
                         .font(.callout.weight(selection == option ? .medium : .regular))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
                         .foregroundStyle(selection == option ? WorkbenchTheme.ink : WorkbenchTheme.inkMuted)
                         .background {
                             if selection == option {
-                                Capsule().fill(WorkbenchTheme.popup)
-                                    .overlay(Capsule().strokeBorder(WorkbenchTheme.popupBorder))
+                                RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).fill(WorkbenchTheme.popup)
+                                    .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.popupBorder))
                                     .shadow(color: WorkbenchTheme.shadow.opacity(0.25), radius: 2, y: 1)
                             }
                         }
-                        .contentShape(Capsule())
+                        .contentShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == option ? .isSelected : [])
             }
         }
-        .padding(4)
-        .background(WorkbenchTheme.surface.opacity(0.7), in: Capsule())
+        .padding(3)
+        .background(WorkbenchTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
     }
@@ -145,10 +150,21 @@ struct CapsulePicker<Value: Hashable>: View {
 
 struct WorkbenchTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration.textFieldStyle(.plain)
+        WorkbenchField(configuration: configuration)
+    }
+}
+
+private struct WorkbenchField<Label: View>: View {
+    let configuration: TextField<Label>
+    @FocusState private var focused: Bool
+    @Environment(\.isEnabled) private var enabled
+    var body: some View {
+        configuration.textFieldStyle(.plain).focused($focused)
+            .font(WorkbenchMetrics.ui)
             .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
-            .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small).strokeBorder(WorkbenchTheme.border))
+            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(focused ? WorkbenchTheme.accent : WorkbenchTheme.border))
+            .opacity(enabled ? 1 : 0.45)
     }
 }
 
@@ -193,9 +209,9 @@ struct ComposerActionStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
-            .foregroundStyle(enabled ? WorkbenchTheme.onInk : Color.secondary.opacity(0.45))
+            .foregroundStyle(enabled ? WorkbenchTheme.onInk : WorkbenchTheme.inkDim)
             .frame(width: 28, height: 28)
-            .background(enabled ? WorkbenchTheme.primaryButton : Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
+            .background(enabled ? WorkbenchTheme.primaryButton : WorkbenchTheme.hover, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
@@ -215,10 +231,10 @@ private struct WorkbenchButtonBody: View {
     @State private var hovered = false
     var body: some View {
         configuration.label
-            .font(.callout.weight(.medium))
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .foregroundStyle(prominent ? WorkbenchTheme.onInk : WorkbenchTheme.ink)
-            .background(prominent ? WorkbenchTheme.primaryButton : hovered && enabled ? WorkbenchTheme.hover : WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+            .font(WorkbenchMetrics.ui)
+            .padding(.horizontal, 10).frame(minHeight: WorkbenchMetrics.button)
+            .foregroundStyle(prominent ? WorkbenchTheme.onInk : configuration.role == .destructive ? WorkbenchTheme.error : WorkbenchTheme.ink)
+            .background(prominent ? (configuration.role == .destructive ? WorkbenchTheme.error : WorkbenchTheme.primaryButton) : hovered && enabled ? WorkbenchTheme.hover : WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(prominent ? .clear : WorkbenchTheme.border))
             .opacity(!enabled ? 0.4 : configuration.isPressed ? 0.72 : 1)
             .onHover { hovered = $0 }
@@ -236,11 +252,11 @@ private struct QuietButtonBody: View {
     @State private var hovered = false
     var body: some View {
         configuration.label
-            .font(.callout.weight(.medium))
-            .padding(7)
+            .font(WorkbenchMetrics.ui)
+            .padding(.horizontal, 6).frame(minHeight: WorkbenchMetrics.button)
             .contentShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
-            .background(hovered && enabled ? WorkbenchTheme.hover : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
-            .opacity(enabled ? (configuration.isPressed ? 0.6 : 1) : 0.35)
+            .background(enabled ? (configuration.isPressed ? WorkbenchTheme.ink.opacity(0.10) : hovered ? WorkbenchTheme.hover : .clear) : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+            .opacity(enabled ? 1 : 0.35)
             .onHover { hovered = $0 }
     }
 }
@@ -296,14 +312,14 @@ struct SheetHeading: View {
     var subtitle: String = ""
     let close: () -> Void
     var body: some View {
-        HStack(alignment: .top, spacing: 20) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {
-                Text(title).font(.title2.weight(.semibold)).tracking(-0.4)
-                if !subtitle.isEmpty { Text(subtitle).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                Text(title).font(.system(size: 14, weight: .semibold))
+                if !subtitle.isEmpty { Text(subtitle).font(.callout).foregroundStyle(WorkbenchTheme.inkMuted).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer(minLength: 8)
-            Button(action: close) { Image(systemName: "xmark").frame(width: 16, height: 16) }
-                .buttonStyle(QuietButtonStyle()).help("关闭").accessibilityLabel("关闭")
+            Button(action: close) { WorkbenchIcon(symbol: "xmark") }
+                .buttonStyle(WorkbenchIconButtonStyle()).help("关闭").accessibilityLabel("关闭")
                 .keyboardShortcut(.cancelAction)
                 .focusEffectDisabled()
         }

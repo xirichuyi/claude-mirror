@@ -6,7 +6,7 @@ import RemoteCCCore
 
 struct ComposerArea: View {
     @EnvironmentObject private var model: AppModel
-    @State private var editorHeight: CGFloat = 40
+    @State private var editorHeight: CGFloat = 32
     @State private var caret = 0
     @State private var selection = 0
     @State private var dismissedText: String?
@@ -75,17 +75,17 @@ struct ComposerArea: View {
                         Button("移除") { model.failedUploads[id]?.removeAll { $0 == url } }
                     }.font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                 }
-                PromptEditor(text: text, caret: $caret, placeholder: "发送消息，或输入 / 使用命令", handler: handleKey, onPasteImage: { model.pasteImage($0) }, onDropFiles: { model.upload($0) }, acceptsFileDrops: model.isConnected, onFileDrag: { dropTarget = $0 }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
+                PromptEditor(text: text, caret: $caret, placeholder: "发消息，@ 文件，/ 命令", handler: handleKey, onPasteImage: { model.pasteImage($0) }, onDropFiles: { model.upload($0) }, acceptsFileDrops: model.isConnected, onFileDrag: { dropTarget = $0 }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
                     .frame(height: editorHeight)
                 toolbarRow
             }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
+            .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
             .background {
-                RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large)
+                RoundedRectangle(cornerRadius: WorkbenchMetrics.dialogRadius)
                     .fill(WorkbenchTheme.surface)
             }
-            .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large).strokeBorder(dropTarget ? WorkbenchTheme.accent : WorkbenchTheme.border.opacity(0.6)))
-            .shadow(color: .black.opacity(0.055), radius: 14, y: 4)
+            .overlay(RoundedRectangle(cornerRadius: WorkbenchMetrics.dialogRadius).strokeBorder(dropTarget ? WorkbenchTheme.accent : WorkbenchTheme.border.opacity(0.6)))
+
             .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in
                 guard model.isConnected else { model.show("先连接服务器，再附加文件"); return false }
                 let destinationId = id
@@ -115,7 +115,7 @@ struct ComposerArea: View {
             }
 
         }
-        .padding(.horizontal, 28).padding(.bottom, 14).padding(.top, 6)
+        .padding(.horizontal, 24).padding(.bottom, 14).padding(.top, 8)
         .frame(maxWidth: WorkbenchTheme.conversationWidth)
         .frame(maxWidth: .infinity)
         .onChange(of: text.wrappedValue) { refreshMentions() }
@@ -184,7 +184,7 @@ struct ComposerArea: View {
                     ForEach(files) { file in
                         HStack(spacing: 5) {
                             Button(file.name) { model.open(file.path) }.buttonStyle(.plain).help(file.path)
-                            Button { model.attachments[id]?.removeAll { $0.path == file.path } } label: { Image(systemName: "xmark") }.buttonStyle(.plain).help("移除附件")
+                            Button { model.attachments[id]?.removeAll { $0.path == file.path } } label: { WorkbenchIcon(symbol: "xmark") }.buttonStyle(.plain).help("移除附件")
                         }
                         .font(.caption).padding(.horizontal, 7).padding(.vertical, 4)
                         .background(WorkbenchTheme.inkMuted.opacity(0.1), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
@@ -196,14 +196,14 @@ struct ComposerArea: View {
 
     private var toolbarRow: some View {
         return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { composerTools; sessionControls }
+            HStack(spacing: 2) { composerTools; sessionControls }
             VStack(alignment: .leading, spacing: 4) { composerTools; sessionControls }
         }
     }
 
     private var composerTools: some View {
         HStack(spacing: 4) {
-            Menu {
+            WorkbenchMenu(iconOnly: true) {
                 Button("添加文件", systemImage: "paperclip") { model.pickAndUpload() }
                 if model.active != nil {
                     Divider()
@@ -213,11 +213,11 @@ struct ComposerArea: View {
                     Divider()
                     Button("记忆与配置", systemImage: "doc.text") { model.openTools("config") }
                 }
-            } label: { Label("添加", systemImage: "plus") }
+            } label: { WorkbenchIcon(symbol: "plus").frame(width: 16) }
                 .menuStyle(.borderlessButton).fixedSize().help("添加文件、技能、连接器与插件").disabled(!model.isConnected)
             if model.active != nil {
-                Button { showingCommands.toggle() } label: { Label("命令", systemImage: "terminal") }
-                    .buttonStyle(QuietButtonStyle()).disabled(!model.isConnected)
+                Button { showingCommands.toggle() } label: { WorkbenchIcon(symbol: "terminal") }
+                    .buttonStyle(WorkbenchIconButtonStyle()).help("命令").accessibilityLabel("命令").disabled(!model.isConnected)
                     .popover(isPresented: $showingCommands, arrowEdge: .top) {
                         let commands = CommandCompletion.candidates(model.active?.capabilities?.commands ?? [])
                         SearchPicker(title: "命令", items: commands.map {
@@ -239,15 +239,15 @@ struct ComposerArea: View {
         let displayed = session?.capabilities?.models.first { $0.value == (modelName ?? "default") }?.displayName ?? modelName ?? session?.model ?? "模型"
         let modes = ["default": "默认权限", "plan": "计划", "acceptEdits": "自动编辑", "dontAsk": "拒绝未授权", "auto": "自动权限"]
         let busy = session?.isBusy ?? false
-        return HStack(spacing: 8) {
+        return HStack(spacing: 4) {
             if session != nil {
-                Button { model.showPreferences = true } label: { Label(modes[preferences?.permissionMode ?? "default"] ?? "默认权限", systemImage: "checkmark.shield") }
+                Button { model.showPreferences = true } label: { Text(modes[preferences?.permissionMode ?? "default"] ?? "默认权限").font(.system(size: 11)).lineLimit(1) }
                     .buttonStyle(QuietButtonStyle()).foregroundStyle(WorkbenchTheme.inkMuted).disabled(!model.isConnected)
-                Spacer(minLength: 12)
+                Spacer(minLength: 2)
                 Button { showingModels.toggle() } label: {
                     HStack(spacing: 4) {
-                        Text(changingModel ? "切换中…" : (displayed == "Default (recommended)" || displayed == "默认" || displayed == "default") ? "模型：默认" : displayed).lineLimit(1)
-                        Image(systemName: "chevron.down").font(.caption2)
+                        Text(changingModel ? "切换中…" : (displayed == "Default (recommended)" || displayed == "默认" || displayed == "default") ? "默认模型" : displayed).font(.system(size: 11)).lineLimit(1).frame(maxWidth: 100)
+                        WorkbenchIcon(symbol: "chevron.down").font(.caption2)
                     }
                 }.buttonStyle(QuietButtonStyle()).disabled(!model.isConnected || changingModel)
                     .popover(isPresented: $showingModels, arrowEdge: .top) {
@@ -268,12 +268,12 @@ struct ComposerArea: View {
             if session == nil { Spacer() }
             HStack(spacing: 8) {
                 if busy && canSend {
-                    Button { send() } label: { Image(systemName: "text.badge.plus") }
+                    Button { send() } label: { WorkbenchIcon(symbol: "text.badge.plus") }
                         .buttonStyle(ComposerActionStyle())
                         .help("加入队列").accessibilityLabel("加入队列")
                 }
                 Button { if busy { model.stop() } else { send() } } label: {
-                    Image(systemName: busy ? "stop.fill" : "arrow.up")
+                    WorkbenchIcon(symbol: busy ? "stop.fill" : "arrow.up")
                 }
                 .buttonStyle(ComposerActionStyle())
                 .help(busy ? "停止生成" : "发送消息 · Enter 发送，Shift + Enter 换行")

@@ -65,7 +65,13 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: python3 macos/scripts/test-publish-appcast.py
       - run: swift test --package-path macos
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.96.0'
+      - run: cargo test --locked --manifest-path vendor/winc-preview/Cargo.toml -p winc-preview
       - run: sh macos/scripts/build-dmg.sh
+      - name: Verify bundled Winc preview bridge
+        run: WINC_PREVIEW_HELPER="$PWD/macos/dist/claude-mirror.app/Contents/MacOS/WincPreview" python3 macos/Helpers/WincPreview/tests/smoke.py
       - name: Sign Sparkle feed
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}

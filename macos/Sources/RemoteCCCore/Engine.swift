@@ -110,6 +110,20 @@ public final class ChatEngine {
         notify()
     }
 
+    public func hydrateAsync(_ id: String) async throws {
+        guard try sessions[index(id)].localMessagesLoaded == false else { return }
+        let messages = try await store.messagesAsync(id)
+        let position = try index(id)
+        // Sending/resuming may have hydrated and modified this session during the read.
+        guard sessions[position].localMessagesLoaded == false else { return }
+        sessions[position].messages = messages
+        sessions[position].localMessagesLoaded = true
+        if sessions[position].status == "stopped", let last = messages.indices.last, messages[last].role == "assistant" {
+            sessions[position].messages[last].interrupted = true
+        }
+        notify()
+    }
+
     // MARK: Connection
 
     public func updateConnection(_ config: ConnectionConfig, _ state: ConnectionState) {
@@ -120,6 +134,20 @@ public final class ChatEngine {
         }
         notify()
     }
+    /// Replace connection settings without changing conversation IDs or project paths.
+    public func replaceMachine(_ original: ConnectionConfig, with replacement: ConnectionConfig) throws {
+        let replacement = try replacement.validated()
+        for index in sessions.indices where sessions[index].config.key == original.key {
+            sessions[index].host = replacement.host
+            sessions[index].port = replacement.port
+            dirty.insert(sessions[index].id)
+        }
+        files.invalidate(original)
+        projectStates[original.key] = nil
+        capabilityCache.removeAll()
+        changed(nil)
+    }
+
     public func connectionState(_ config: ConnectionConfig) -> ConnectionState { connectionStates[config.key] ?? ConnectionState() }
 
     // MARK: Conversation management

@@ -3,7 +3,7 @@ import SwiftUI
 
 struct WorktreeSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     @State private var branch = "remotecc/task-" + String(Int(Date().timeIntervalSince1970))
     @State private var busy = false
     @State private var error = ""
