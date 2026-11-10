@@ -64,6 +64,10 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: python3 macos/scripts/test-publish-appcast.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install Pillow==12.2.0
       - run: swift test --package-path macos
       - uses: dtolnay/rust-toolchain@stable
         with:
