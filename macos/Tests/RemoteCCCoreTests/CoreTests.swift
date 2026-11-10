@@ -66,9 +66,12 @@ final class AgentEnvironment {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         resourcesDirectory = home.appendingPathComponent("resources")
         let node = try XCTUnwrap(Self.which("node"))
-        // Keep the fixture's login shell on the same Node as the test process.
-        let nodeDirectory = URL(fileURLWithPath: node).deletingLastPathComponent().path.replacingOccurrences(of: "'", with: "'\"'\"'")
-        try ("export PATH='" + nodeDirectory + "':$PATH\n").write(to: home.appendingPathComponent(".bash_profile"), atomically: true, encoding: .utf8)
+        // The login shell resets PATH. Keep both fixture generation and the agent
+        // on the same Node/Python installations (including CI's Pillow environment).
+        let executables = [node, Self.which("python3")].compactMap { $0 }
+        let toolDirectories = executables.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }
+        try ("export PATH=" + shellQuote(toolDirectories.joined(separator: ":")) + ":$PATH\n")
+            .write(to: home.appendingPathComponent(".bash_profile"), atomically: true, encoding: .utf8)
         _ = try run(node, [repository.appendingPathComponent("macos/scripts/prepare-server.cjs").path, resourcesDirectory.path])
         if standIn {
             let script = "const{createHash:c}=require('crypto'),z=require('zlib'),fs=require('fs');const d=Buffer.from(JSON.stringify({'task-worker.cjs':fs.readFileSync(0,'utf8')}));const m=JSON.parse(fs.readFileSync(process.argv[1]));m.bundleDigest=c('sha256').update(d).digest('hex');m.bundlePayload=z.gzipSync(d).toString('base64');fs.writeFileSync(process.argv[1],JSON.stringify(m));"
