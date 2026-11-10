@@ -167,7 +167,7 @@ private struct SidebarNavigationBody: View {
     var body: some View {
         configuration.label
             .foregroundStyle(WorkbenchTheme.sidebarInk)
-            .padding(.horizontal, 8).padding(.vertical, 6)
+            .padding(.horizontal, 8).padding(.vertical, 3).frame(minHeight: 26)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
             .background(selected ? WorkbenchTheme.selected : hovered ? WorkbenchTheme.hover : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
@@ -245,6 +245,52 @@ private struct QuietButtonBody: View {
     }
 }
 
+/// A tree row that expands its children, like the reference sidebar: 24 pt, rotating chevron,
+/// hover fill; children appear with the tree animation. The label sees the hover state.
+struct SidebarDisclosure<Label: View, Content: View>: View {
+    @Binding var expanded: Bool
+    @ViewBuilder let label: (Bool) -> Label
+    @ViewBuilder let content: () -> Content
+    @State private var hovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private func toggle() { withAnimation(Motion.animation(Motion.tree, reduce: reduceMotion)) { expanded.toggle() } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(WorkbenchTheme.inkMuted)
+                    .rotationEffect(.degrees(expanded ? 90 : 0)).frame(width: 12)
+                label(hovered)
+            }
+            .padding(.horizontal, 6).frame(height: 24).frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovered ? WorkbenchTheme.hover : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+            .contentShape(Rectangle())
+            .onTapGesture(perform: toggle)
+            .onHover { hovered = $0 }
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(expanded ? "已展开" : "已收起")
+            .accessibilityAction { toggle() }
+            if expanded {
+                content().transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .clipped()
+    }
+}
+
+/// Small dim section titles, as in the reference sidebar.
+struct SidebarSectionHeader: View {
+    let title: String
+    var body: some View {
+        Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(WorkbenchTheme.inkDim)
+            .padding(.leading, 8).padding(.top, 10).padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 struct SheetHeading: View {
     let title: String
     var subtitle: String = ""
@@ -259,6 +305,7 @@ struct SheetHeading: View {
             Button(action: close) { Image(systemName: "xmark").frame(width: 16, height: 16) }
                 .buttonStyle(QuietButtonStyle()).help("关闭").accessibilityLabel("关闭")
                 .keyboardShortcut(.cancelAction)
+                .focusEffectDisabled()
         }
     }
 }

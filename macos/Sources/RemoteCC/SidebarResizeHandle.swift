@@ -13,7 +13,7 @@ struct SidebarResizeHandle: View {
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
             .overlay {
-                Rectangle().fill(Color.primary.opacity(hovered || dragOrigin != nil ? 0.15 : 0))
+                Rectangle().fill(WorkbenchTheme.ink.opacity(hovered || dragOrigin != nil ? 0.15 : 0))
                     .frame(width: 2)
                     .allowsHitTesting(false)
             }

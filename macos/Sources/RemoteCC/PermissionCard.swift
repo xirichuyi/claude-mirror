@@ -22,10 +22,10 @@ struct PermissionCard: View {
             HStack(spacing: 8) {
                 Label("等待你的确认", systemImage: "hand.raised.fill").foregroundStyle(WorkbenchTheme.accent)
                 Spacer()
-                if sending { ProgressView().controlSize(.mini); Text("正在提交…").foregroundStyle(.secondary) }
+                if sending { ProgressView().controlSize(.mini); Text("正在提交…").foregroundStyle(WorkbenchTheme.inkMuted) }
             }.font(.subheadline.weight(.medium)).padding(.bottom, 4)
             if permission.kind == "elicitation" { elicitation } else { approval }
-            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
+            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.error) }
         }
         .padding(16)
         .disabled(sending || (onAnswer == nil && !model.isConnected))
@@ -50,13 +50,13 @@ struct PermissionCard: View {
         let question = permission.name == "AskUserQuestion"
         let view = ToolPresentation(name: permission.name, input: permission.input)
         Text(question ? "Claude 想确认一下" : permission.name == "ExitPlanMode" ? "Claude 的计划，确认后开始执行" : permission.title ?? "Claude 请求使用 \(permission.name ?? "工具")").fontWeight(.semibold)
-        if let description = permission.description, !description.isEmpty { Text(description).font(.caption).foregroundStyle(.secondary) }
+        if let description = permission.description, !description.isEmpty { Text(description).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 if question { questions }
                 else {
                     if let file = view.file { Button(file) { model.open(file) }.buttonStyle(.link) }
-                    if let subject = view.subject, permission.name != "Bash" { Text(subject).foregroundStyle(.secondary) }
+                    if let subject = view.subject, permission.name != "Bash" { Text(subject).foregroundStyle(WorkbenchTheme.inkMuted) }
                     if let body = view.body { ToolBodyView(body: body, actions: actions) }
                     else if view.file == nil && view.subject == nil { CodeBlock(text: permission.input?.text(pretty: true) ?? "") }
                 }
@@ -127,10 +127,10 @@ struct PermissionCard: View {
     @ViewBuilder private var elicitation: some View {
         let request = permission.request
         Text(request?["title"]?.string ?? "需要你的输入").fontWeight(.semibold)
-        if let server = request?["serverName"]?.string { Text(server).font(.caption2).foregroundStyle(.secondary) }
+        if let server = request?["serverName"]?.string { Text(server).font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted) }
         if let message = request?["message"]?.string { Text(message).textSelection(.enabled) }
         if request?["mode"]?.string == "url", let link = request?["url"]?.string, let url = URL(string: link), ["http", "https"].contains(url.scheme ?? "") {
-            Text(link).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            Text(link).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled)
             // Opening is the user's click; it is not treated as proof that authorization succeeded.
             Button("打开 " + (url.host ?? link)) { NSWorkspace.shared.open(url) }
             actionRow(acceptTitle: "已完成，继续", supported: true) { ["action": "accept"] }
@@ -138,7 +138,7 @@ struct PermissionCard: View {
             ForEach(fields) { field in SchemaFieldView(field: field, values: $form) }
             actionRow(acceptTitle: "提交", supported: true) { ["action": "accept", "content": .object(form)] }
         } else {
-            Text("此表单包含暂不支持的结构，可以拒绝或取消。").font(.caption).foregroundStyle(.secondary)
+            Text("此表单包含暂不支持的结构，可以拒绝或取消。").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             actionRow(acceptTitle: "提交", supported: false) { ["action": "accept"] }
         }
     }
@@ -165,7 +165,7 @@ struct FlowOptions: View {
                 ForEach(options, id: \.0) { option in
                     Button(option.0) { toggle(option.0) }
                         .buttonStyle(.bordered).controlSize(.small)
-                        .tint(selected.contains(option.0) ? WorkbenchTheme.accent : Color.secondary)
+                        .tint(selected.contains(option.0) ? WorkbenchTheme.accent : WorkbenchTheme.inkMuted)
                         .help(option.1)
                 }
             }
@@ -207,7 +207,7 @@ struct SchemaFieldView: View {
             case .text:
                 TextField(field.label, text: Binding(get: { values[field.name]?.string ?? field.defaultValue?.string ?? "" }, set: { values[field.name] = .string($0) })).textFieldStyle(WorkbenchTextFieldStyle())
             }
-            if let description = field.description { Text(description).font(.caption2).foregroundStyle(.secondary) }
+            if let description = field.description { Text(description).font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted) }
         }
     }
 }

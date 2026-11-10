@@ -9,7 +9,6 @@ struct ProjectGroup: View {
     let searching: Bool
     var flat = false
     var initiallyExpanded = false
-    @State private var headerHovered = false
     @State private var showAll = false
     @State private var expanded: Bool?
     @State private var renaming: ChatSession?
@@ -27,31 +26,39 @@ struct ProjectGroup: View {
     }
 
     private var rows: some View {
-            ForEach(visibleSessions) { session in
-                Button { model.select(session.id) } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        if session.pinned == true { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
-                        Text(historyDisplayTitle(session.name)).font(.system(size: 13)).lineLimit(1)
-                        Spacer(minLength: 0)
-                        if model.unreadSessions.contains(session.id) { Circle().fill(WorkbenchTheme.accent).frame(width: 6, height: 6) }
-                    }
-                    if session.isBusy {
-                        Text(statusLabel(session.status)).font(.caption2).foregroundStyle(WorkbenchTheme.accent)
-                    }
-                }
-                }
-                .buttonStyle(SidebarNavigationStyle(selected: model.activeId == session.id))
-                .accessibilityAddTraits(model.activeId == session.id ? .isSelected : [])
-                .help(session.directory + " · " + session.name)
-                .contextMenu {
-                    Button("重命名…") { name = session.name; renaming = session }
-                    Button(session.pinned == true ? "取消固定" : "固定") { model.perform { try model.engine?.setPinned(session.id, session.pinned != true) } }
-                    Button(session.archived == true ? "恢复" : "归档") { model.perform { try model.engine?.setArchived(session.id, session.archived != true) } }
-                    Button("导出…") { model.exportConversation(session) }
-                    Divider()
-                    Button("删除…", role: .destructive) { model.deleteConversation(session) }
-                }
+        ForEach(visibleSessions) { session in sessionRow(session) }
+    }
+
+    private func sessionLabel(_ session: ChatSession) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: session.pinned == true ? "pin" : "bubble.left")
+                .font(.system(size: 11)).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 16)
+            Text(historyDisplayTitle(session.name)).font(.system(size: 13)).lineLimit(1)
+            Spacer(minLength: 0)
+            // One line per row, as in the reference tree: state is a mark, not a second line.
+            if session.isBusy {
+                ProgressView().controlSize(.mini).scaleEffect(0.75).frame(width: 14, height: 14)
+            } else if model.unreadSessions.contains(session.id) {
+                Circle().fill(WorkbenchTheme.accent).frame(width: 6, height: 6)
+            }
+        }
+    }
+
+    private func sessionRow(_ session: ChatSession) -> some View {
+        let selected = model.activeId == session.id
+        let state = session.isBusy ? statusLabel(session.status) : model.unreadSessions.contains(session.id) ? "有新结果" : ""
+        return Button { model.select(session.id) } label: { sessionLabel(session) }
+            .buttonStyle(SidebarNavigationStyle(selected: selected))
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityValue(state)
+            .help(session.directory + " · " + session.name + (state.isEmpty ? "" : " · " + state))
+            .contextMenu {
+                Button("重命名…") { name = session.name; renaming = session }
+                Button(session.pinned == true ? "取消固定" : "固定") { model.perform { try model.engine?.setPinned(session.id, session.pinned != true) } }
+                Button(session.archived == true ? "恢复" : "归档") { model.perform { try model.engine?.setArchived(session.id, session.archived != true) } }
+                Button("导出…") { model.exportConversation(session) }
+                Divider()
+                Button("删除…", role: .destructive) { model.deleteConversation(session) }
             }
     }
 
@@ -75,36 +82,37 @@ struct ProjectGroup: View {
         Group {
             if flat { rows }
             else if let first = sessions.first {
-                DisclosureGroup(isExpanded: isExpanded) {
-                    rows.padding(.leading, 24)
-                    if !searching && (showAll || sessions.count > visibleSessions.count) {
-                        Button(showAll ? "收起" : "显示更多（\(sessions.count - visibleSessions.count)）") { showAll.toggle() }
-                            .buttonStyle(.borderless).font(.callout).foregroundStyle(.secondary)
-                            .padding(.vertical, 6).listRowSeparator(.hidden).selectionDisabled()
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: "folder").foregroundStyle(.secondary)
-                        Text(first.directory == "/" ? "/" : (first.directory as NSString).lastPathComponent).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                        Spacer()
+                SidebarDisclosure(expanded: isExpanded) { hovered in
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder").font(.system(size: 12)).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 16)
+                        Text(first.directory == "/" ? "/" : (first.directory as NSString).lastPathComponent).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        Spacer(minLength: 4)
                         Button { model.newConversation(in: first) } label: {
-                            Image(systemName: "plus").frame(width: 20, height: 20)
-                        }.buttonStyle(.plain).help("在此项目中新建对话")
+                            Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 18, height: 18)
+                        }.buttonStyle(.plain).foregroundStyle(WorkbenchTheme.inkMuted).help("在此项目中新建对话")
                             .accessibilityLabel("在此项目中新建对话")
                             .disabled(model.projectMissing(first))
-                            .opacity(headerHovered ? 1 : 0).allowsHitTesting(headerHovered)
-                        Menu { projectActions(first) } label: { Image(systemName: "ellipsis") }
+                            .opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
+                        Menu { projectActions(first) } label: { Image(systemName: "ellipsis").font(.system(size: 11)) }
                             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                             .help("项目操作").accessibilityLabel("项目操作")
-                            .opacity(headerHovered ? 1 : 0)
-                            .allowsHitTesting(headerHovered)
-                    }.contentShape(Rectangle()).onHover { headerHovered = $0 }.help(first.host + " · " + first.directory)
-                        .contextMenu { projectActions(first) }
+                            .opacity(hovered ? 1 : 0)
+                            .allowsHitTesting(hovered)
+                    }
+                    .help(first.host + " · " + first.directory)
+                    .contextMenu { projectActions(first) }
+                } content: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        rows
+                        if !searching && (showAll || sessions.count > visibleSessions.count) {
+                            Button(showAll ? "收起" : "显示更多（\(sessions.count - visibleSessions.count)）") { showAll.toggle() }
+                                .buttonStyle(.borderless).font(.system(size: 12)).foregroundStyle(WorkbenchTheme.inkMuted)
+                                .padding(.leading, 30).frame(height: 24)
+                        }
+                    }.padding(.leading, 16)
                 }
             }
         }
-        .listRowSeparator(.hidden)
-        .listSectionSeparator(.hidden)
         .onChange(of: model.activeId) {
             if sessions.contains(where: { $0.id == model.activeId }) { expanded = true }
         }

@@ -37,7 +37,7 @@ struct SearchPicker: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").foregroundStyle(WorkbenchTheme.inkMuted)
                 TextField("搜索" + title, text: $query).textFieldStyle(.plain).focused($focused)
                     .onSubmit { if let item = results.first(where: { $0.id == selection }) ?? results.first { choose(item.id) } }
                     .onMoveCommand { direction in
@@ -59,7 +59,7 @@ struct SearchPicker: View {
                                 HStack(spacing: 10) {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(item.title).font(.callout.weight(.medium))
-                                        if !item.detail.isEmpty { Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                                        if !item.detail.isEmpty { Text(item.detail).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(2) }
                                     }
                                     Spacer()
                                     if selected == item.id { Image(systemName: "checkmark").foregroundStyle(WorkbenchTheme.ink) }
@@ -74,7 +74,7 @@ struct SearchPicker: View {
             }
             Divider()
             HStack {
-                Text("↑ ↓ 选择 · Enter 确认").font(.caption).foregroundStyle(.secondary)
+                Text("↑ ↓ 选择 · Enter 确认").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                 Spacer()
                 Button("刷新", action: refresh).buttonStyle(.borderless)
             }.padding(12)

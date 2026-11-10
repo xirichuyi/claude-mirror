@@ -10,10 +10,10 @@ struct InterfaceState: View {
     var body: some View {
         VStack(spacing: 10) {
             if loading { ProgressView().controlSize(.small) }
-            else { Image(systemName: symbol).font(.system(size: 24, weight: .light)).foregroundStyle(.secondary) }
+            else { Image(systemName: symbol).font(.system(size: 24, weight: .light)).foregroundStyle(WorkbenchTheme.inkMuted) }
             Text(title).font(.callout.weight(.medium))
             if !detail.isEmpty {
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+                Text(detail).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }
         }.padding(24).frame(maxWidth: .infinity)

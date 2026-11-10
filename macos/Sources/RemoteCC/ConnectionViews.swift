@@ -58,7 +58,7 @@ struct ConnectSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("添加机器").font(.title2.weight(.semibold))
                 Text("通过 SSH 连接远端 Claude Code。")
-                    .font(.body).foregroundStyle(.secondary)
+                    .font(.body).foregroundStyle(WorkbenchTheme.inkMuted)
             }
             VStack(alignment: .leading, spacing: 16) {
                 connectionField("主机名称", text: $name, prompt: "例如：开发服务器（可选）")
@@ -100,10 +100,10 @@ struct ConnectSheet: View {
                 .font(.callout)
                 .help("复用本应用的 SSH 连接，让服务器通过私有 socket 连到本机的远程登录服务。服务器会获得一把只能经此通道使用的专用密钥，关闭后立即撤销；开启期间服务器上的程序能以你的身份登录这台 Mac。")
             Text(authentication == .password ? "密码仅用于本次连接，不会保存。" : authentication == .keyFile ? "使用所选私钥认证，不会上传私钥。" : "使用本机 SSH 配置与 SSH Agent 认证。")
-                .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(.subheadline).foregroundStyle(WorkbenchTheme.inkMuted).fixedSize(horizontal: false, vertical: true)
             if !error.isEmpty {
                 Label(error, systemImage: "exclamationmark.circle")
-                    .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                    .font(.callout).foregroundStyle(WorkbenchTheme.error).textSelection(.enabled)
             }
             HStack {
                 if connecting { ProgressView().controlSize(.small) }

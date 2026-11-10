@@ -17,10 +17,10 @@ struct ProjectPickerSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             SheetHeading(title: "选择项目") { dismiss() }.disabled(busy)
-            Label(model.active?.host ?? "", systemImage: "server.rack").font(.callout).foregroundStyle(.secondary)
+            Label(model.active?.host ?? "", systemImage: "server.rack").font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
             TextField("远端项目路径", text: $directory).textFieldStyle(WorkbenchTextFieldStyle()).focused($pathFocused)
             if !recent.isEmpty {
-                Text("最近的项目").font(.caption).foregroundStyle(.secondary)
+                Text("最近的项目").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(recent, id: \.self) { path in
@@ -36,8 +36,8 @@ struct ProjectPickerSheet: View {
                 }.frame(maxHeight: 140)
             }
             Text("切换到其他项目会新建对话，并带上未发送的草稿。原对话保留在原项目中。")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).fixedSize(horizontal: false, vertical: true)
+            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.error).textSelection(.enabled) }
             HStack {
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()

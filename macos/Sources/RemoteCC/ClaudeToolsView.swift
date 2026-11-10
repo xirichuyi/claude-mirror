@@ -31,9 +31,9 @@ struct ClaudeToolsView: View {
                 Button("刷新") { revision += 1 }.disabled(busy || !model.isConnected)
             }
             if busy { ProgressView("正在读取远端…") }
-            if let message { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+            if let message { Text(message).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled) }
             if session?.remoteOwner == nil {
-                Text("可查看项目环境；重载和连接控制需先建立实时会话。").font(.caption).foregroundStyle(.secondary)
+                Text("可查看项目环境；重载和连接控制需先建立实时会话。").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -85,10 +85,10 @@ struct ClaudeToolsView: View {
                 Text(itemTitle(item))
                     .font(.subheadline.weight(.semibold)).textSelection(.enabled)
                 Spacer()
-                if let status = item["status"]?.string { Text(status).font(.caption).foregroundStyle(.secondary) }
+                if let status = item["status"]?.string { Text(status).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
             }
-            if let description = item["description"]?.string { Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(3).help(description).textSelection(.enabled) }
-            if let error = item["error"]?.string { Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
+            if let description = item["description"]?.string { Text(description).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(3).help(description).textSelection(.enabled) }
+            if let error = item["error"]?.string { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.warning).textSelection(.enabled) }
             if section == .commands || section == .skills, let name = item["name"]?.string {
                 HStack {
                     Text("/" + name + (item["argumentHint"]?.string.map { " " + $0 } ?? "")).font(.caption.monospaced())
@@ -103,7 +103,7 @@ struct ClaudeToolsView: View {
                     let enabled = item["status"]?.string != "disabled"
                     Button(enabled ? "禁用" : "启用") { manage("toggleMcp", name: name, enabled: !enabled) }
                         .disabled(!canManage || !actions.contains("toggleMcp"))
-                    Text("仅当前会话").font(.caption).foregroundStyle(.secondary)
+                    Text("仅当前会话").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                 }
             }
             if section == .tasks, item["status"]?.string == "running", let id = item["id"]?.string {
@@ -116,7 +116,7 @@ struct ClaudeToolsView: View {
     private var configuration: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("编辑远端 Claude Code 实际使用的文件，保存沿用编辑器的冲突检查。文件不存在时会明确提示。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             ForEach([("项目记忆", "CLAUDE.md"), ("项目本地记忆", "CLAUDE.local.md"),
                      ("用户记忆", "~/.claude/CLAUDE.md"), ("项目设置 / 权限 / Hooks", ".claude/settings.json"),
                      ("项目本地设置", ".claude/settings.local.json"), ("用户设置 / 权限 / Hooks", "~/.claude/settings.json"),
@@ -124,7 +124,7 @@ struct ClaudeToolsView: View {
                 Button(title) { dismiss(); model.open(path) }.buttonStyle(.link)
             }
             Text("Hooks、权限和 MCP 配置的生效时机由远端 Claude 决定；需要时重新建立会话。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             Button("重载输出样式") { manage("reloadOutputStyles") }
                 .disabled(!canManage || !actions.contains("reloadOutputStyles"))
             Link("Claude Code 官方功能说明", destination: URL(string: "https://code.claude.com/docs/en/desktop")!)

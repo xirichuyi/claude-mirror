@@ -69,7 +69,7 @@ struct SidebarView: View {
                 }
                 if searchExpanded {
                     HStack(spacing: 7) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        Image(systemName: "magnifyingglass").foregroundStyle(WorkbenchTheme.inkMuted)
                         TextField("搜索对话", text: $model.searchText)
                             .textFieldStyle(.plain).focused($searchFocused)
                             .task { await Task.yield(); searchFocused = true }
@@ -78,37 +78,44 @@ struct SidebarView: View {
                             .buttonStyle(.plain).help("关闭搜索").accessibilityLabel("关闭搜索")
                     }
                     .font(.callout).padding(9)
-                    .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+                    .background(WorkbenchTheme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
             .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 12)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
+                LazyVStack(alignment: .leading, spacing: 1) {
                 if !groups.isEmpty {
-                    Section(model.showArchived ? "已归档 · 项目" : "项目") {
+                    Section {
                         ForEach(Array(visibleGroups.enumerated()), id: \.element.key) { index, group in
                             ProjectGroup(sessions: group.sessions, searching: !model.searchText.isEmpty, initiallyExpanded: index < 2)
                         }
                         if model.searchText.isEmpty && (showAllProjects || groups.count > visibleGroups.count) {
                             Button(showAllProjects ? "收起项目" : "更多项目（\(groups.count - visibleGroups.count)）") { showAllProjects.toggle() }
-                                .buttonStyle(.borderless).foregroundStyle(.secondary).font(.callout)
-                                .padding(.vertical, 6).listRowSeparator(.hidden).selectionDisabled()
+                                .buttonStyle(.borderless).foregroundStyle(WorkbenchTheme.inkMuted).font(.system(size: 12))
+                                .padding(.leading, 22).frame(height: 24)
                         }
-                    }
+                    } header: { SidebarSectionHeader(title: model.showArchived ? "已归档 · 项目" : "项目") }
                     if model.searchText.isEmpty && !model.showArchived {
                         Section {
-                        DisclosureGroup("最近对话", isExpanded: $recentExpanded) {
-                            ProjectGroup(sessions: Array(model.machineSessions.filter { $0.archived != true && !model.projectMissing($0) }.sorted { $0.updatedAt > $1.updatedAt }.prefix(8)), searching: false, flat: true)
-                        }.listRowSeparator(.hidden)
+                        SidebarDisclosure(expanded: $recentExpanded) { _ in
+                            HStack(spacing: 6) {
+                                Image(systemName: "clock").font(.system(size: 11.5)).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 16)
+                                Text("最近对话").font(.system(size: 13, weight: .medium))
+                            }
+                        } content: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                ProjectGroup(sessions: Array(model.machineSessions.filter { $0.archived != true && !model.projectMissing($0) }.sorted { $0.updatedAt > $1.updatedAt }.prefix(8)), searching: false, flat: true)
+                            }.padding(.leading, 16)
+                        }
                         }
                     }
                 }
                 if !unavailableSessions.isEmpty {
-                    Section("目录已移除 · 历史对话") {
+                    Section {
                         ProjectGroup(sessions: unavailableSessions, searching: !model.searchText.isEmpty, flat: true)
-                    }
+                    } header: { SidebarSectionHeader(title: "目录已移除 · 历史对话") }
                 }
-                }.padding(.horizontal, 10).padding(.vertical, 8)
+                }.padding(.horizontal, 6).padding(.bottom, 8)
 
             }
             .id(model.currentConfig?.key ?? "no-machine")
@@ -118,9 +125,9 @@ struct SidebarView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(model.searchText.isEmpty ? (model.showArchived ? "还没有归档的对话" : "暂无历史对话") : "没有找到匹配的对话")
                         Text(model.searchText.isEmpty ? "连接后自动同步这台机器的对话" : "试试其他关键词")
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(WorkbenchTheme.inkDim)
                     }
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(WorkbenchTheme.inkMuted)
                     .padding(.horizontal, 20).padding(.top, 20).allowsHitTesting(false)
                 }
             }

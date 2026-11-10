@@ -22,7 +22,7 @@ struct AccountQuotaView: View {
                 Text(account?["account"]?["email"]?.string ?? "账号")
                     .font(.callout).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 4)
-                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
             .contentShape(Rectangle())
@@ -58,7 +58,7 @@ struct AccountQuotaView: View {
                             .font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle)
                             .help(account?["account"]?["email"]?.string ?? "")
                         Text(account?["account"]?["subscriptionType"]?.string ?? "订阅信息未报告")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                     }
                 }.padding(12)
                 Divider().padding(.horizontal, 8)
@@ -97,8 +97,8 @@ struct AccountQuotaView: View {
                 Image(systemName: icon).frame(width: 20)
                 Text(title)
                 Spacer(minLength: 8)
-                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                if chevron { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary) }
+                if let detail { Text(detail).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1) }
+                if chevron { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted) }
             }.font(.callout).padding(.horizontal, 10).padding(.vertical, 9).contentShape(Rectangle())
         }.buttonStyle(AccountMenuRowStyle())
     }

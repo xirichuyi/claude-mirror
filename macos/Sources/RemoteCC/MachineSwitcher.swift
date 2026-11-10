@@ -10,9 +10,9 @@ struct MachineSwitcher: View {
         Button { choosing.toggle() } label: {
             // Keep the current host visible beside its connection status.
             HStack(spacing: 7) {
-                Circle().fill(model.isConnected ? WorkbenchTheme.sage : Color.secondary.opacity(0.5)).frame(width: 7, height: 7)
+                Circle().fill(model.isConnected ? WorkbenchTheme.sage : WorkbenchTheme.inkMuted.opacity(0.5)).frame(width: 7, height: 7)
                 Text(model.currentConfig?.displayName ?? "选择机器").font(.headline).lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
             }
             .padding(.horizontal, 6).padding(.vertical, 4).contentShape(Rectangle())
         }.buttonStyle(.plain).help("当前机器：" + (model.currentConfig?.displayName ?? "未连接") + " · 切换或添加机器")
@@ -20,7 +20,7 @@ struct MachineSwitcher: View {
             VStack(alignment: .leading, spacing: 6) {
                 Button { choosing = false; model.activeId = nil } label: { Label("返回首页", systemImage: "house") }.buttonStyle(QuietButtonStyle())
                 Divider()
-                Text("我的机器").font(.subheadline.weight(.medium)).foregroundStyle(.secondary).padding(8)
+                Text("我的机器").font(.subheadline.weight(.medium)).foregroundStyle(WorkbenchTheme.inkMuted).padding(8)
                 ForEach(model.savedMachines, id: \.key) { machine in
                     Button {
                         choosing = false
@@ -30,11 +30,11 @@ struct MachineSwitcher: View {
                             Image(systemName: "desktopcomputer")
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(machine.displayName)
-                                Text(machine.host + (machine.port.map { ":\($0)" } ?? "")).font(.caption2).foregroundStyle(.secondary)
+                                Text(machine.host + (machine.port.map { ":\($0)" } ?? "")).font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
                             }
                             Spacer()
                             if model.currentConfig?.key == machine.key { Image(systemName: "checkmark") }
-                            Circle().fill(model.engine?.connectionState(machine).status == .connected ? Color.green : Color.secondary).frame(width: 6, height: 6)
+                            Circle().fill(model.engine?.connectionState(machine).status == .connected ? WorkbenchTheme.added : WorkbenchTheme.inkMuted).frame(width: 6, height: 6)
                         }.font(.body).padding(4).contentShape(Rectangle())
                     }.buttonStyle(QuietButtonStyle())
                     .contextMenu {

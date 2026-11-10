@@ -26,9 +26,9 @@ struct SessionDetailsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("环境", systemImage: "server.rack").font(.subheadline.weight(.semibold))
                         Text(session.config.displayName).font(.callout)
-                        Text(session.directory).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(session.directory).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled)
                         Label(model.isConnected ? statusLabel(session.status) : "未连接", systemImage: model.isConnected ? "circle.fill" : "network.slash")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                         Button("切换项目") { model.openProjectPicker() }.disabled(!model.isConnected)
                     }
                     Divider()
@@ -43,9 +43,9 @@ struct SessionDetailsView: View {
                         if let context, let total = context["totalTokens"]?.double, let limit = context["maxTokens"]?.double, limit > 0 {
                             ProgressView(value: min(total, limit), total: limit)
                             Text("\(Int(total)) / \(Int(limit)) tokens · \(Int(total / limit * 100))%")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                         } else {
-                            Text(contextError ?? "开始对话后显示实时上下文").font(.caption).foregroundStyle(.secondary)
+                            Text(contextError ?? "开始对话后显示实时上下文").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                         }
                         Button("查看用量明细") { model.showUsage = true }
                     }
@@ -54,7 +54,7 @@ struct SessionDetailsView: View {
                         Label("后台任务", systemImage: "checklist").font(.subheadline.weight(.semibold))
                         let tasks = session.tasks?.array ?? []
                         Text(tasks.isEmpty ? "暂无后台任务" : "\(tasks.filter { $0["status"]?.string == "running" }.count) 个正在运行 · 共 \(tasks.count) 个")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                         ForEach(Array(tasks.prefix(3)), id: \.self) { task in
                             Text(task["description"]?.string ?? task["summary"]?.string ?? task["id"]?.string ?? "任务")
                                 .font(.caption).lineLimit(2)

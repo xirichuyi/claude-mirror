@@ -14,7 +14,7 @@ struct ChatView: View {
                         Label("远端目录已不存在，历史对话仍可查看", systemImage: "folder.badge.questionmark")
                         Spacer()
                         Button("选择项目") { model.showProjectPicker = true }
-                    }.font(.callout).padding(12).background(Color.orange.opacity(0.08))
+                    }.font(.callout).padding(12).background(WorkbenchTheme.warning.opacity(0.08))
                 }
                 if model.active == nil {
                     MachineHomeView()
@@ -132,7 +132,7 @@ struct MessagesList: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("这条历史记录未保存用量结果", systemImage: "chart.bar").font(.callout.weight(.medium))
                             Text("可直接查看账户当前的五小时与本周用量，无需发送消息。")
-                                .font(.callout).foregroundStyle(.secondary)
+                                .font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
                             Button("查看当前用量") { model.presentation = .accountUsage }
                                 .buttonStyle(WorkbenchButtonStyle())
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
@@ -225,7 +225,7 @@ struct HistoryNotice: View {
                     else { model.perform { try await model.engine?.loadHistory(session.id, older: true) } }
                 }.disabled(session.isBusy || !model.isConnected)
             }
-        }.font(.caption).foregroundStyle(.secondary).buttonStyle(.borderless)
+        }.font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).buttonStyle(.borderless)
     }
 }
 
@@ -283,7 +283,7 @@ struct MessageRow: View, Equatable {
                         Text("预计恢复：" + Date(timeIntervalSince1970: reset).formatted(date: .abbreviated, time: .shortened)).font(.caption)
                     }
                 }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+                    .background(WorkbenchTheme.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             }
             if let error = message.error {
                 ReplyFailureView(error: error, canEdit: model.active?.isBusy != true, edit: restoreRequest)
@@ -292,10 +292,10 @@ struct MessageRow: View, Equatable {
                 HStack(spacing: 8) {
                     if sessionStatus == "permission" { Image(systemName: "hand.raised").foregroundStyle(WorkbenchTheme.accent) }
                     else { ProgressView().controlSize(.mini) }
-                    Text(message.activity ?? activityLabel).font(.callout).foregroundStyle(.secondary)
+                    Text(message.activity ?? activityLabel).font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
                 }.padding(.vertical, 8).accessibilityElement(children: .combine)
             }
-            if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(.secondary) }
+            if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
             if !busy { footer }
         }
     }
@@ -348,7 +348,7 @@ struct MessageRow: View, Equatable {
                 }
                 Text(parts.joined(separator: " · ")).lineLimit(1).truncationMode(.middle)
             }
-            .font(.caption2).foregroundStyle(.secondary)
+            .font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
         }
     }
 }
@@ -368,8 +368,8 @@ struct ReplyFailureView: View {
         let failure = ReplyFailure(error)
         VStack(alignment: .leading, spacing: 10) {
             Label(failure.title, systemImage: "exclamationmark.circle")
-                .font(.callout.weight(.medium)).foregroundStyle(.orange)
-            Text(failure.summary).font(.callout).foregroundStyle(.secondary).lineLimit(expanded ? nil : 2)
+                .font(.callout.weight(.medium)).foregroundStyle(WorkbenchTheme.warning)
+            Text(failure.summary).font(.callout).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(expanded ? nil : 2)
             HStack(spacing: 12) {
                 Button("编辑请求", action: edit).disabled(!canEdit)
                 Button(expanded ? "收起详情" : "查看详情") { expanded.toggle() }
@@ -377,7 +377,7 @@ struct ReplyFailureView: View {
             }.buttonStyle(.borderless).font(.caption)
             if expanded {
                 Text(error).font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled).foregroundStyle(.secondary)
+                    .textSelection(.enabled).foregroundStyle(WorkbenchTheme.inkMuted)
             }
         }
         .padding(16).frame(maxWidth: .infinity, alignment: .leading)
@@ -405,12 +405,12 @@ struct BlockView: View {
         case "tool": ToolCard(block: block, actions: actions)
         case "notice":
             Text(block.text ?? "").font(.caption)
-                .foregroundStyle(block.level == "error" ? Color.red : Color.secondary)
+                .foregroundStyle(block.level == "error" ? WorkbenchTheme.error : WorkbenchTheme.inkMuted)
                 .frame(maxWidth: .infinity, alignment: block.level == "boundary" ? .center : .leading)
                 .padding(.vertical, 6)
                 .overlay(alignment: .top) { if block.level == "boundary" { Divider() } }
                 .overlay(alignment: .bottom) { if block.level == "boundary" { Divider() } }
-        default: Text(block.text ?? "暂不支持的消息类型：\(block.type)").font(.caption).foregroundStyle(.secondary)
+        default: Text(block.text ?? "暂不支持的消息类型：\(block.type)").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
         }
     }
 }
@@ -427,8 +427,8 @@ struct ToolCard: View {
     }
     private var dotColor: Color {
         switch block.status {
-        case "running": return .orange
-        case "error": return .red
+        case "running": return WorkbenchTheme.warning
+        case "error": return WorkbenchTheme.error
         case "stopped", "history": return .gray
         default: return WorkbenchTheme.sage
         }
@@ -450,26 +450,26 @@ struct ToolCard: View {
                         if block.name != "Read" { Button("查看变更") { model.panel = .changes; model.showFiles = true } }
                     }.font(.caption).disabled(!model.isConnected)
                 }
-                if let summary = block.summary { Text(summary).font(.caption).foregroundStyle(.secondary) }
+                if let summary = block.summary { Text(summary).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
                 if let body = view.body { ToolBodyView(body: body, actions: actions) }
                 if let children = block.children, !children.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(children) { child in
                             let step = ToolPresentation(name: child.name, input: child.input)
                             HStack(spacing: 8) {
-                                Text(step.title).fontWeight(.medium).foregroundStyle(child.status == "running" ? Color.orange : child.status == "error" ? Color.red : Color.primary)
-                                Text(step.file ?? step.subject ?? "").foregroundStyle(.secondary).lineLimit(1)
+                                Text(step.title).fontWeight(.medium).foregroundStyle(child.status == "running" ? WorkbenchTheme.warning : child.status == "error" ? WorkbenchTheme.error : Color.primary)
+                                Text(step.file ?? step.subject ?? "").foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1)
                             }
                         }
                     }
                     .font(.caption)
                 }
-                if let text = block.agentText { Text(text).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                if let text = block.agentText { Text(text).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled) }
                 if let output = block.output, !output.isEmpty, !view.hidesOutput || block.status == "error" {
                     CodeBlock(text: output, color: block.status == "error" ? WorkbenchTheme.error : WorkbenchTheme.inkMuted)
                 } else if block.name == "Read" {
                     Text(block.status == "running" ? "正在读取…" : block.status == "history" ? "读取结果未保存在历史中" : "无输出")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                 }
             }
             .padding(.top, 4)
@@ -481,14 +481,14 @@ struct ToolCard: View {
                 if let file = view.file {
                     Button((file as NSString).lastPathComponent) { actions.open(file, view.line) }.buttonStyle(.link).lineLimit(1).truncationMode(.middle).help(file)
                 }
-                if let subject = view.subject { Text(subject).foregroundStyle(.secondary).lineLimit(1) }
+                if let subject = view.subject { Text(subject).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1) }
                 Spacer(minLength: 4)
-                if !statusText.isEmpty { Text(statusText).foregroundStyle(block.status == "error" ? Color.red : Color.secondary) }
+                if !statusText.isEmpty { Text(statusText).foregroundStyle(block.status == "error" ? WorkbenchTheme.error : WorkbenchTheme.inkMuted) }
             }
             .font(.caption)
         }
         .padding(.vertical, 2).padding(.horizontal, 2)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(WorkbenchTheme.inkMuted)
     }
 }
 
@@ -515,10 +515,10 @@ struct TodoList: View {
             ForEach(items) { item in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: item.status == "completed" ? "checkmark.circle.fill" : item.status == "in_progress" ? "circle.lefthalf.filled" : "circle")
-                        .foregroundStyle(item.status == "in_progress" ? Color.orange : Color.secondary)
+                        .foregroundStyle(item.status == "in_progress" ? WorkbenchTheme.warning : WorkbenchTheme.inkMuted)
                     Text(item.text)
                         .strikethrough(item.status == "completed")
-                        .foregroundStyle(item.status == "completed" ? Color.secondary : Color.primary)
+                        .foregroundStyle(item.status == "completed" ? WorkbenchTheme.inkMuted : Color.primary)
                         .fontWeight(item.status == "in_progress" ? .semibold : .regular)
                 }
             }

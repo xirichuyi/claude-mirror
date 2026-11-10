@@ -120,7 +120,7 @@ import RemoteCCCore
                 let level = kind == "heading" ? Int(cmark_node_get_heading_level(node)) : 0
                 let size: CGFloat = level == 1 ? 23 : level == 2 ? 19 : level > 0 ? 16 : 13
                 var attrs = attributes(size: size, bold: level > 0)
-                if quote { attrs[.foregroundColor] = NSColor.secondaryLabelColor }
+                if quote { attrs[.foregroundColor] = NSTheme.textMuted }
                 let p = style(indent: indent)
                 if !prefix.isEmpty {
                     p.firstLineHeadIndent = max(0, indent - 20)

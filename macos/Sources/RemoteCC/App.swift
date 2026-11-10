@@ -85,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             switch environment["MIRROR_SCENE"] {
             case "connect": self?.model?.showConnect = true
             case "home": self?.model?.activeId = nil
+            case "settings": self?.model?.presentation = .settings
             case "files":
                 self?.model?.showFiles = true
                 if let workspace = self?.model?.activeWorkspace { DemoData.seed(workspace) }

@@ -21,8 +21,8 @@ struct AccountStatusSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(model.currentConfig?.displayName ?? "未选择机器").font(.headline)
                     if loading { ProgressView("正在读取远端信息…") }
-                    if !model.isConnected { Text("连接机器后查看账号与环境。").foregroundStyle(.secondary) }
-                    if let failure { Text(failure).foregroundStyle(.secondary).textSelection(.enabled) }
+                    if !model.isConnected { Text("连接机器后查看账号与环境。").foregroundStyle(WorkbenchTheme.inkMuted) }
+                    if let failure { Text(failure).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled) }
                     if let status { accountSection(status) }
                     if let session = model.active { sessionSection(session) }
                     if let environment { environmentSection(environment) }
@@ -30,7 +30,7 @@ struct AccountStatusSheet: View {
             }
             HStack {
                 Text("信息来自远端 Claude Code；未返回的字段显示为“未报告”。")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                 Spacer()
                 Button("刷新") { revision += 1 }.disabled(loading || !model.isConnected)
             }.padding(20)
@@ -42,7 +42,7 @@ struct AccountStatusSheet: View {
     private func accountSection(_ value: JSON) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("登录账号").font(.headline)
-            if let error = value["accountError"]?.string { Text(error).foregroundStyle(.secondary) }
+            if let error = value["accountError"]?.string { Text(error).foregroundStyle(WorkbenchTheme.inkMuted) }
             let account = value["account"]
             row("邮箱", account?["email"]?.string)
             row("组织", account?["organization"]?.string)
@@ -61,8 +61,8 @@ struct AccountStatusSheet: View {
                     if let reset = window["resetsAt"]?.string { row("重置时间", resetTime(reset)) }
                 }
             }
-            if let error = value["quotaError"]?.string { Text("额度：" + error).foregroundStyle(.secondary) }
-            Text("检测到任一周期已用达到 95% 时停止。同一远端登录已用达到 90% 后限制并行任务；用量反馈有延迟，无法保证精确保留 5%。").font(.caption).foregroundStyle(.secondary)
+            if let error = value["quotaError"]?.string { Text("额度：" + error).foregroundStyle(WorkbenchTheme.inkMuted) }
+            Text("检测到任一周期已用达到 95% 时停止。同一远端登录已用达到 90% 后限制并行任务；用量反馈有延迟，无法保证精确保留 5%。").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
         }
     }
 
@@ -87,19 +87,19 @@ struct AccountStatusSheet: View {
             Divider()
             Text("机器默认环境").font(.headline)
             Text("从远端主目录读取。项目专属技能、MCP、插件与任务请在当前对话的会话工具中查看。")
-                .font(.caption).foregroundStyle(.secondary)
-            if let error = value["capabilitiesError"]?.string { Text(error).foregroundStyle(.secondary) }
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+            if let error = value["capabilitiesError"]?.string { Text(error).foregroundStyle(WorkbenchTheme.inkMuted) }
             let capabilities = value["capabilities"]
             entries("可用模型", capabilities?["models"]?.array ?? [], name: "displayName", fallback: "value")
             entries("命令与技能", capabilities?["commands"]?.array ?? [], name: "name", fallback: "name")
             entries("Agents", capabilities?["agents"]?.array ?? [], name: "name", fallback: "name")
             if let styles = capabilities?["outputStyles"]?.array { row("可用输出样式", styles.compactMap(\.string).joined(separator: "、")) }
-            if let error = value["mcpError"]?.string { Text("MCP：" + error).foregroundStyle(.secondary) }
+            if let error = value["mcpError"]?.string { Text("MCP：" + error).foregroundStyle(WorkbenchTheme.inkMuted) }
             DisclosureGroup("MCP 服务器（\(value["mcp"]?.array?.count ?? 0)）") {
                 ForEach(value["mcp"]?.array ?? [], id: \.self) { server in
                     VStack(alignment: .leading, spacing: 6) {
                         row(server["name"]?.string ?? "MCP", server["status"]?.string)
-                        if let error = server["error"]?.string { Text(error).font(.caption).foregroundStyle(.secondary) }
+                        if let error = server["error"]?.string { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
                         entries("工具", server["tools"]?.array ?? [], name: "name", fallback: "name")
                     }.padding(.vertical, 6)
                 }
@@ -112,7 +112,7 @@ struct AccountStatusSheet: View {
             ForEach(items, id: \.self) { item in
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item[name]?.string ?? item[fallback]?.string ?? "未报告名称").font(.subheadline.weight(.medium))
-                    if let description = item["description"]?.string { Text(description).font(.caption).foregroundStyle(.secondary) }
+                    if let description = item["description"]?.string { Text(description).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 5).textSelection(.enabled)
             }
         }
@@ -120,7 +120,7 @@ struct AccountStatusSheet: View {
 
     private func row(_ title: String, _ value: String?) -> some View {
         HStack(alignment: .top) {
-            Text(title).foregroundStyle(.secondary).frame(width: 130, alignment: .leading)
+            Text(title).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 130, alignment: .leading)
             Text(value.flatMap { $0.isEmpty ? nil : $0 } ?? "未报告").textSelection(.enabled)
             Spacer(minLength: 0)
         }.font(.callout)

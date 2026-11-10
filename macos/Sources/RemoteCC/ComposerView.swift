@@ -53,7 +53,7 @@ struct ComposerArea: View {
                     if model.connectionState.status != .connecting, let config = model.currentConfig {
                         Button("重新连接") { model.perform { try await model.connect(config) } }
                     }
-                }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+                }.font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).padding(.horizontal, 4)
             }
             if let session = model.active {
                 todoStrip(session)
@@ -73,7 +73,7 @@ struct ComposerArea: View {
                         Spacer()
                         Button("重试") { model.upload([url], to: model.failedUploadDirectories[id]?[url]) }.disabled(model.uploadingSessions.contains(id) || !model.isConnected)
                         Button("移除") { model.failedUploads[id]?.removeAll { $0 == url } }
-                    }.font(.caption).foregroundStyle(.secondary)
+                    }.font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                 }
                 PromptEditor(text: text, caret: $caret, placeholder: "发送消息，或输入 / 使用命令", handler: handleKey, onPasteImage: { model.pasteImage($0) }, onDropFiles: { model.upload($0) }, acceptsFileDrops: model.isConnected, onFileDrag: { dropTarget = $0 }, focusToken: model.composerFocus, onHeightChange: { editorHeight = $0 })
                     .frame(height: editorHeight)
@@ -111,7 +111,7 @@ struct ComposerArea: View {
             }
             if !model.transferStatus.isEmpty {
                 Text(model.transferStatus).lineLimit(1)
-                    .font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 4)
+                    .font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted).padding(.horizontal, 4)
             }
 
         }
@@ -128,7 +128,7 @@ struct ComposerArea: View {
            case .todos(let items)? = ToolPresentation(name: block.name, input: block.input).body, !items.isEmpty {
             ScrollView { TodoList(items: items).padding(8).frame(maxWidth: .infinity, alignment: .leading) }
                 .frame(maxHeight: 130).fixedSize(horizontal: false, vertical: true)
-                .background(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.2)))
+                .background(RoundedRectangle(cornerRadius: 8).strokeBorder(WorkbenchTheme.inkMuted.opacity(0.2)))
         }
     }
 
@@ -136,7 +136,7 @@ struct ComposerArea: View {
         if let queue = session.queue, !queue.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(session.queuePaused == true ? "队列已暂停" : "回复完成后依次发送").foregroundStyle(.secondary)
+                    Text(session.queuePaused == true ? "队列已暂停" : "回复完成后依次发送").foregroundStyle(WorkbenchTheme.inkMuted)
                     if session.queuePaused == true {
                         Button("继续队列") { model.perform { try model.engine?.resumeQueue(session.id) } }.disabled(!model.isConnected)
                     }
@@ -159,9 +159,9 @@ struct ComposerArea: View {
             return AnyView(Button { choose(command, execute: false) } label: {
                 HStack(spacing: 10) {
                     Text("/" + command.name).font(.system(size: 12, design: .monospaced)).frame(minWidth: 90, alignment: .leading)
-                    Text((command.description ?? "").components(separatedBy: "\n").first ?? "").foregroundStyle(.secondary).lineLimit(1)
+                    Text((command.description ?? "").components(separatedBy: "\n").first ?? "").foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1)
                     Spacer()
-                    Text(command.argumentHint ?? "").font(.caption2).foregroundStyle(.secondary)
+                    Text(command.argumentHint ?? "").font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
                 }
                 .contentShape(Rectangle())
             }.buttonStyle(.plain))
@@ -187,7 +187,7 @@ struct ComposerArea: View {
                             Button { model.attachments[id]?.removeAll { $0.path == file.path } } label: { Image(systemName: "xmark") }.buttonStyle(.plain).help("移除附件")
                         }
                         .font(.caption).padding(.horizontal, 7).padding(.vertical, 4)
-                        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+                        .background(WorkbenchTheme.inkMuted.opacity(0.1), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
                     }
                 }
             }
@@ -242,7 +242,7 @@ struct ComposerArea: View {
         return HStack(spacing: 8) {
             if session != nil {
                 Button { model.showPreferences = true } label: { Label(modes[preferences?.permissionMode ?? "default"] ?? "默认权限", systemImage: "checkmark.shield") }
-                    .buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).disabled(!model.isConnected)
+                    .buttonStyle(QuietButtonStyle()).foregroundStyle(WorkbenchTheme.inkMuted).disabled(!model.isConnected)
                 Spacer(minLength: 12)
                 Button { showingModels.toggle() } label: {
                     HStack(spacing: 4) {

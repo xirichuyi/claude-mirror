@@ -28,11 +28,11 @@ struct PreferencesSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeading(title: "对话选项") { dismiss() }.disabled(saving).padding(24)
             if let capabilities { form(capabilities).disabled(saving) }
-            else if !loadError.isEmpty { Text(loadError).foregroundStyle(.red).padding().textSelection(.enabled) }
+            else if !loadError.isEmpty { Text(loadError).foregroundStyle(WorkbenchTheme.error).padding().textSelection(.enabled) }
             else { ProgressView("读取远端能力…").padding().frame(maxWidth: .infinity) }
             HStack {
                 Button("刷新模型列表") { load(refresh: true) }
-                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
+                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.error).lineLimit(2) }
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("应用") { apply() }.buttonStyle(WorkbenchButtonStyle(prominent: true)).keyboardShortcut(.defaultAction).disabled(capabilities == nil || saving)
@@ -156,7 +156,7 @@ struct CommandPickerSheet: View {
             }
             if interaction.kind == .model { TextField("或输入自定义模型 ID", text: $custom).textFieldStyle(WorkbenchTextFieldStyle()) }
             if let description = options.first(where: { $0.value == value })?.description ?? interaction.description {
-                Text(description).font(.caption).foregroundStyle(.secondary)
+                Text(description).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             }
             HStack {
                 Spacer()
@@ -209,7 +209,7 @@ struct SessionToolsSheet: View {
                         if model.sessionToolsSection == "ssh" { portForwarding(session) }
                         else { ClaudeToolsView(sessionID: session.id, section: SessionToolSection(rawValue: model.sessionToolsSection) ?? .skills).id(session.id + ":" + model.sessionToolsSection) }
                     } else {
-                        Text("打开对话后管理该项目的扩展和配置。").foregroundStyle(.secondary)
+                        Text("打开对话后管理该项目的扩展和配置。").foregroundStyle(WorkbenchTheme.inkMuted)
                         Spacer()
                     }
                 }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -220,7 +220,7 @@ struct SessionToolsSheet: View {
 
     private func portForwarding(_ session: ChatSession) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("将远端服务转发到本机，在浏览器中访问。").foregroundStyle(.secondary)
+            Text("将远端服务转发到本机，在浏览器中访问。").foregroundStyle(WorkbenchTheme.inkMuted)
             HStack {
                 TextField("本地端口", text: $localPort).frame(width: 110)
                 TextField("远端端口", text: $remotePort).frame(width: 110)
@@ -234,7 +234,7 @@ struct SessionToolsSheet: View {
                     Button("关闭") { close(tunnel, session) }
                 }
             }
-            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
+            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.error) }
             Spacer()
         }
     }

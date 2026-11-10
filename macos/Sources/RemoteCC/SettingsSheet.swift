@@ -30,7 +30,7 @@ struct SettingsSheet: View {
                         else {
                             Text("claude mirror").font(.title2.weight(.semibold))
                             Text("版本 " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(WorkbenchTheme.inkMuted)
                             Button(model.checkingForUpdates ? "正在检查…" : "检查更新") { Task { await model.checkForUpdates(manual: true) } }
                                 .disabled(model.checkingForUpdates)
                                 .buttonStyle(WorkbenchButtonStyle())
@@ -61,7 +61,7 @@ struct SettingsSheet: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(machine.displayName).font(.body.weight(.medium))
-                            Text(machine.host).font(.caption).foregroundStyle(.secondary)
+                            Text(machine.host).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                         }
                         Spacer()
                         Button("重命名") { name = machine.displayName; renaming = machine }
@@ -75,9 +75,10 @@ struct SettingsSheet: View {
                         get: { model.savedMachines.first { $0.key == machine.key }?.reverseAccess == true },
                         set: { model.setReverseAccess(machine, enabled: $0) }))
                         .help("允许这台服务器通过 SSH 以你的用户身份访问本机")
+                        .toggleStyle(.switch).controlSize(.mini)
                     if machine.reverseAccess == true {
                         HStack {
-                            Text(model.reverseStatus(machine)).font(.caption).foregroundStyle(.secondary)
+                            Text(model.reverseStatus(machine)).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                             Spacer()
                             Button("复制连接命令") { model.copyReverseCommand(machine) }
                                 .disabled(model.reverseStates[machine.key]?.command == nil)
@@ -85,7 +86,7 @@ struct SettingsSheet: View {
                     }
                 }.padding(14).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.card))
             }
-            if model.savedMachines.isEmpty { Text("尚未添加主机").foregroundStyle(.secondary) }
+            if model.savedMachines.isEmpty { Text("尚未添加主机").foregroundStyle(WorkbenchTheme.inkMuted) }
         }.buttonStyle(QuietButtonStyle())
     }
 
@@ -119,12 +120,12 @@ struct SettingsSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("当前对话").font(.headline)
             if let session = model.active {
-                Text(historyDisplayTitle(session.name)).lineLimit(2).foregroundStyle(.secondary)
+                Text(historyDisplayTitle(session.name)).lineLimit(2).foregroundStyle(WorkbenchTheme.inkMuted)
                 Button("模型与权限") { dismiss(); model.showPreferences = true }
                 Button("上下文与用量") { dismiss(); model.showUsage = true }
                 Button("扩展与配置") { dismiss(); model.openTools("config") }
             } else {
-                Text("打开对话后可调整模型和权限。").foregroundStyle(.secondary)
+                Text("打开对话后可调整模型和权限。").foregroundStyle(WorkbenchTheme.inkMuted)
             }
         }.buttonStyle(WorkbenchButtonStyle())
     }

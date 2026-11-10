@@ -15,7 +15,7 @@ struct MachineHomeView: View {
                         .font(.largeTitle.weight(.semibold))
                         .foregroundStyle(WorkbenchTheme.ink)
                     Text(model.currentConfig == nil ? "使用服务器上的 Claude Code。" : model.currentConfig!.displayName)
-                        .font(.body).foregroundStyle(.secondary).lineSpacing(6)
+                        .font(.body).foregroundStyle(WorkbenchTheme.inkMuted).lineSpacing(6)
                     if model.currentConfig == nil || !model.isConnected {
                     HStack(spacing: 12) {
                         if let config = model.currentConfig {
@@ -26,7 +26,7 @@ struct MachineHomeView: View {
                         } else {
                             Button { model.showConnect = true } label: { Label("添加服务器", systemImage: "plus") }
                                 .buttonStyle(WorkbenchButtonStyle(prominent: true))
-                            Text("支持 SSH 别名与 user@host").font(.subheadline).foregroundStyle(.tertiary)
+                            Text("支持 SSH 别名与 user@host").font(.subheadline).foregroundStyle(WorkbenchTheme.inkDim)
                         }
                     }.padding(.top, 4)
                     }
@@ -34,7 +34,7 @@ struct MachineHomeView: View {
                 if model.currentConfig != nil {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("最近对话").font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                            Text("最近对话").font(.callout.weight(.medium)).foregroundStyle(WorkbenchTheme.inkMuted)
                             Spacer()
                             if syncing { ProgressView().controlSize(.small) }
                             else {
@@ -46,7 +46,7 @@ struct MachineHomeView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(syncing ? "正在读取远端历史…" : "还没有对话").font(.body.weight(.medium))
                                 Text(model.historyStatus)
-                                    .font(.callout).foregroundStyle(.secondary)
+                                    .font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
                             }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
                                 .background(WorkbenchTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
                         } else {
@@ -56,12 +56,12 @@ struct MachineHomeView: View {
                                         HStack(spacing: 14) {
                                                                                         VStack(alignment: .leading, spacing: 5) {
                                                 Text(historyDisplayTitle(session.name)).font(.body.weight(.medium)).lineLimit(1)
-                                                Text(session.directory).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                                Text(session.directory).font(.subheadline).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1).truncationMode(.middle)
                                             }
                                             Spacer()
                                             Text(Date(timeIntervalSince1970: session.updatedAt / 1000), format: .dateTime.month().day())
-                                                .font(.caption2).foregroundStyle(.tertiary)
-                                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                                                .font(.caption2).foregroundStyle(WorkbenchTheme.inkDim)
+                                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(WorkbenchTheme.inkDim)
                                         }.padding(.vertical, 8).padding(.horizontal, 4).contentShape(Rectangle())
                                     }.buttonStyle(SidebarNavigationStyle())
                                 }

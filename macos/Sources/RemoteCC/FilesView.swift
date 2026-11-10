@@ -32,7 +32,7 @@ struct FilePanel: View {
             if let workspace = model.activeWorkspace {
                 if !model.isConnected {
                     Label("连接已断开", systemImage: "network.slash")
-                        .font(.caption).foregroundStyle(.secondary).padding(8)
+                        .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).padding(8)
                 }
                 Group {
                     switch model.panel {
@@ -309,7 +309,7 @@ struct ChangesView: View {
         let status = workspace.gitStatus
         VStack(alignment: .leading, spacing: 0) {
             Text(summary(status))
-                .font(.caption).foregroundStyle(.secondary).padding(10)
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).padding(10)
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(status?.files ?? []) { file in
@@ -317,7 +317,7 @@ struct ChangesView: View {
                             HStack {
                                 Text(file.relative).foregroundStyle(gitColor(file.code)).lineLimit(1).truncationMode(.head)
                                 Spacer()
-                                Text(file.status.trimmingCharacters(in: .whitespaces)).foregroundStyle(.secondary)
+                                Text(file.status.trimmingCharacters(in: .whitespaces)).foregroundStyle(WorkbenchTheme.inkMuted)
                             }
                             .font(.callout).padding(.horizontal, 10).padding(.vertical, 4).contentShape(Rectangle())
                         }
@@ -356,14 +356,14 @@ struct SearchView: View {
                     .buttonStyle(QuietButtonStyle()).help("搜索 · Enter").accessibilityLabel("搜索文件内容")
                     .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.isConnected || searching)
             }.padding(8)
-            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 8) }
+            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).padding(.horizontal, 12).padding(.bottom, 8) }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(matches) { match in
                         Button { model.open(match.path, line: match.line) } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("\(match.relative):\(match.line)").font(.caption.weight(.medium)).lineLimit(1)
-                                Text(match.text.trimmingCharacters(in: .whitespaces)).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).lineLimit(2)
+                                Text(match.text.trimmingCharacters(in: .whitespaces)).font(.system(size: 11, design: .monospaced)).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(2)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.buttonStyle(QuietButtonStyle()).help(match.path)
                     }
@@ -416,7 +416,7 @@ struct QuickOpenSheet: View {
                 .onKeyPress(.downArrow) { selection = min(selection + 1, max(results.count - 1, 0)); return .handled }
                 .onKeyPress(.upArrow) { selection = max(selection - 1, 0); return .handled }
                 .onKeyPress(.escape) { dismiss(); return .handled }
-            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary).padding(8) }
+            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).padding(8) }
             MenuList(count: results.count, selection: selection) { index in
                 let file = results[index]
                 return AnyView(Button { choose(file) } label: {
@@ -512,7 +512,7 @@ struct EditorPane: View {
                 }
                 .help(tab.path)
                 if tab.notice != nil || tab.error != nil || preview == nil || preview?.truncated == true {
-                    Text(tab.notice ?? tab.error.map { _ in "无法预览" } ?? info(tab)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text(tab.notice ?? tab.error.map { _ in "无法预览" } ?? info(tab)).font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1)
                 }
                 if !tab.isDiff, let preview {
                     if tab.draft != nil {
@@ -633,20 +633,20 @@ struct EditorContent: View {
     var body: some View {
         Group {
             if let error = tab.error, tab.preview == nil {
-                Text(error).foregroundStyle(.secondary).padding().textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Text(error).foregroundStyle(WorkbenchTheme.inkMuted).padding().textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if tab.isDiff {
                 if let text = tab.diffText {
                     let rows = unifiedDiffRows(text)
-                    if rows.isEmpty { Text("没有差异").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity) }
+                    if rows.isEmpty { Text("没有差异").foregroundStyle(WorkbenchTheme.inkMuted).frame(maxWidth: .infinity, maxHeight: .infinity) }
                     else { DiffView(rows: rows) }
                 } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             } else if let preview = tab.preview {
                 VStack(spacing: 0) {
                     if let error = tab.error {
                         Text("刷新失败，保留上次加载的内容：" + error)
-                            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled)
                             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.orange.opacity(0.08))
+                            .background(WorkbenchTheme.warning.opacity(0.08))
                     }
                     content(preview)
                 }
@@ -674,11 +674,11 @@ struct EditorContent: View {
         case "image":
             if let data = preview.data, let image = NSImage(data: data) {
                 ScrollView([.horizontal, .vertical]) { Image(nsImage: image).padding() }
-            } else { Text("无法显示图片").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            } else { Text("无法显示图片").foregroundStyle(WorkbenchTheme.inkMuted).frame(maxWidth: .infinity, maxHeight: .infinity) }
         case "pdf":
             if let data = preview.data { PDFContent(data: data) }
         default:
-            Text(preview.reason ?? "此格式请下载或在本地打开").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            Text(preview.reason ?? "此格式请下载或在本地打开").foregroundStyle(WorkbenchTheme.inkMuted).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

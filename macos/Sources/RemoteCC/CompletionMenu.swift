@@ -16,7 +16,7 @@ struct MenuList: View {
                     ForEach(0..<count, id: \.self) { index in
                         row(index)
                             .padding(.horizontal, 8).padding(.vertical, 6)
-                            .background(index == selection ? Color.secondary.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+                            .background(index == selection ? WorkbenchTheme.inkMuted.opacity(0.15) : Color.clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
                             .id(index)
                     }
                 }
@@ -25,7 +25,7 @@ struct MenuList: View {
             .frame(maxHeight: 260)
             .fixedSize(horizontal: false, vertical: true)
             .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(WorkbenchTheme.inkMuted.opacity(0.25)))
             .onChange(of: selection) { proxy.scrollTo(selection) }
         }
     }

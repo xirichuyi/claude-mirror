@@ -15,7 +15,7 @@ struct ActivitySheet: View {
             HStack {
                 Button("发送测试通知") { model.testNotification() }.disabled(!model.notificationsEnabled || model.notificationTestRunning)
                 if model.notificationsAuthorizing { ProgressView().controlSize(.small) }
-                Text(model.notificationTestStatus).font(.caption).foregroundStyle(.secondary)
+                Text(model.notificationTestStatus).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
@@ -25,11 +25,11 @@ struct ActivitySheet: View {
                                 Label(machine.displayName, systemImage: "desktopcomputer").font(.headline)
                                 Spacer()
                                 let online = model.engine?.connectionState(machine).status == .connected
-                                Text(online ? "已连接" : "离线 · 状态可能不是最新").font(.caption).foregroundStyle(.secondary)
+                                Text(online ? "已连接" : "离线 · 状态可能不是最新").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                                 if !online { Button("连接") { model.perform { try await model.connect(machine) } } }
                             }
                             let sessions = model.attentionSessions.filter { $0.config.key == machine.key }
-                            if sessions.isEmpty { Text("暂无待处理任务").font(.caption).foregroundStyle(.secondary) }
+                            if sessions.isEmpty { Text("暂无待处理任务").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
                             ForEach(sessions) { session in
                                 VStack(alignment: .leading, spacing: 8) {
                                     Button { model.select(session.id); dismiss() } label: {
@@ -46,8 +46,8 @@ struct ActivitySheet: View {
                                             Image(systemName: task["status"]?.string == "running" ? "circle.dotted" : "checkmark.circle")
                                             VStack(alignment: .leading, spacing: 4) {
                                                 Text(task["description"]?.string ?? "后台任务").font(.caption).lineLimit(2)
-                                                if let summary = task["summary"]?.string { Text(summary).font(.caption2).foregroundStyle(.secondary).lineLimit(3) }
-                                                if let id = task["id"]?.string, let error = stopErrors[session.id + id] { Text(error).font(.caption2).foregroundStyle(.red) }
+                                                if let summary = task["summary"]?.string { Text(summary).font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(3) }
+                                                if let id = task["id"]?.string, let error = stopErrors[session.id + id] { Text(error).font(.caption2).foregroundStyle(WorkbenchTheme.error) }
                                             }
                                             Spacer()
                                             if task["status"]?.string == "running", let id = task["id"]?.string {
@@ -62,7 +62,7 @@ struct ActivitySheet: View {
                                                 }
                                                 .disabled(stopping.contains(key) || model.engine?.connectionState(session.config).status != .connected)
                                             }
-                                        }.foregroundStyle(.secondary)
+                                        }.foregroundStyle(WorkbenchTheme.inkMuted)
                                     }
                                 }.padding(12).background(WorkbenchTheme.canvas, in: RoundedRectangle(cornerRadius: 8))
                             }
@@ -73,7 +73,7 @@ struct ActivitySheet: View {
                             Image(systemName: "checkmark.circle").font(.largeTitle.weight(.light)).foregroundStyle(WorkbenchTheme.accent.opacity(0.7))
                             Text("暂时没有需要处理的任务").font(.body.weight(.medium))
                             Text(model.savedMachines.isEmpty ? "连接机器后，任务会汇总在这里。" : "正在运行、等待确认和未读的结果都会出现在这里。")
-                                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                                .font(.callout).foregroundStyle(WorkbenchTheme.inkMuted).multilineTextAlignment(.center)
                         }.frame(maxWidth: .infinity).padding(.vertical, 40)
                     }
                 }

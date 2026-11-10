@@ -31,7 +31,7 @@ struct ChatGallery: View {
                 VStack(alignment: .leading, spacing: 24) {
                     MessageRow(message: ChatMessage(role: "user", text: "请检查聊天界面的展示效果。"), busy: false, actions: FileActions(open: { _, _ in }))
                     if phase == "权限确认", let permission = try? JSONDecoder().decode(PermissionRequest.self, from: Data(#"{"id":"preview","name":"Bash","title":"运行项目测试","description":"示例请求：仅用于检查界面，不会执行命令。","input":{"command":"swift test","description":"运行单元测试"}}"#.utf8)) {
-                        if answered { Label("已处理 · 本地示例，未执行命令", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
+                        if answered { Label("已处理 · 本地示例，未执行命令", systemImage: "checkmark.circle").foregroundStyle(WorkbenchTheme.inkMuted) }
                         else { PermissionCard(permission: permission, onAnswer: { _ in answered = true }) }
                     } else {
                     MessageRow(message: sample, busy: phase == "思考中" || phase == "工具执行", sessionStatus: "working", actions: FileActions(open: { _, _ in }))
