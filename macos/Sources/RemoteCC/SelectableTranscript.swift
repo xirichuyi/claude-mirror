@@ -134,7 +134,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
     }
     static func render(_ text: String, markdown: Bool) -> NSAttributedString {
         if markdown { return NativeMarkdown.document(text) }
-        return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor(WorkbenchTheme.ink)])
+        return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSTheme.text])
     }
 
 }

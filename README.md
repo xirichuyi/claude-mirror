@@ -347,7 +347,7 @@ Windows 新客户端启动时在后台检查同一稳定版本，也可从“更
 
 ## 来源与许可
 
-项目曾名 RemoteCC、Claudock，现统一为镜像 Claude（Claude Mirror），保留原有提交历史与用户数据兼容路径。使用官方 Claude Agent SDK；Markdown 渲染使用 MarkdownUI，其依赖许可随应用打包在 `Resources/ThirdParty`。AgentBox 是交互设计参考之一，本项目没有将其整个客户端直接移植。
+项目曾名 RemoteCC、Claudock，现统一为镜像 Claude（Claude Mirror），保留原有提交历史与用户数据兼容路径。使用官方 Claude Agent SDK；Markdown 渲染使用 MarkdownUI，其依赖许可随应用打包在 `Resources/ThirdParty`。AgentBox 是交互设计参考之一，本项目没有将其整个客户端直接移植。界面配色、卡片布局尺寸和动效时长改编自 [winc](https://github.com/DEEIX-AI/Winc)（Apache-2.0，Copyright 2026 Chenyme and DEEIX AI），主题已改名并映射到本项目的界面；许可证全文随应用打包在 `Resources/ThirdParty/winc-LICENSE.txt`。代码高亮为独立实现，沿用相同的九类词法颜色。
 
 项目代码采用 MIT 许可，见 [LICENSE](LICENSE)。第三方依赖遵循各自许可。镜像 Claude 名称和标识不表示获得 Anthropic 官方授权。
 

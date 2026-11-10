@@ -466,7 +466,7 @@ struct ToolCard: View {
                 }
                 if let text = block.agentText { Text(text).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
                 if let output = block.output, !output.isEmpty, !view.hidesOutput || block.status == "error" {
-                    CodeBlock(text: output, color: block.status == "error" ? .red : .secondary)
+                    CodeBlock(text: output, color: block.status == "error" ? WorkbenchTheme.error : WorkbenchTheme.inkMuted)
                 } else if block.name == "Read" {
                     Text(block.status == "running" ? "正在读取…" : block.status == "history" ? "读取结果未保存在历史中" : "无输出")
                         .font(.caption).foregroundStyle(.secondary)
@@ -499,8 +499,8 @@ struct ToolBodyView: View {
 
     var body: some View {
         switch body_ {
-        case .command(let text): CodeBlock(text: text, color: .primary)
-        case .code(let text): CodeBlock(text: text, color: .secondary)
+        case .command(let text): CodeBlock(text: text, color: WorkbenchTheme.ink)
+        case .code(let text): CodeBlock(text: text, color: WorkbenchTheme.inkMuted)
         case .diff(let rows): DiffView(rows: rows, maxHeight: 420)
         case .markdown(let text): MarkdownView(text: text, actions: actions)
         case .todos(let items): TodoList(items: items)
@@ -529,17 +529,18 @@ struct TodoList: View {
 
 struct CodeBlock: View {
     let text: String
-    var color: Color = .primary
+    var color: Color = WorkbenchTheme.ink
 
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
-            Text(text).font(.system(size: 11, design: .monospaced)).foregroundStyle(color).textSelection(.enabled)
-                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+            Text(text).font(.system(size: 11.5, design: .monospaced)).lineSpacing(3).foregroundStyle(color).textSelection(.enabled)
+                .padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
         }
         .defaultScrollAnchor(.topLeading)
         .frame(maxHeight: 320)
         .fixedSize(horizontal: false, vertical: true)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+        .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+        .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small).strokeBorder(WorkbenchTheme.border))
     }
 }
 
@@ -567,10 +568,10 @@ struct DiffView: View {
         switch row.kind { case .added: return "+ "; case .removed: return "- "; case .context: return "  "; case .hunk: return "" }
     }
     private func foreground(_ row: DiffRow) -> Color {
-        switch row.kind { case .added: return .green; case .removed: return .red; case .hunk: return .blue; case .context: return .primary }
+        switch row.kind { case .added: return WorkbenchTheme.added; case .removed: return WorkbenchTheme.removed; case .hunk: return WorkbenchTheme.modified; case .context: return WorkbenchTheme.ink }
     }
     private func rowBackground(_ row: DiffRow) -> Color {
-        switch row.kind { case .added: return .green.opacity(0.1); case .removed: return .red.opacity(0.1); case .hunk: return .blue.opacity(0.06); case .context: return .clear }
+        switch row.kind { case .added: return WorkbenchTheme.added.opacity(0.12); case .removed: return WorkbenchTheme.removed.opacity(0.12); case .hunk: return WorkbenchTheme.modified.opacity(0.08); case .context: return .clear }
     }
 }
 

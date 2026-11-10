@@ -2,70 +2,95 @@
 import SwiftUI
 import AppKit
 
+/// Every colour resolves from the active `ThemePalette`, so appearance and palette changes
+/// re-colour the whole app without rebuilding views. Token names are this app's roles.
 enum WorkbenchTheme {
-    // Neutral surfaces and graphite controls; never inherit a blue system accent.
-    static let canvas = Color(nsColor: .textBackgroundColor)
-    static let sidebar = Color(nsColor: .windowBackgroundColor)
-    static let surface = Color(nsColor: .controlBackgroundColor)
-    static let ink = Color.primary
+    private static func token(_ value: @escaping (ThemePalette) -> NSColor) -> Color { Color(nsColor: ThemeStore.dynamic(value)) }
+
+    /// Window background behind the floating cards.
+    static let frame = token(\.frame)
+    /// Conversation and editor card.
+    static let canvas = token(\.card)
+    /// Sidebar and inspector cards.
+    static let sidebar = token(\.card)
+    static let popup = token(\.popup)
+    /// Inputs, code blocks and grouped rows.
+    static let surface = token(\.surface)
+    static let ink = token(\.text)
+    static let inkMuted = token(\.textMuted)
+    static let inkDim = token(\.textDim)
     static let onInk = Color.white
-    static let primaryButton = Color.black
-    static let accent = Color(nsColor: .labelColor)
-    static let userBubble = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
-    static let border = Color(nsColor: .separatorColor)
-    static let sidebarInk = Color.primary
-    static let sage = Color.green
+    static let primaryButton = token(\.accentFill)
+    static let accent = token(\.accent)
+    static let userBubble = token(\.tint)
+    static let border = token(\.border)
+    static let popupBorder = token(\.popupBorder)
+    static let separator = token(\.separator)
+    static let hover = token(\.hover)
+    static let selected = token(\.selected)
+    static let selection = token(\.selection)
+    static let shadow = token(\.shadow)
+    static let sidebarInk = token(\.text)
+    static let sage = token(\.gitAdded)
+    static let error = token(\.error)
+    static let warning = token(\.warning)
+    static let added = token(\.gitAdded)
+    static let removed = token(\.gitRemoved)
+    static let modified = token(\.gitModified)
 
     /// One spacing and corner scale for the whole app instead of per-view numbers.
     enum Space { static let xs: CGFloat = 4, s: CGFloat = 8, m: CGFloat = 12, l: CGFloat = 16, xl: CGFloat = 24 }
     static let conversationWidth: CGFloat = 800
 
-    enum Radius { static let small: CGFloat = 6, medium: CGFloat = 10, large: CGFloat = 16 }
+    /// Rows 6, tabs and popups 8, cards 10, pill controls 14.
+    enum Radius { static let small: CGFloat = 6, medium: CGFloat = 8, card: CGFloat = 10, large: CGFloat = 14 }
+    /// Cards float on the frame: 6 pt from the window edge and from each other.
+    enum Island { static let margin: CGFloat = 6, gap: CGFloat = 6 }
+}
 
+/// Short, purposeful motion: popups in 150 ms and out 110 ms, dialogs 220/150 ms scaling from
+/// 95 %, panels 200 ms, trees 160 ms, hover 120 ms. Reduce Motion turns all of it off.
+enum Motion {
+    static let popupIn = 0.15, popupOut = 0.11, dialogIn = 0.22, dialogOut = 0.15
+    static let panel = 0.2, tree = 0.16, slide = 0.15, hover = 0.12
 
+    static func animation(_ duration: Double, reduce: Bool) -> Animation? { reduce ? nil : .easeOut(duration: duration) }
+
+    /// Fades in while growing from 95 %, and out while shrinking slightly.
+    static var card: AnyTransition {
+        .asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.95)).animation(.easeOut(duration: dialogIn)),
+                    removal: .opacity.combined(with: .scale(scale: 0.98)).animation(.easeIn(duration: dialogOut)))
+    }
+    static var popup: AnyTransition {
+        .asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97, anchor: .top)).animation(.easeOut(duration: popupIn)),
+                    removal: .opacity.animation(.easeIn(duration: popupOut)))
+    }
+}
+
+/// An opaque card floating on the frame, as in the reference design.
+struct IslandCard: ViewModifier {
+    var color: Color = WorkbenchTheme.canvas
+    func body(content: Content) -> some View {
+        content
+            .background(color)
+            .clipShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.card, style: .continuous).strokeBorder(WorkbenchTheme.popupBorder))
+    }
+}
+
+extension View {
+    func islandCard(_ color: Color = WorkbenchTheme.canvas) -> some View { modifier(IslandCard(color: color)) }
 }
 
 
-/// AppKit's traditional blur samples the backdrop, without an opaque tint overlay.
+/// Panels are opaque palette cards rather than translucent material: text contrast then holds
+/// to the palette's measured ratios regardless of what is behind the window.
 struct FrostedBackground: View {
     var material: NSVisualEffectView.Material = .sidebar
-    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
-        if reduceTransparency {
-            WorkbenchTheme.sidebar
-        } else {
-            ClassicVisualEffect(material: material, blendingMode: blendingMode)
-                .saturation(0)
-                .overlay(colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.68))
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
-    }
-}
-
-private struct ClassicVisualEffect: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-    let blendingMode: NSVisualEffectView.BlendingMode
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        updateNSView(view, context: context)
-        return view
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSVisualEffectView, context: Context) -> CGSize? {
-        // A background must accept its parent's size, never feed intrinsic sizing into split views.
-        proposal.replacingUnspecifiedDimensions(by: .zero)
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        if view.material != material { view.material = material }
-        if view.blendingMode != blendingMode { view.blendingMode = blendingMode }
-        if view.state != .active { view.state = .active }
-        if view.isEmphasized { view.isEmphasized = false }
+        (material == .windowBackground ? WorkbenchTheme.popup : WorkbenchTheme.sidebar)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -97,11 +122,12 @@ struct CapsulePicker<Value: Hashable>: View {
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 10).padding(.vertical, 8)
-                        .foregroundStyle(selection == option ? Color.white : Color.secondary)
+                        .foregroundStyle(selection == option ? WorkbenchTheme.ink : WorkbenchTheme.inkMuted)
                         .background {
                             if selection == option {
-                                Capsule().fill(Color(white: 0.17))
-                                    .shadow(color: .black.opacity(0.16), radius: 2, y: 1)
+                                Capsule().fill(WorkbenchTheme.popup)
+                                    .overlay(Capsule().strokeBorder(WorkbenchTheme.popupBorder))
+                                    .shadow(color: WorkbenchTheme.shadow.opacity(0.25), radius: 2, y: 1)
                             }
                         }
                         .contentShape(Capsule())
@@ -121,8 +147,8 @@ struct WorkbenchTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration.textFieldStyle(.plain)
             .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(WorkbenchTheme.border))
+            .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+            .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small).strokeBorder(WorkbenchTheme.border))
     }
 }
 
@@ -137,15 +163,17 @@ private struct SidebarNavigationBody: View {
     let configuration: ButtonStyleConfiguration
     let selected: Bool
     @State private var hovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         configuration.label
             .foregroundStyle(WorkbenchTheme.sidebarInk)
-            .padding(.horizontal, 8).padding(.vertical, 7)
+            .padding(.horizontal, 8).padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-            .background(Color.primary.opacity(selected ? 0.065 : hovered ? 0.035 : 0), in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+            .background(selected ? WorkbenchTheme.selected : hovered ? WorkbenchTheme.hover : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
             .opacity(configuration.isPressed ? 0.7 : 1)
             .onHover { hovered = $0 }
+            .animation(Motion.animation(Motion.hover, reduce: reduceMotion), value: hovered)
     }
 }
 
@@ -190,11 +218,11 @@ private struct WorkbenchButtonBody: View {
             .font(.callout.weight(.medium))
             .padding(.horizontal, 12).padding(.vertical, 7)
             .foregroundStyle(prominent ? WorkbenchTheme.onInk : WorkbenchTheme.ink)
-            .background(prominent ? WorkbenchTheme.primaryButton : hovered && enabled ? WorkbenchTheme.sidebar : WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+            .background(prominent ? WorkbenchTheme.primaryButton : hovered && enabled ? WorkbenchTheme.hover : WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(prominent ? .clear : WorkbenchTheme.border))
             .opacity(!enabled ? 0.4 : configuration.isPressed ? 0.72 : 1)
             .onHover { hovered = $0 }
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: hovered)
+            .animation(Motion.animation(Motion.hover, reduce: reduceMotion), value: hovered)
     }
 }
 
@@ -211,7 +239,7 @@ private struct QuietButtonBody: View {
             .font(.callout.weight(.medium))
             .padding(7)
             .contentShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
-            .background(hovered && enabled ? Color.primary.opacity(0.055) : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+            .background(hovered && enabled ? WorkbenchTheme.hover : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
             .opacity(enabled ? (configuration.isPressed ? 0.6 : 1) : 0.35)
             .onHover { hovered = $0 }
     }

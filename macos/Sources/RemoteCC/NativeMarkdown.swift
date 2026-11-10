@@ -58,7 +58,7 @@ import RemoteCCCore
         return style
     }
     private static func attributes(size: CGFloat = 13, bold: Bool = false) -> [NSAttributedString.Key: Any] {
-        [.font: NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular), .foregroundColor: NSColor(WorkbenchTheme.ink)]
+        [.font: NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular), .foregroundColor: NSTheme.text]
     }
     private static func inline(_ node: UnsafeMutablePointer<cmark_node>, attributes attrs: [NSAttributedString.Key: Any]) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
@@ -69,9 +69,10 @@ import RemoteCCCore
         case "softbreak": return NSAttributedString(string: " ", attributes: attrs)
         case "linebreak": return NSAttributedString(string: "\n", attributes: attrs)
         case "code":
-            attrs[.font] = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+            attrs[.font] = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+            attrs[.foregroundColor] = ThemeStore.syntaxColor(.string)
             let text = literal(node)
-            if text.count < 80 { attrs[.backgroundColor] = NSColor(WorkbenchTheme.sidebar) }
+            if text.count < 80 { attrs[.backgroundColor] = NSTheme.surface }
             return NSAttributedString(string: text, attributes: attrs)
         case "strong", "emph":
             let font = attrs[.font] as? NSFont ?? NSFont.systemFont(ofSize: 13)
@@ -80,7 +81,7 @@ import RemoteCCCore
         case "link", "image":
             if let value = cmark_node_get_url(node) {
                 let raw = String(cString: value)
-                if let url = link(raw) { attrs[.link] = url; attrs[.foregroundColor] = NSColor(WorkbenchTheme.accent) }
+                if let url = link(raw) { attrs[.link] = url; attrs[.foregroundColor] = NSTheme.accent }
             }
         default: break
         }
@@ -141,10 +142,10 @@ import RemoteCCCore
             case "block_quote": for child in children(node) { walk(child, depth: depth, quote: true) }
             case "code_block":
                 flush()
-                let codeStyle = style(); codeStyle.paragraphSpacing = 0; codeStyle.lineSpacing = 3
-                let value = NSAttributedString(string: literal(node), attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular), .foregroundColor: NSColor(WorkbenchTheme.ink), .paragraphStyle: codeStyle])
-                let width = min(16000, max(120, value.string.components(separatedBy: "\n").map { ($0 as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)]).width }.max() ?? 120) + 8)
                 let language = cmark_node_get_fence_info(node).map { String(cString: $0).split(separator: " ").first.map(String.init) ?? "" } ?? ""
+                // Coloured by the fence language; an unknown or missing one stays plain.
+                let value = CodeStyle.attributed(literal(node), grammar: SyntaxGrammar.named(language))
+                let width = min(16000, max(120, value.string.components(separatedBy: "\n").map { ($0 as NSString).size(withAttributes: [.font: CodeStyle.font]).width }.max() ?? 120) + 8)
                 blocks.append(Block(id: blocks.count, kind: .code, content: value, language: language, width: width))
             case "table": table(node)
             case "thematic_break":
@@ -166,8 +167,8 @@ import RemoteCCCore
                     cellBlock.setValue(100 / CGFloat(columns), type: .percentageValueType, for: .width)
                     cellBlock.setWidth(8, type: .absoluteValueType, for: .padding)
                     cellBlock.setWidth(0.5, type: .absoluteValueType, for: .border)
-                    cellBlock.setBorderColor(NSColor(WorkbenchTheme.border))
-                    if rowIndex == 0 { cellBlock.backgroundColor = NSColor(WorkbenchTheme.sidebar) }
+                    cellBlock.setBorderColor(NSTheme.border)
+                    if rowIndex == 0 { cellBlock.backgroundColor = NSTheme.surface }
                     let p = style(); p.textBlocks = [cellBlock]; p.paragraphSpacing = 0
                     if column < columns, let alignment = alignments?[column] {
                         if alignment == 99 { p.alignment = .center }

@@ -495,7 +495,7 @@ struct EditorContent: View {
                         .textSelection(.enabled).padding(20).frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
-                CodeTextView(text: preview.text ?? "", line: tab.line)
+                CodeTextView(text: preview.text ?? "", line: tab.line, path: tab.path)
             }
         case "image":
             if let data = preview.data, let image = NSImage(data: data) {
@@ -524,13 +524,15 @@ struct PDFContent: NSViewRepresentable {
     final class Coordinator { var shown: Data? }
 }
 
-/// AppKit's text system handles megabyte files that a SwiftUI Text cannot.
+/// AppKit's text system handles megabyte files that a SwiftUI Text cannot. Code is coloured by
+/// file type, and line numbers live in a ruler so copied text never contains them.
 struct CodeTextView: NSViewRepresentable {
     let text: String
     let line: Int?
+    var path: String = ""
 
     func makeCoordinator() -> Coordinator { Coordinator() }
-    final class Coordinator { var text: String?; var line: Int? }
+    final class Coordinator { var text: String?; var line: Int?; var path: String? }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -538,49 +540,116 @@ struct CodeTextView: NSViewRepresentable {
         let view = scroll.documentView as! NSTextView
         view.drawsBackground = false
         view.isEditable = false; view.isSelectable = true; view.isRichText = false
-        view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        view.textContainerInset = NSSize(width: 8, height: 10)
+        view.font = CodeStyle.font
+        view.textContainerInset = NSSize(width: 10, height: 10)
+        view.selectedTextAttributes = [.backgroundColor: NSTheme.selection]
         // Long lines scroll rather than wrap, so line numbers from Claude stay meaningful.
         view.isHorizontallyResizable = true
         view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         view.textContainer?.widthTracksTextView = false
         view.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         scroll.hasHorizontalScroller = true
+        let ruler = LineNumberRuler(textView: view, scrollView: scroll)
+        scroll.verticalRulerView = ruler
+        scroll.hasVerticalRuler = true
+        scroll.rulersVisible = true
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let view = scroll.documentView as? NSTextView else { return }
+        guard let view = scroll.documentView as? NSTextView, let ruler = scroll.verticalRulerView as? LineNumberRuler else { return }
         // Updates arrive constantly while Claude works; only real changes may move the view.
-        guard context.coordinator.text != text || context.coordinator.line != line else { return }
-        let lineChanged = context.coordinator.line != line
-        context.coordinator.text = text; context.coordinator.line = line
-        let numbered = numberedText()
-        let visible = scroll.contentView.bounds.origin
-        view.string = numbered
-        guard lineChanged, let line, line > 0 else { scroll.contentView.scroll(to: visible); return }
-        var index = numbered.startIndex
-        for _ in 1..<line {
-            guard let newline = numbered[index...].firstIndex(of: "\n") else { break }
-            index = numbered.index(after: newline)
+        let coordinator = context.coordinator
+        guard coordinator.text != text || coordinator.line != line || coordinator.path != path else { return }
+        let lineChanged = coordinator.line != line
+        if coordinator.text != text || coordinator.path != path {
+            let visible = scroll.contentView.bounds.origin
+            view.textStorage?.setAttributedString(CodeStyle.attributed(text, grammar: SyntaxGrammar.forFile(path)))
+            ruler.reload()
+            scroll.contentView.scroll(to: visible)
+            scroll.reflectScrolledClipView(scroll.contentView)
         }
-        let location = NSRange(index..<index, in: numbered).location
-        let lineRange = (numbered as NSString).lineRange(for: NSRange(location: location, length: 0))
+        coordinator.text = text; coordinator.line = line; coordinator.path = path
+        ruler.activeLine = line
+        guard lineChanged, let line, line > 0, let range = ruler.range(ofLine: line) else { return }
         DispatchQueue.main.async {
-            view.scrollRangeToVisible(lineRange)
-            view.setSelectedRange(lineRange)
+            view.scrollRangeToVisible(range)
+            view.setSelectedRange(range)
         }
     }
+}
 
-    private func numberedText() -> String {
-        let lines = text.components(separatedBy: "\n")
-        let width = String(lines.count).count
-        // Beyond this size the gutter costs more than it helps.
-        guard lines.count < 50_000 else { return text }
-        return lines.enumerated().map { index, line in
-            let number = String(index + 1)
-            return String(repeating: " ", count: width - number.count) + number + "  " + line
-        }.joined(separator: "\n")
+/// Draws line numbers beside a non-wrapping text view, using the same font and line height so
+/// every number sits on its line's baseline.
+final class LineNumberRuler: NSRulerView {
+    private weak var textView: NSTextView?
+    private var lineStarts: [Int] = [0]
+    var activeLine: Int? { didSet { if activeLine != oldValue { needsDisplay = true } } }
+
+    init(textView: NSTextView, scrollView: NSScrollView) {
+        self.textView = textView
+        super.init(scrollView: scrollView, orientation: .verticalRuler)
+        clientView = textView
+        ruleThickness = 40
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+    }
+    required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    override var isFlipped: Bool { true }
+    @objc private func scrolled() { needsDisplay = true }
+
+    /// Re-indexes line starts after the text changes.
+    func reload() {
+        var starts = [0]
+        if let text = textView?.string {
+            var index = 0
+            for unit in text.utf16 { index += 1; if unit == 10 { starts.append(index) } }
+        }
+        lineStarts = starts
+        let digits = max(2, String(starts.count).count)
+        let width = ("8" as NSString).size(withAttributes: [.font: CodeStyle.font]).width
+        ruleThickness = ceil(CGFloat(digits) * width + 22)
+        needsDisplay = true
+    }
+
+    /// The character range of a 1-based line, without its line break.
+    func range(ofLine line: Int) -> NSRange? {
+        guard line >= 1, line <= lineStarts.count, let length = (textView?.string as NSString?)?.length else { return nil }
+        let start = lineStarts[line - 1]
+        let end = line < lineStarts.count ? lineStarts[line] - 1 : length
+        return NSRange(location: start, length: max(0, end - start))
+    }
+
+    override func drawHashMarksAndLabels(in rect: NSRect) {
+        NSTheme.card.setFill(); bounds.fill()
+        NSTheme.border.setFill(); NSRect(x: bounds.maxX - 1, y: bounds.minY, width: 1, height: bounds.height).fill()
+        guard let textView, let layout = textView.layoutManager, let container = textView.textContainer else { return }
+        let length = (textView.string as NSString).length
+        let paragraph = CodeStyle.paragraph(); paragraph.alignment = .right
+        let origin = textView.textContainerOrigin
+        func draw(_ number: Int, fragment: NSRect) {
+            let top = convert(NSPoint(x: 0, y: fragment.minY + origin.y), from: textView).y
+            let attributes: [NSAttributedString.Key: Any] = [.font: CodeStyle.font, .paragraphStyle: paragraph, .baselineOffset: CodeStyle.baselineOffset(CodeStyle.font),
+                                                             .foregroundColor: number == activeLine ? NSTheme.gutterActive : NSTheme.gutter]
+            NSAttributedString(string: String(number), attributes: attributes)
+                .draw(in: NSRect(x: 0, y: top, width: ruleThickness - 12, height: fragment.height))
+        }
+        guard length > 0 else { draw(1, fragment: layout.extraLineFragmentRect); return }
+        let glyphs = layout.glyphRange(forBoundingRect: textView.visibleRect, in: container)
+        let characters = layout.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        // The first visible line: the last start at or before the first visible character.
+        var low = 0, high = lineStarts.count - 1
+        while low < high { let mid = (low + high + 1) / 2; if lineStarts[mid] <= characters.location { low = mid } else { high = mid - 1 } }
+        var line = low
+        while line < lineStarts.count, lineStarts[line] <= NSMaxRange(characters) {
+            let start = lineStarts[line]
+            let fragment = start >= length ? layout.extraLineFragmentRect
+                : layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: start), effectiveRange: nil)
+            draw(line + 1, fragment: fragment)
+            line += 1
+        }
     }
 }
 #endif
