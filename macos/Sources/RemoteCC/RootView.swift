@@ -27,8 +27,8 @@ struct RootView: View {
                             }
                             .transition(.move(edge: .leading).combined(with: .opacity))
                     }
+                    // WorkArea draws its own cards: chat, editor and files are separate islands.
                     WorkArea().frame(minWidth: 340, maxWidth: .infinity)
-                        .islandCard()
                     if model.showSessionDetails && model.active != nil {
                         SessionDetailsView().frame(width: 270)
                             .islandCard(WorkbenchTheme.sidebar)

@@ -317,3 +317,28 @@ public final class Workspace {
         (try await files.run(config, "suggest", ["query": .string(query)])["files"] ?? []).array?.compactMap { try? $0.decode(FileEntry.self) } ?? []
     }
 }
+
+#if DEBUG
+extension Workspace {
+    /// Documentation fixtures only: a file tree and open tabs without a server.
+    public func seedPreview(root: String, rows: [(entry: FileEntry, depth: Int, expanded: Bool, git: String?)], files: [FilePreview], diff: (path: String, text: String)?, active: String?, git: GitStatus?) {
+        self.root = root
+        self.rows = rows.map { TreeRow(entry: $0.entry, depth: $0.depth, expanded: $0.expanded, gitCode: $0.git, touched: false) }
+        self.gitStatus = git
+        var opened: [EditorTab] = files.map { file in
+            let tab = EditorTab(id: file.path, path: file.path, isDiff: false)
+            tab.preview = file
+            return tab
+        }
+        if let diff {
+            let tab = EditorTab(id: "diff:" + diff.path, path: diff.path, isDiff: true)
+            tab.diffText = diff.text
+            opened.append(tab)
+        }
+        tabs = opened
+        activeTabId = active
+        footer = "\(rows.count) 项"
+        onChange?()
+    }
+}
+#endif

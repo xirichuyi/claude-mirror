@@ -14,8 +14,9 @@ struct WorkArea: View {
             let hasEditor = workspace?.activeTab != nil
             let hasFiles = model.showFiles && model.active != nil
             let hasWorkspace = hasEditor || hasFiles
+            // Each area is its own card on the window frame, as in the reference layout.
             if !hasWorkspace {
-                ChatView()
+                ChatView().islandCard()
             } else if geometry.size.width < 720 {
                 VStack(spacing: 0) {
                     CapsulePicker(label: "显示区域", options: [true, false], selection: $showingChat) {
@@ -23,16 +24,16 @@ struct WorkArea: View {
                     }.padding(10)
                     if showingChat { ChatView() }
                     else { workspacePane(workspace, hasFiles: hasFiles) }
-                }
+                }.islandCard()
             } else {
-                HStack(spacing: 0) {
-                    ChatView().frame(minWidth: 340, maxWidth: .infinity)
+                HStack(spacing: WorkbenchTheme.Island.gap) {
+                    ChatView().frame(minWidth: 340, maxWidth: .infinity).islandCard()
                     if hasWorkspace {
                         if geometry.size.width >= 1080 {
-                            if let workspace, hasEditor { EditorPane(workspace: workspace).frame(minWidth: 360, maxWidth: .infinity) }
-                            if hasFiles { FilePanel().frame(minWidth: 230, idealWidth: 260, maxWidth: 340) }
+                            if let workspace, hasEditor { EditorPane(workspace: workspace).frame(minWidth: 360, maxWidth: .infinity).islandCard() }
+                            if hasFiles { FilePanel().frame(minWidth: 230, idealWidth: 260, maxWidth: 340).islandCard(WorkbenchTheme.sidebar) }
                         } else {
-                            workspacePane(workspace, hasFiles: hasFiles).frame(minWidth: 320, maxWidth: .infinity)
+                            workspacePane(workspace, hasFiles: hasFiles).frame(minWidth: 320, maxWidth: .infinity).islandCard()
                         }
                     }
                 }

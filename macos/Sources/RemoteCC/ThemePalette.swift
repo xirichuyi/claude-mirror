@@ -146,8 +146,15 @@ enum ThemeStore {
         NSColor(name: nil) { appearance in token(palette(for: appearance)) }
     }
 
-    /// Syntax colours stay dynamic, so cached highlighted text follows theme changes.
-    static func syntaxColor(_ kind: SyntaxKind?) -> NSColor { dynamic { $0.color(kind) } }
+    /// Syntax colours stay dynamic, so cached highlighted text follows theme changes. They are
+    /// created once: equal source must render to equal attributed text, or views that compare
+    /// it to skip updates would re-render every streamed code block.
+    private static let syntaxColors: [String: NSColor] = {
+        var table = ["": dynamic { $0.color(nil) }]
+        for kind in SyntaxKind.allCases { table[kind.rawValue] = dynamic { $0.color(kind) } }
+        return table
+    }()
+    static func syntaxColor(_ kind: SyntaxKind?) -> NSColor { syntaxColors[kind?.rawValue ?? ""]! }
 }
 
 /// AppKit-side tokens for attributed text; like the SwiftUI ones they resolve on every draw.
