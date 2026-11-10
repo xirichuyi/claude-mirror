@@ -419,7 +419,7 @@ const PROJECTS = () => path.join(CLAUDE_ROOT(), 'projects');
 const INDEX_DIRECTORY = () => path.join(CLAUDE_ROOT(), 'remotecc-index');
 const SESSION_FILE = /^[0-9a-fA-F-]{36}\.jsonl$/;
 const WINDOW = 65536, MAX_LINE = 16 * MEGABYTE;
-const listSnapshots = new Map();
+const listSnapshots = new Map(), MAX_LIST_SNAPSHOTS = 4;
 
 async function atomicJSON(filename, value) {
   const temporary = `${filename}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
@@ -534,6 +534,8 @@ async function historyList(request) {
     snapshot = { created: now, rows: rows.filter(Boolean), errors };
     token = crypto.randomBytes(16).toString('hex');
     listSnapshots.set(token, snapshot);
+    // Each refresh holds every session row; keep only the newest few so repeated refreshes cannot grow memory.
+    while (listSnapshots.size > MAX_LIST_SNAPSHOTS) listSnapshots.delete(listSnapshots.keys().next().value);
   }
   const end = position + 200;
   return { sessions: snapshot.rows.slice(position, end), nextOffset: end < snapshot.rows.length ? token + ':' + end : null,
@@ -582,8 +584,33 @@ async function forEachLine(source, start, limit, visit, chunkSize = MEGABYTE) {
   }
 }
 
-async function indexedHistory(reference, source) {
+// The on-disk index is only a cache: a stale copy is extended from its last complete line, so
+// appends are written at most once per INDEX_PERSIST_DELAY instead of on every read of a live session.
+const INDEX_PERSIST_DELAY = 5000, MAX_INDEX_NODES = 500000;
+const indexBuilds = new Map(), indexWrites = new Map();
+
+function persistIndex(filename, index, immediate) {
+  const write = async () => {
+    indexWrites.delete(filename);
+    // Not recursive: a delayed write must not recreate a Claude config directory removed meanwhile.
+    await fsp.mkdir(path.dirname(filename), { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+    await atomicJSON(filename, { ...index, nodes: [...index.nodes.values()] });
+  };
+  if (immediate) { clearTimeout(indexWrites.get(filename)); return write(); }
+  if (indexWrites.has(filename)) return;
+  const timer = setTimeout(() => { write().catch(() => { /* Cache only; rebuilt on demand. */ }); }, INDEX_PERSIST_DELAY);
+  timer.unref?.();
+  indexWrites.set(filename, timer);
+}
+
+// Concurrent reads of one transcript share a single build; the index object is mutated in place.
+function indexedHistory(reference, source) {
   const key = crypto.createHash('sha256').update(reference).digest('hex');
+  if (!indexBuilds.has(key)) indexBuilds.set(key, buildHistoryIndex(key, source).finally(() => indexBuilds.delete(key)));
+  return indexBuilds.get(key);
+}
+
+async function buildHistoryIndex(key, source) {
   const filename = path.join(INDEX_DIRECTORY(), key + '.json');
   const info = await source.stat({ bigint: true });
   const signature = `${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
@@ -597,6 +624,7 @@ async function indexedHistory(reference, source) {
   // Reuse only complete lines, checking both ends of the previously indexed prefix.
   const append = index && index.inode === String(info.ino) && size > index.size && await prefixFingerprint(source, index.end) === index.fingerprint;
   if (!append) index = { nodes: new Map(), leaf: null, cwd: '', skipped: 0, end: 0 };
+  let tooLarge = false;
   await forEachLine(source, index.end, size, (position, line, end) => {
     index.end = end;
     let row = null;
@@ -607,13 +635,17 @@ async function indexedHistory(reference, source) {
       const visible = (row.type === 'user' || row.type === 'assistant') && !row.isMeta ? 1 : 0;
       index.nodes.set(row.uuid, [row.uuid, row.parentUuid ?? null, position, visible]);
       if (visible) index.leaf = row.uuid;
+      // Stop while reading rather than after the whole transcript is already held in memory.
+      if (index.nodes.size > MAX_INDEX_NODES) { tooLarge = true; return false; }
     }
   });
-  if (index.nodes.size > 500000) throw new Error('历史记录过大，当前预览最多索引 50 万条记录');
+  if (tooLarge) {
+    historyIndexes.delete(key); // A partly extended index must not be reused.
+    throw new Error('历史记录过大，当前预览最多索引 50 万条记录');
+  }
   Object.assign(index, { signature, inode: String(info.ino), size, fingerprint: await prefixFingerprint(source, index.end) });
   rememberIndex(key, index);
-  await fsp.mkdir(INDEX_DIRECTORY(), { recursive: true, mode: 0o700 });
-  await atomicJSON(filename, { ...index, nodes: [...index.nodes.values()] });
+  await persistIndex(filename, index, !append);
   return index;
 }
 
@@ -710,19 +742,22 @@ async function trashProjectHistory(request) {
       request.directory.includes('\0')) throw new Error('需要远端绝对目录');
   const directory = path.normalize(request.directory);
   const entries = await historyEntries();
-  const selected = [];
-  for (const entry of entries) {
-    const data = await summarize(entry.reference, entry.size, entry.modified);
-    if (data.directory && path.normalize(data.directory) === directory) selected.push(entry);
-  }
+  // Unchanged transcripts reuse the listing cache's summary instead of being reread one by one.
+  const cache = await readJSON(path.join(INDEX_DIRECTORY(), 'listing.json')).catch(() => ({}));
+  const summaries = await mapLimit(entries, 16, entry => {
+    const known = cache[entry.reference];
+    return known?.signature === entry.signature ? known.data : summarize(entry.reference, entry.size, entry.modified);
+  });
+  const selected = entries.filter((entry, index) => summaries[index].directory && path.normalize(summaries[index].directory) === directory);
   if (!selected.length) return { count: 0, references: [] };
   // Refuse deletion while any client-owned worker for this directory is alive.
   const tasks = await fsp.readdir(TASKS, { withFileTypes: true }).catch(() => []);
   for (const task of tasks.filter(item => item.isDirectory())) {
     const folder = path.join(TASKS, task.name);
     if (!ownerAlive(folder)) continue;
-    const original = await readJSON(path.join(folder, 'request.json'));
-    if (original.session?.directory === directory) throw new Error('请先停止此项目的远端任务');
+    const original = await readJSON(path.join(folder, 'request.json')).catch(() => null);
+    // A live task whose request cannot be read might belong to this project; refuse rather than guess.
+    if (!original || original.session?.directory === directory) throw new Error('请先停止此项目的远端任务');
   }
   const trash = path.join(path.dirname(PROJECTS()), 'remotecc-trash', crypto.randomUUID());
   await fsp.mkdir(trash, { recursive: true, mode: 0o700 });
@@ -1035,7 +1070,9 @@ async function watchTask(taskId, emit, token) {
           let packet = state;
           if (previous) {
             const delta = { delta: true, base: version, version: state.version, patches: stateDelta(previous, state) };
-            if (JSON.stringify(delta).length < JSON.stringify(state).length) packet = delta;
+            // state.json is compact JSON, so its byte size stands in for the full packet without
+            // serializing the whole state again on every streamed update.
+            if (JSON.stringify(delta).length < Number(info.size)) packet = delta;
           }
           emit(packet);
           version = state.version; previous = state;

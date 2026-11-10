@@ -37,7 +37,8 @@ class ChatService extends EventEmitter {
       this.store.save(this.sessions, session);
       this.emit('changed', session);
     } else if (!this.timers.has(session.id)) {
-      this.timers.set(session.id, setTimeout(() => this.changed(session, true), 50));
+      // A host may stretch the coalescing window (the remote worker does for large states).
+      this.timers.set(session.id, setTimeout(() => this.changed(session, true), this.streamDelay?.(session) ?? 50));
     }
   }
 

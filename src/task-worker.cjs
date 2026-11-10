@@ -14,13 +14,20 @@ const folder = process.argv[2];
 const request = JSON.parse(fs.readFileSync(path.join(folder, 'request.json'), 'utf8'));
 const session = request.session;
 session.permissions = [];
-let version = 0, ended = false, hibernating = false;
+let version = 0, ended = false, hibernating = false, stateBytes = 0;
 function atomic(filename, value) {
-  fs.writeFileSync(filename + '.tmp', JSON.stringify(value), { mode: 0o600 });
+  const data = JSON.stringify(value);
+  fs.writeFileSync(filename + '.tmp', data, { mode: 0o600 });
   fs.renameSync(filename + '.tmp', filename);
+  return data.length;
 }
+// Every streamed update rewrites the whole state, and each watcher parses and diffs it. Past
+// 256 KB, widen the coalescing window in proportion so a long reply costs ~5 MB/s at most
+// instead of growing per 50 ms tick. Approvals and completion are always written immediately.
+const STREAM_BYTES = 256 * 1024;
+const streamDelay = () => Math.min(1000, Math.max(50, Math.round(50 * stateBytes / STREAM_BYTES)));
 function snapshot() {
-  atomic(path.join(folder, 'state.json'), { version: ++version, done: ended, resident: true, hibernated: hibernating,
+  stateBytes = atomic(path.join(folder, 'state.json'), { version: ++version, done: ended, resident: true, hibernated: hibernating,
     status: session.status, permissions: session.permissions, message: session.messages.at(-1),
     remoteSessionId: session.remoteSessionId, model: session.model, preferences: session.preferences,
     capabilities: session.capabilities, tools: session.tools, plugins: session.plugins,
@@ -29,6 +36,7 @@ function snapshot() {
 session.tasks = []; // Background task membership belongs to this SDK process.
 const service = new ChatService({ load: () => [session], save: snapshot });
 service.closing = true;
+service.streamDelay = streamDelay;
 service.spawn = (_session, options, onError) => {
   const child = spawn(service.claudeExecutable, options.args, { cwd: session.directory, stdio: ['pipe', 'pipe', 'pipe'], env: options.env, signal: options.signal });
   child.stderr.setEncoding('utf8'); child.stderr.on('data', onError); return child;
@@ -97,33 +105,81 @@ async function control(command) {
   if (command.kind === 'close') { input.close(); query.close(); return {}; }
   throw new Error('未知会话请求');
 }
+const commandDirectory = path.join(folder, 'commands');
+const inFlight = new Set(), stopping = new Set();
+async function execute(name, command) {
+  const filename = path.join(commandDirectory, name);
+  inFlight.add(name);
+  try {
+    // A bad command must never block later answers or stop requests.
+    if (!fs.existsSync(filename + '.result')) {
+      let result;
+      try { result = { ok: true, value: await control(command ?? JSON.parse(fs.readFileSync(filename, 'utf8'))) }; }
+      catch (error) { result = { ok: false, error: error.message }; }
+      atomic(filename + '.result', result);
+    }
+    fs.renameSync(filename, filename + '.done');
+  } finally { inFlight.delete(name); }
+}
+// Approvals and stop must not wait behind a slow control (plugin reload, MCP status, catalogue).
+// An answer can always go ahead; a stop goes ahead unless an earlier send is still queued,
+// because overtaking that send would stop nothing and let the new turn run.
+function overtakes(command, earlierSend) {
+  return command?.kind === 'respond' || (command?.kind === 'stop' && !earlierSend);
+}
 let rerun = false;
 async function commands() {
   if (!query) return;
+  const ordered = [];
+  let earlierSend = false;
+  for (const name of fs.readdirSync(commandDirectory).sort()) {
+    if (!name.endsWith('.json') || inFlight.has(name)) continue;
+    let command = null;
+    try { command = JSON.parse(fs.readFileSync(path.join(commandDirectory, name), 'utf8')); } catch { /* Reported by execute. */ }
+    if (overtakes(command, earlierSend)) {
+      const done = execute(name, command).catch(error => console.error(error.message));
+      if (command.kind === 'stop') { stopping.add(done); void done.finally(() => stopping.delete(done)); }
+    } else {
+      if (command?.kind === 'send') earlierSend = true;
+      ordered.push([name, command]);
+    }
+  }
   if (handling) { rerun = true; return; }
   handling = true;
   try {
-    for (const name of fs.readdirSync(path.join(folder, 'commands')).sort()) {
-      if (!name.endsWith('.json')) continue;
-      const filename = path.join(folder, 'commands', name);
-      // A bad command must never block later answers or stop requests.
-      if (!fs.existsSync(filename + '.result')) {
-        let result;
-        try { result = { ok: true, value: await control(JSON.parse(fs.readFileSync(filename, 'utf8'))) }; }
-        catch (error) { result = { ok: false, error: error.message }; }
-        atomic(filename + '.result', result);
-      }
-      fs.renameSync(filename, filename + '.done');
+    for (const [name, command] of ordered) {
+      if (inFlight.has(name) || !fs.existsSync(path.join(commandDirectory, name))) continue;
+      // A send queued after a stop starts only once that stop has finished.
+      if (command?.kind === 'send') await Promise.all(stopping);
+      await execute(name, command);
     }
   } finally { handling = false; }
   if (rerun) { rerun = false; return commands(); }
+}
+// .done/.result files are replay tombstones: a retried command ID must not run twice. Keep them a
+// day, then remove them so a long-lived resident session does not rescan an ever-growing folder.
+const TOMBSTONE_AGE = 86400000;
+let lastPrune = 0;
+function pruneTombstones(now = Date.now()) {
+  if (now - lastPrune < 3600000) return;
+  lastPrune = now;
+  for (const name of fs.readdirSync(commandDirectory)) {
+    if (!name.endsWith('.json.done')) continue;
+    const filename = path.join(commandDirectory, name);
+    try {
+      if (now - fs.statSync(filename).mtimeMs < TOMBSTONE_AGE) continue;
+      fs.rmSync(filename.slice(0, -5) + '.result', { force: true });
+      fs.rmSync(filename, { force: true });
+    } catch { /* Removed concurrently. */ }
+  }
 }
 session.preferences ||= {};
 snapshot();
 const runCommands = async () => {
   try {
     await commands();
-    if (!query || handling || hibernating || ended) return;
+    pruneTombstones();
+    if (!query || handling || inFlight.size || hibernating || ended) return;
     if (idle.expired(session, service.runs.has(session.id))) {
       // Mark completion before closing the SDK, so reconnecting clients can resume
       // from remoteSessionId instead of sending into a dead command queue.
