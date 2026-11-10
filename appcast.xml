@@ -4,24 +4,34 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>claude-mirror</title>
         <item>
-            <title>0.21.4</title>
-            <pubDate>Fri, 06 Nov 2026 02:03:21 +0800</pubDate>
-            <sparkle:version>10</sparkle:version>
-            <sparkle:shortVersionString>0.21.4</sparkle:shortVersionString>
+            <title>0.22.1</title>
+            <pubDate>Tue, 10 Nov 2026 21:22:12 +0000</pubDate>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>0.22.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# claude-mirror v0.21.4
+            <description sparkle:format="markdown"><![CDATA[# Claude Mirror v0.22.1
 
-- 更换为深灰底、白色斜杠与方块的新图标。
-- 同步 macOS 应用图标、Windows 程序与安装程序图标、应用内品牌图及 README 展示图。
-- 功能与 v0.21.3 一致，包含远端预览加速、原生 Markdown 渲染、用量与额度保护、上下文缓存设置。
+本次界面与交互更新适用于 macOS；Windows 延续原生客户端界面，并随附本版远端代理。
 
-macOS 安装包适用于 Apple Silicon、macOS 14+，仍为 ad-hoc 签名，尚未经过 Apple 公证。Windows 为原生预览版。
+- 按 Winc 调整侧栏、图标、按钮、文件标签与菜单，右上角只保留同步、分支和导出。
+- 底栏显示账户、五小时及本周订阅用量；网络刷新失败时保留账户信息，明确标记用量不可用。
+- 聊天记录后台读取，快速切换合并同步请求；已打开文件直接切换，并保留最近三个预览视图。
+- 集成 Winc 原始预览解析与解码代码，支持图片、SVG、Markdown、CSV/TSV、XLSX/XLSM；PDF 沿用 PDFKit。
+- 修复聊天中的文件夹链接，恢复文件下载的直接入口，调整聊天布局与滚动跟随。
+
+发布流程已补齐 Pillow，并修复测试子进程的 Python 路径，确保缩略图测试在干净 CI 环境运行。
+
+验证：服务端 114 项测试通过；客户端测试发现的根目录旧断言已修正并复测。真实 SSH 上传下载、文件夹跳转、历史同步、重连、账户和两个额度周期复测通过；5 类 Winc 文件桥接测试通过。远端验证曾发生一次 SSH 断开，重试通过。
+
+已知限制：本轮最终 macOS 点击、滚动与连续切换的实机验收因锁屏未完成；Winc 预览的解析和解码已集成，尚不具备其全部显示交互（如表格合并单元格、公式和 Mermaid 渲染）。
+
+macOS 安装包适用于 Apple Silicon、macOS 14+，使用 ad-hoc 签名，尚未经过 Apple 公证。Windows 为原生预览版。
 ]]></description>
-            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.4/claude-mirror-0.21.4-macOS-arm64.dmg" length="6656293" type="application/octet-stream" sparkle:edSignature="6PUtmYNXtlTwQBij98HBhwm/gVDwIvwJeA0MUb3OtMXVNesHM7q8BA4Hsc3aNe2JUIFFlXs4IHLq4c+PxRvoDQ=="></enclosure>
+            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.22.1/claude-mirror-0.22.1-macOS-arm64.dmg" length="8643786" type="application/octet-stream" sparkle:edSignature="4fjcJitM2Mym5ArYYbpUbbyO3ePJBWXbig0T6fHPJMp3mJ8SkTmDYdCicdCahHgWrZqzD6eIYzLzowgQ0NMyCQ=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: TzMMESW2WdWqdWmqmn45clZiYV5hCsy5u1jv7UJ3oPlxjrg6GakKcnov994Ky7Q9yuIEFe20qRTI+w51BrkMBQ==
-length: 1691
+edSignature: vQtzdLl4BFLEqbdl/2dWMEAH576spcUhcMi0pb3sN/wuDf9EgR4nAfZ0ttGtEX6BoYlqASD6HR8u3vHtN6QKAg==
+length: 2786
 -->
