@@ -246,7 +246,8 @@ struct ComposerArea: View {
                 Spacer(minLength: 2)
                 Button { showingModels.toggle() } label: {
                     HStack(spacing: 4) {
-                        Text(changingModel ? "切换中…" : (displayed == "Default (recommended)" || displayed == "默认" || displayed == "default") ? "默认模型" : displayed).font(.system(size: 11)).lineLimit(1).frame(maxWidth: 100)
+                        let title = changingModel ? "切换中…" : (displayed == "Default (recommended)" || displayed == "默认" || displayed == "default") ? "默认模型" : displayed
+                        Text(title.count > 20 ? String(title.prefix(19)) + "…" : title).font(.system(size: 11)).lineLimit(1).fixedSize()
                         WorkbenchIcon(symbol: "chevron.down").font(.caption2)
                     }
                 }.buttonStyle(QuietButtonStyle()).disabled(!model.isConnected || changingModel)

@@ -7,7 +7,6 @@ struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showAllProjects = false
     @State private var searchExpanded = false
-    @State private var recentExpanded = false
     @FocusState private var searchFocused: Bool
 
     private var groups: [(key: String, sessions: [ChatSession])] {
@@ -40,26 +39,24 @@ struct SidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 6) {
-                HStack(spacing: 2) {
-                    Button { model.newConversation() } label: { WorkbenchIcon(symbol: "square.and.pencil") }
-                        .buttonStyle(WorkbenchIconButtonStyle()).help("新建对话（⌘N）").accessibilityLabel("新建对话")
-                        .disabled(model.currentConfig == nil)
-                    Button { model.openProjectPicker() } label: { WorkbenchIcon(symbol: "folder.badge.plus") }
-                        .buttonStyle(WorkbenchIconButtonStyle()).help("选择项目").accessibilityLabel("选择项目")
-                        .disabled(!model.isConnected)
-                    HistorySyncButton()
-                    Spacer(minLength: 0)
-                    Button { model.showActivity = true } label: {
-                        WorkbenchIcon(symbol: "bell")
-                            .overlay(alignment: .topTrailing) {
-                                if !model.attentionSessions.isEmpty { Circle().fill(WorkbenchTheme.accent).frame(width: 5, height: 5).offset(x: 3, y: -2) }
-                            }
-                    }.buttonStyle(WorkbenchIconButtonStyle()).help("所有机器的任务").accessibilityLabel("所有机器的任务")
+                // The most common action gets a label and its shortcut; search sits beside it.
+                HStack(spacing: 4) {
+                    Button { model.newConversation() } label: {
+                        HStack(spacing: 7) {
+                            WorkbenchIcon(symbol: "square.and.pencil")
+                            Text("新对话").font(.system(size: 13, weight: .medium))
+                            Spacer(minLength: 4)
+                            Text("⌘N").font(.system(size: 11)).foregroundStyle(WorkbenchTheme.inkDim)
+                        }
+                    }
+                    .buttonStyle(SidebarNavigationStyle())
+                    .disabled(model.currentConfig == nil)
+                    .help("新建对话（⌘N）").accessibilityLabel("新建对话")
                     Button {
                         if searchExpanded { closeSearch() }
                         else { searchExpanded = true }
                     } label: { WorkbenchIcon(symbol: "magnifyingglass") }
-                        .buttonStyle(WorkbenchIconButtonStyle()).help("搜索对话")
+                        .buttonStyle(WorkbenchIconButtonStyle(selected: searchExpanded)).help("搜索对话")
                         .accessibilityLabel("搜索对话")
                 }
                 if searchExpanded {
@@ -89,21 +86,7 @@ struct SidebarView: View {
                                 .buttonStyle(.borderless).foregroundStyle(WorkbenchTheme.inkMuted).font(.system(size: 12))
                                 .padding(.leading, 22).frame(height: 24)
                         }
-                    } header: { SidebarSectionHeader(title: model.showArchived ? "已归档 · 项目" : "项目") }
-                    if model.searchText.isEmpty && !model.showArchived {
-                        Section {
-                        SidebarDisclosure(expanded: $recentExpanded) { _ in
-                            HStack(spacing: 6) {
-                                WorkbenchIcon(symbol: "clock").font(.system(size: 11.5)).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 16)
-                                Text("最近对话").font(.system(size: 13, weight: .medium))
-                            }
-                        } content: {
-                            VStack(alignment: .leading, spacing: 1) {
-                                ProjectGroup(sessions: Array(model.machineSessions.filter { $0.archived != true && !model.projectMissing($0) }.sorted { $0.updatedAt > $1.updatedAt }.prefix(8)), searching: false, flat: true)
-                            }.padding(.leading, 16)
-                        }
-                        }
-                    }
+                    } header: { projectsHeader }
                 }
                 if !unavailableSessions.isEmpty {
                     Section {
@@ -128,6 +111,17 @@ struct SidebarView: View {
         }
         .background { FrostedBackground() }
         .foregroundStyle(WorkbenchTheme.sidebarInk)
+    }
+
+    /// Section title with its own actions, so they sit next to the list they change.
+    private var projectsHeader: some View {
+        HStack(spacing: 2) {
+            SidebarSectionHeader(title: model.showArchived ? "已归档 · 项目" : "项目")
+            Button { model.openProjectPicker() } label: { WorkbenchIcon(symbol: "folder.badge.plus") }
+                .buttonStyle(WorkbenchIconButtonStyle(size: 22)).help("打开或新建项目").accessibilityLabel("打开或新建项目")
+                .disabled(!model.isConnected)
+            HistorySyncButton()
+        }.padding(.trailing, 2).padding(.top, 4)
     }
 
     private func closeSearch() {

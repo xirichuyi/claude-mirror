@@ -102,7 +102,16 @@ struct WorkArea: View {
                 Button { splitEditor = false; model.focusChat() } label: { WorkbenchIcon(symbol: "sidebar.right") }
                     .buttonStyle(WorkbenchIconButtonStyle()).help("收起代码面板").accessibilityLabel("收起代码面板")
             }
+            sessionMenuButton
         }.padding(.horizontal, 12).frame(height: 40)
+    }
+
+    @ViewBuilder private var sessionMenuButton: some View {
+        if model.active != nil {
+            Button { model.sessionMenuVisible.toggle() } label: { WorkbenchIcon(symbol: "ellipsis") }
+                .buttonStyle(WorkbenchIconButtonStyle(selected: model.sessionMenuVisible))
+                .help("对话操作：同步、分支、导出").accessibilityLabel("对话操作")
+        }
     }
 
     private func tabs(_ workspace: Workspace?, hasEditor: Bool) -> some View {
@@ -131,7 +140,7 @@ struct WorkArea: View {
                 .help(splitEditor ? "切换为单栏（仅此按钮改变布局）" : "并排查看对话与文件")
                 .accessibilityLabel(splitEditor ? "切换为单栏" : "并排查看对话与文件")
                 .accessibilityAddTraits(splitEditor ? .isSelected : [])
-                .padding(.trailing, 7)
+            sessionMenuButton.padding(.trailing, 7)
         }.frame(height: 40)
     }
 }

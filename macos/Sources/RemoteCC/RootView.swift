@@ -7,7 +7,6 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @AppStorage("workspace.sidebarWidth") private var savedSidebarWidth: Double = 240
     @State private var sidebarWidth: Double = 240
-    @State private var sessionMenuVisible = false
     @AppStorage(ThemeStore.modeKey) private var themeMode = ThemeStore.Mode.system.rawValue
     @AppStorage(ThemeStore.darkKey) private var darkTheme = ThemePalette.midnight.id
     @AppStorage(ThemeStore.lightKey) private var lightTheme = ThemePalette.daylight.id
@@ -19,9 +18,11 @@ struct RootView: View {
                 ContentUnavailableView("无法启动", systemImage: "exclamationmark.triangle", description: Text(failure))
             } else {
                 VStack(spacing: 0) {
-                WorkspaceTopBar(sidebarVisible: $model.sidebarVisible, menuVisible: $sessionMenuVisible)
+                WorkspaceTopBar(sidebarVisible: $model.sidebarVisible)
                 HStack(spacing: WorkbenchTheme.Island.gap) {
                     VStack(spacing: 0) {
+                        // Where am I, then what am I looking at: machine first, then the view switcher.
+                        MachineSwitcher().padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 2)
                         WorkspaceSidebarTabs()
                         RetainedPaneLayout(selection: model.showFiles ? 1 : 0, parkInactive: false) {
                             SidebarView().sidebarPaneVisible(!model.showFiles && model.sidebarVisible)
@@ -53,15 +54,15 @@ struct RootView: View {
                 }
                 .background(WorkbenchTheme.frame)
                 .overlay(alignment: .topTrailing) {
-                    if sessionMenuVisible, let session = model.active {
+                    if model.sessionMenuVisible, let session = model.active {
                         ZStack(alignment: .topTrailing) {
                             Color.clear.contentShape(Rectangle()).onTapGesture { closeSessionMenu() }
                             SessionActionMenu(session: session, close: closeSessionMenu)
-                                .padding(.top, WorkbenchMetrics.header + 6).padding(.trailing, 10)
+                                .padding(.top, WorkbenchMetrics.header + 6 + 40).padding(.trailing, WorkbenchTheme.Island.margin + 8)
                         }
                     }
                 }
-                .onChange(of: model.active?.id) { sessionMenuVisible = false }
+                .onChange(of: model.active?.id) { model.sessionMenuVisible = false }
                 .ignoresSafeArea(.container, edges: .top)
             }
         }
@@ -107,7 +108,7 @@ struct RootView: View {
         .toggleStyle(WorkbenchToggleStyle())
     }
     private func closeSessionMenu() {
-        sessionMenuVisible = false
+        model.sessionMenuVisible = false
         model.focusWorkspace()
     }
 }
