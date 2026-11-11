@@ -40,8 +40,8 @@ struct WorkspaceStatusBar: View {
         HStack(spacing: 14) {
             HStack(spacing: 5) {
                 Circle().fill(model.isConnected ? WorkbenchTheme.sage : WorkbenchTheme.inkMuted.opacity(0.5)).frame(width: 6, height: 6)
-                Text(model.currentConfig.map { (model.isConnected ? "已连接 " : "未连接 ") + $0.displayName } ?? "未添加服务器")
-            }
+                Text(model.currentConfig == nil ? "未添加服务器" : model.isConnected ? "已连接" : "未连接")
+            }.help(model.currentConfig.map { $0.displayName + " · " + $0.host } ?? "")
             if let session = model.active {
                 Text(session.directory).lineLimit(1).truncationMode(.middle)
             }

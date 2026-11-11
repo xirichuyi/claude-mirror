@@ -22,7 +22,7 @@ struct RootView: View {
                 HStack(spacing: WorkbenchTheme.Island.gap) {
                     VStack(spacing: 0) {
                         // Where am I, then what am I looking at: machine first, then the view switcher.
-                        MachineSwitcher().padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 2)
+                        MachineSwitcher().frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 2)
                         WorkspaceSidebarTabs()
                         RetainedPaneLayout(selection: model.showFiles ? 1 : 0, parkInactive: false) {
                             SidebarView().sidebarPaneVisible(!model.showFiles && model.sidebarVisible)

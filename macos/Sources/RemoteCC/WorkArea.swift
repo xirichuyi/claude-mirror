@@ -21,7 +21,8 @@ struct WorkArea: View {
             VStack(spacing: 0) {
                 if !split {
                     if hasEditor { tabs(workspace, hasEditor: true) }
-                    else { conversationHeader(hasEditor: false) }
+                    // The machine page has its own heading; a second "新对话" bar above it is noise.
+                    else if model.active != nil { conversationHeader(hasEditor: false) }
                 }
                 RetainedPaneLayout(selection: chatVisible ? 0 : 1, split: split, fraction: fraction) {
                     VStack(spacing: 0) {

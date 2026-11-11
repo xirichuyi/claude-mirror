@@ -4,11 +4,9 @@ import RemoteCCCore
 struct WorkspaceTopBar: View {
     @EnvironmentObject private var model: AppModel
     @Binding var sidebarVisible: Bool
+    /// The machine is named at the top of the sidebar; the title only says which project.
     private var title: String {
-        let machine = model.currentConfig?.displayName
-        guard let session = model.active else { return machine ?? "Claude Mirror" }
-        let project = (session.directory as NSString).lastPathComponent
-        return machine.map { project + " · " + $0 } ?? project
+        model.active.map { ($0.directory as NSString).lastPathComponent } ?? "claude-mirror"
     }
     var body: some View {
         HStack(spacing: 6) {
