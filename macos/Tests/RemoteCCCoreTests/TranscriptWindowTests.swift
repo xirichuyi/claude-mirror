@@ -47,10 +47,13 @@ final class TranscriptWindowTests: XCTestCase {
         session.remoteOwner = RemoteOwner(id: "fixture", version: 0, messageId: "reply")
         store.save([session]); store.flush()
         let engine = try ChatEngine(store: store, agents: env.agents, files: env.files)
+        var initialized = false
+        engine.onChange = { initialized = true }
         try await engine.hydrateAsync(session.id)
+        initialized = false
         try engine.apply(session.id, state: ["version": 0, "status": "working", "resident": true,
             "message": ["id": "reply", "role": "assistant", "blocks": []]])
-        try await Task.sleep(for: .milliseconds(30))
+        try await eventually { initialized }
         var global = 0, transcript = 0
         engine.onChange = { global += 1 }
         engine.onTranscriptChange = { ids in
@@ -66,7 +69,7 @@ final class TranscriptWindowTests: XCTestCase {
         XCTAssertGreaterThan(transcript, 0)
         try engine.apply(session.id, state: ["version": 101, "status": "idle", "resident": true,
             "message": ["id": "reply", "role": "assistant", "blocks": [["type": "text", "text": "done"]]]])
-        try await Task.sleep(for: .milliseconds(40))
+        try await eventually { global == 1 }
         XCTAssertEqual(global, 1)
         XCTAssertEqual(engine.session(session.id)?.messages.last?.blocks?.last?.text, "done")
         engine.shutdown()
