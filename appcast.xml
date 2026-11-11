@@ -4,33 +4,35 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>claude-mirror</title>
         <item>
-            <title>0.23.1</title>
-            <pubDate>Wed, 11 Nov 2026 12:47:31 +0000</pubDate>
-            <sparkle:version>14</sparkle:version>
-            <sparkle:shortVersionString>0.23.1</sparkle:shortVersionString>
+            <title>0.23.2</title>
+            <pubDate>Wed, 11 Nov 2026 16:31:08 +0000</pubDate>
+            <sparkle:version>15</sparkle:version>
+            <sparkle:shortVersionString>0.23.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Claude Mirror v0.23.1
+            <description sparkle:format="markdown"><![CDATA[# v0.23.2
 
-合并 macOS 聊天性能修复与 macOS / Windows 首次连接引导。
+- 启动时恢复上次打开的聊天及其主机。
+- 主机切换和侧栏导航并排显示，精简主机菜单并修复重复点击无法关闭的问题。
+- 主机管理增加删除入口；保留聊天与远端文件，避免已移除的主机在重启时自动恢复。
+- 统一表单、按钮、菜单和图标；保留地球图标，账户使用缩写头像，用量显示为 5h / 7d。
+- 按设计系统、功能和持久化拆分界面代码，集中管理动画，统一支持减少动态效果。
+- 添加代码规范、格式检查与主机恢复回归测试。
 
-- 流式文本更新仅通知聊天区域；状态、审批和任务结束仍及时刷新界面。
-- 历史采用每页最多 30 条的重叠分页，可查看更早、较新消息并回到最新，避免持续加载造成视图堆积。
-- 长回复按完整段落分块，保留未变化正文的排版；修复按钮悬停、快速滚到底部时的重复刷新与跟随冲突。
-- 重启后恢复远端任务订阅，分别显示 SSH 连接、任务恢复和后台运行状态。
-- 首次连接增加 Node.js、Claude 安装与登录状态检查，提供安装、终端登录和免密配置入口；Windows 同步完善设置流程。
-- 保留 Winc 文件预览、下载、账户与订阅用量入口。
+验证：macOS 完整测试 144 项，9 项按环境跳过，0 失败；最终相关回归测试 5 项通过，格式检查及 release 构建通过。
 
-性能验证：Release 构建使用独立测试数据，在原生 SwiftUI/AppKit 视图中连续两分钟执行 1,313 次模拟输出更新，全局界面刷新为 0；3,000 条历史翻阅 150 页，原生文本视图最多 30 个。该测试不等同于真实模型或公网网络性能保证。
+## 上传记录（2026-11-12）
 
-macOS 安装包适用于 Apple Silicon、macOS 14+，使用 ad-hoc 签名，尚未经过 Apple 公证。Windows 为原生预览版。
-
-发布测试改为等待实际初始化回调，避免较慢 CI 机器因固定延时误报。
+- 构建提交：`b3cc6e2753d81ab7d3a354245e558c9a2c362811`，已推送至 `winc-style-ui`。
+- macOS arm64 DMG 与 `.sha256` 校验文件已上传至 GitHub Release 草稿，尚未正式发布或推送应用内更新。
+- DMG：`claude-mirror-0.23.2-macOS-arm64.dmg`，8,901,274 字节。
+- SHA-256：`6fce729d6c1119d417d32d34116271d4dfe06f1736d1f10470d2d706a54a7296`。
+- 上传时 [CI](https://github.com/xirichuyi/claude-mirror/actions/runs/43054726504) 仍在运行；本地测试通过不代表发布流水线已完成。正式发布状态以 [GitHub Releases](https://github.com/xirichuyi/claude-mirror/releases) 为准。
 ]]></description>
-            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.23.1/claude-mirror-0.23.1-macOS-arm64.dmg" length="8816462" type="application/octet-stream" sparkle:edSignature="0uPOh4OWeKsWr3ALmyklZthOz+q2jUAXThqWIYtan30i4To5BkZwIF/8Nu3ihDHU2g67ZeXVI2105LCOloL8BQ=="></enclosure>
+            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.23.2/claude-mirror-0.23.2-macOS-arm64.dmg" length="8898741" type="application/octet-stream" sparkle:edSignature="zMf5asV1d0FKpHxlDKO43aLzDTZFj6I+qPw+NRSRFPy6u8tku5YOcKGDN9hEHnxm+3ujibOA0nFeuSfXDy97AQ=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: pxKrGqet3vCdR6QSF2EGWAjtYZxupO3v/GPjc0KWhXXIWPtiL5GmmZc2jRq2AipoQ+oHrg8owL5crutOBg58DA==
-length: 2567
+edSignature: 3y5FA3fUVBXhahOmYDM3+2EI/3v+ENk36umOm0ngoJ+gA96wKLoQcaM/KtS17Ubm8R98j8LdLWso82GNmeE8DQ==
+length: 2636
 -->
