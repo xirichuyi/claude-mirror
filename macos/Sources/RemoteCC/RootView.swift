@@ -74,6 +74,14 @@ struct RootView: View {
             } else { loader = nil }
             await model.accountStore.observe(source: config?.key ?? "", loader: loader)
         }
+        .onAppear {
+            #if DEBUG
+            if Bundle.main.bundleIdentifier == "local.claudemirror.demo",
+               ProcessInfo.processInfo.environment["MIRROR_SCENE"] == "menu" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { sessionMenuVisible = true }
+            }
+            #endif
+        }
         .onAppear { sidebarWidth = min(360, max(200, savedSidebarWidth)); ThemeStore.apply() }
         .onChange(of: themeMode) { ThemeStore.apply() }
         // Palette changes keep the appearance, so force one redraw with the new colours.

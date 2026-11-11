@@ -38,6 +38,13 @@ struct SettingsSheet: View {
                 }
             }.frame(maxWidth: .infinity)
         }.frame(width: 720, height: 520)
+        .onAppear {
+            #if DEBUG
+            if Bundle.main.bundleIdentifier == "local.claudemirror.demo",
+               let requested = ProcessInfo.processInfo.environment["MIRROR_SETTINGS_SECTION"],
+               sections.contains(where: { $0.title == requested }) { section = requested }
+            #endif
+        }
     }
 
     private let sections = [(title: "主机", icon: "server.rack"), (title: "对话", icon: "bubble.left.and.bubble.right"),

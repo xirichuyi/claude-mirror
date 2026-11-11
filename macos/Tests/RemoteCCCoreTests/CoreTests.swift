@@ -61,7 +61,7 @@ final class AgentEnvironment {
     let files: RemoteFiles
     let config: ConnectionConfig
 
-    init(standIn: Bool = true) throws {
+    init(standIn: Bool = true, workerSource: String? = nil) throws {
         home = FileManager.default.temporaryDirectory.appendingPathComponent("rcc-swift-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         resourcesDirectory = home.appendingPathComponent("resources")
@@ -75,7 +75,7 @@ final class AgentEnvironment {
         _ = try run(node, [repository.appendingPathComponent("macos/scripts/prepare-server.cjs").path, resourcesDirectory.path])
         if standIn {
             let script = "const{createHash:c}=require('crypto'),z=require('zlib'),fs=require('fs');const d=Buffer.from(JSON.stringify({'task-worker.cjs':fs.readFileSync(0,'utf8')}));const m=JSON.parse(fs.readFileSync(process.argv[1]));m.bundleDigest=c('sha256').update(d).digest('hex');m.bundlePayload=z.gzipSync(d).toString('base64');fs.writeFileSync(process.argv[1],JSON.stringify(m));"
-            _ = try run(node, ["-e", script, resourcesDirectory.appendingPathComponent("manifest.json").path], input: Data(standInWorker.utf8))
+            _ = try run(node, ["-e", script, resourcesDirectory.appendingPathComponent("manifest.json").path], input: Data((workerSource ?? standInWorker).utf8))
         }
         launcher = LocalLauncher(home: home.path)
         agents = AgentClient(launcher: launcher, resources: try ServerResources(directory: resourcesDirectory))

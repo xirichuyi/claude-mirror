@@ -25,6 +25,12 @@ function atomic(filename, value) {
   fs.renameSync(filename + '.tmp', filename);
 }
 function snapshot() {
+  // Late permission/runtime callbacks can set "working" after a result ended the
+  // foreground turn. Background work is represented separately in session.tasks.
+  if (!service.runs.has(session.id) && !session.permissions.length &&
+      ['working', 'connecting', 'stopping'].includes(session.status)) {
+    session.status = run.stopped ? 'stopped' : 'idle';
+  }
   atomic(path.join(folder, 'state.json'), { version: ++version, done: ended, resident: true, hibernated: hibernating,
     status: session.status, permissions: session.permissions, message: session.messages.at(-1),
     remoteSessionId: session.remoteSessionId, model: session.model, preferences: session.preferences,
@@ -89,7 +95,12 @@ async function control(command) {
       run.stopped = true; session.status = 'stopping'; snapshot();
       for (const permission of [...session.permissions]) service.respond(session.id, permission.id, { allow: false });
       await query.interrupt();
-    }
+    } else if (['working', 'connecting', 'permission', 'stopping'].includes(session.status)) {
+      // A late SDK event can leave a stale busy label after the turn finished.
+      // Acknowledge stop with a fresh terminal snapshot, not a silent no-op.
+      run.stopped = true;
+      service.finish(session, run, true);
+    } else { snapshot(); }
     return {};
   }
   if (command.kind === 'respond') {
@@ -212,6 +223,10 @@ try { commandWatcher = fs.watch(path.join(folder, 'commands'), runCommands); com
   quotaCoordinator.release();
   ended = true; clearInterval(quotaTimer); clearInterval(timer); commandWatcher?.close(); input.close(); query?.close();
   if (service.runs.has(session.id)) service.finish(session, run, true);
+  else if (['working', 'connecting', 'permission', 'stopping'].includes(session.status)) {
+    run.stopped = true;
+    service.finish(session, run, true);
+  }
   for (const pending of service.timers.values()) clearTimeout(pending);
   snapshot();
 });

@@ -6,7 +6,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 
-test('worker exits after quiescence and retains the resumable Claude session', {timeout:10000}, async () => {
+for (const staleBusy of [false, true]) test(`worker exits after quiescence and retains the resumable Claude session (stale busy: ${staleBusy})`, {timeout:10000}, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),'mirror-idle-worker-'));
   let child;
   try {
@@ -23,7 +23,7 @@ test('worker exits after quiescence and retains the resumable Claude session', {
       constructor(store){this.store=store;this.runs=new Map();this.timers=new Map();}
       options(){return {}}
       consumeEvent(session,event){session.remoteSessionId='saved-session';session.messages.at(-1).blocks=[{type:'text',text:'finished'}];}
-      finish(session){this.runs.delete(session.id);session.status='idle';this.store.save();}
+      finish(session){this.runs.delete(session.id);session.status='idle';this.store.save();${staleBusy ? "session.status='working';this.store.save();" : ''}}
     };`);
     fs.writeFileSync(path.join(dir,'sdk.mjs'), `export function query({prompt}) {
       return {async usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(){return {rate_limits_available:true,rate_limits:{five_hour:{utilization:0},seven_day:{utilization:0}}}},async *[Symbol.asyncIterator](){for await (const input of prompt) yield {type:'result'};},close(){prompt.close()}};

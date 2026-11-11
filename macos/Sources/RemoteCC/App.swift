@@ -57,6 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A bare SwiftPM executable starts as a background process unless told otherwise.
         UNUserNotificationCenter.current().delegate = self
+        // A replaced or directly launched app can retain a generic system icon.
+        // Supply the bundled icon for running-app surfaces as well as Info.plist.
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         #if DEBUG
@@ -93,6 +99,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             case "tools": self?.model?.presentation = .sessionTools
             case "account": self?.model?.presentation = .account
             case "activity": self?.model?.presentation = .activity
+            case "account-usage": self?.model?.presentation = .accountUsage
+            case "usage": self?.model?.presentation = .usage
+            case "preferences": self?.model?.presentation = .preferences
+            case "projects": self?.model?.presentation = .projectPicker
+            case "worktree": self?.model?.presentation = .worktree
+            case "remote-setup": self?.model?.presentation = .remoteSetup(DemoData.config)
+            case "edit-machine": self?.model?.presentation = .editMachine(DemoData.config)
+            case "key-login": self?.model?.presentation = .keyLogin(DemoData.config)
+            case "details": self?.model?.showSessionDetails = true
+            case "archive": self?.model?.showArchived = true
+            case "gallery": self?.model?.presentation = .chatGallery
+            case "rename": self?.model?.presentation = .rename(WorkbenchRename(title: "重命名对话", initial: "检查登录接口", save: { _ in }))
+            case "confirmation": self?.model?.presentation = .confirmation(WorkbenchConfirmation(title: "从侧栏移除项目？", detail: "/workspace/web-app", actionTitle: "移除", action: {}))
+            case "changes", "search":
+                if let workspace = self?.model?.activeWorkspace { DemoData.seed(workspace) }
+                self?.model?.openPanel(environment["MIRROR_SCENE"] == "changes" ? .changes : .search)
             case "diff":
                 self?.model?.showFiles = false
                 if let workspace = self?.model?.activeWorkspace {

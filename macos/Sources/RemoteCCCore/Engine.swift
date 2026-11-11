@@ -33,6 +33,7 @@ public final class ChatEngine {
     public var onTranscriptChange: ((Set<String>) -> Void)?
     private var transcriptChanges = Set<String>()
     private var metadataChanged = false
+    private var stopRequests = Set<String>()
     public var onError: ((String) -> Void)?
 
     private let store: ChatStore
@@ -450,7 +451,10 @@ public final class ChatEngine {
         let version = state["version"]?.int ?? 0
         guard version >= ownerVersion else { return }
         let done = state["done"]?.isTruthy == true
-        let status = state["status"]?.string ?? "working"
+        let reportedStatus = state["status"]?.string ?? "working"
+        // A closed worker cannot still generate a reply, even if an older worker
+        // persisted a stale busy state while shutting down.
+        let status = done && ["working", "connecting", "permission", "stopping", "detached"].contains(reportedStatus) ? "stopped" : reportedStatus
         let messageId = state["message"]?["id"]?.string
         // A queued new turn must not be overwritten by the previous turn's idle snapshot.
         if let task, messageId != task.messageId {
@@ -478,6 +482,7 @@ public final class ChatEngine {
         guard let target = sessions[position].messages.firstIndex(where: { $0.id == messageId }), let message = state["message"] else { throw RemoteError("远端任务与本地消息不匹配") }
         let previousMetadata = sessions[position].transcriptIndependentState
         sessions[position].messages[target] = try message.decode(ChatMessage.self)
+        if done && status == "stopped" { sessions[position].messages[target].interrupted = true }
         sessions[position].status = status
         sessions[position].permissions = (try? state["permissions"]?.decode([PermissionRequest].self)) ?? []
         if let value = state["remoteSessionId"]?.string { sessions[position].remoteSessionId = value }
@@ -574,8 +579,33 @@ public final class ChatEngine {
     }
 
     public func stop(_ id: String) async throws {
-        guard sessions[try index(id)].remoteTask != nil else { return }
+        guard stopRequests.insert(id).inserted else { return }
+        defer { stopRequests.remove(id) }
+        let session = sessions[try index(id)]
+        // A resident owner can resume work after the locally submitted turn ended.
+        // Restored owner-only sessions must use the same stop command path.
+        guard session.remoteTask != nil || session.remoteOwner != nil else { return }
+        let owner = session.remoteOwner?.id ?? session.remoteTask?.id
+        let message = session.messages.last?.id
         _ = try await command(id, kind: "stop")
+        if try await waitForStop(id, owner: owner, message: message) { return }
+        // Older resident workers may acknowledge an interrupt without ending the
+        // turn. Close only that owner; never kill unrelated Claude processes.
+        _ = try await command(id, kind: "close")
+        guard try await waitForStop(id, owner: owner, message: message) else {
+            throw RemoteError("远端尚未确认停止，请重新连接后检查任务状态")
+        }
+    }
+
+    private func waitForStop(_ id: String, owner: String?, message: String?) async throws -> Bool {
+        for _ in 0..<30 {
+            guard let current = session(id), current.isBusy,
+                  currentOwnerId(id) == owner, current.messages.last?.id == message else { return true }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard let current = session(id), current.isBusy,
+              currentOwnerId(id) == owner, current.messages.last?.id == message else { return true }
+        return false
     }
 
     /// Worker validates the answer; a rejected form comes back as an error here.

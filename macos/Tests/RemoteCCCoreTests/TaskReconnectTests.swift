@@ -43,6 +43,52 @@ final class TaskReconnectTests: XCTestCase {
         idleReopened.shutdown()
     }
 
+    func testStopReachesResidentOwnerWithoutLocalRemoteTask() async throws {
+        let env = try AgentEnvironment(); defer { env.cleanup() }
+        let engine = try ChatEngine(store: ChatStore(directory: env.home.appendingPathComponent("stop-store")), agents: env.agents, files: env.files)
+        engine.updateConnection(env.config, ConnectionState(status: .connected))
+        let id = try engine.create(env.config).id
+        try engine.send(id, text: "stop recovery fixture")
+        try await eventually { engine.session(id)?.status == "permission" }
+        try await engine.respond(id, permission: "p1", answer: ["allow": true])
+        try await eventually { engine.session(id)?.status == "idle" }
+        let session = try XCTUnwrap(engine.session(id))
+        let owner = try XCTUnwrap(session.remoteOwner)
+        XCTAssertNil(session.remoteTask)
+        // The resident SDK can emit more work without a new local send.
+        try engine.apply(id, state: ["version": .number(Double(owner.version)), "status": "working", "resident": true,
+            "message": try JSON.from(XCTUnwrap(session.messages.last))])
+        XCTAssertTrue(engine.session(id)?.isBusy == true)
+        XCTAssertNil(engine.session(id)?.remoteTask)
+        try await engine.stop(id)
+        try await eventually { engine.session(id)?.status == "stopped" }
+        try await engine.remove(id)
+        engine.shutdown()
+    }
+
+    func testAcknowledgedButIgnoredStopClosesOnlyThatOwnerAndClearsStaleBusyState() async throws {
+        let worker = standInWorker
+            .replacingOccurrences(of: "if(c.kind==='stop'){permissions=[];status='stopped';message.interrupted=true;write();}", with: "if(c.kind==='stop'){}")
+            .replacingOccurrences(of: "if(c.kind==='close'){status='idle';write(true);process.exit(0);}", with: "if(c.kind==='close'){status='working';write(true);process.exit(0);}")
+        XCTAssertNotEqual(worker, standInWorker)
+        let env = try AgentEnvironment(workerSource: worker); defer { env.cleanup() }
+        let engine = try ChatEngine(store: ChatStore(directory: env.home.appendingPathComponent("ignored-stop")), agents: env.agents, files: env.files)
+        engine.updateConnection(env.config, ConnectionState(status: .connected))
+        let id = try engine.create(env.config).id
+        let other = try engine.create(env.config).id
+        try engine.send(id, text: "ignore stop")
+        try engine.send(other, text: "keep running")
+        try await eventually { engine.session(id)?.status == "permission" && engine.session(other)?.status == "permission" }
+        try await engine.stop(id)
+        XCTAssertEqual(engine.session(id)?.status, "stopped")
+        XCTAssertNil(engine.session(id)?.remoteOwner)
+        XCTAssertTrue(engine.session(id)?.messages.last?.interrupted == true)
+        XCTAssertEqual(engine.session(other)?.status, "permission")
+        try await engine.stop(other)
+        try await engine.remove(id); try await engine.remove(other)
+        engine.shutdown()
+    }
+
     func testIdleReplyStillReportsRunningBackgroundTasks() {
         var session = ChatSession(config: ConnectionConfig(host: "test", directory: "/tmp"))
         session.status = "idle"
