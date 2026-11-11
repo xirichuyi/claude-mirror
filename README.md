@@ -25,15 +25,17 @@
 
 ### 安装 DMG
 
-1. 从发布页下载 `claude-mirror-0.21.2-macOS-arm64.dmg`。
+1. 从[发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载最新的 `claude-mirror-<版本号>-macOS-arm64.dmg`。
 2. 打开 DMG，将 **claude-mirror.app** 拖入 **Applications**。
-3. 从应用程序启动「镜像 Claude」，添加 SSH 主机。
+3. 从应用程序启动 claude-mirror，按首页的三步引导添加服务器。
 
-本机使用 DMG 无需安装 Node.js、Swift 或 Xcode；远端仍需要 Node.js 和 Claude Code。发布页附 SHA-256 校验文件。
+第一次使用请看 **[入门指南](docs/getting-started.md)**：从准备服务器、首次打开被 macOS 拦截，到登录 Claude，每一步都有说明。
+
+本机使用 DMG 无需安装 Node.js、Swift 或 Xcode。服务器只需要能用 SSH 登录：连接后应用会检查环境，缺少 Claude Code 或 Node.js 时可以一键安装（装在用户目录，不需要管理员权限），Claude 未登录时会引导你在终端完成登录。发布页附 SHA-256 校验文件。
 
 **应用内更新**：从 v0.21.0 起接入 Sparkle，每次启动检查新版，也可在“账号 → 设置 → 关于”检查更新。确认后在应用内下载、验证签名、安装并重启，不用手动替换 DMG。退出前保存输入草稿和已上传附件，远端任务继续运行；未保存的文件编辑会先提示。v0.20.0 及更早版本需要最后手动安装一次 v0.21.0。更新包及更新源使用 Ed25519 签名；当前应用仍未经过 Apple 公证。
 
-当前构建为 ad-hoc 签名，尚未通过 Apple Developer ID 签名和 Apple 公证。macOS 可能阻止首次启动；核对下载来源后，可在「系统设置 → 隐私与安全性」中允许本次打开。不要关闭全局 Gatekeeper。
+**首次打开被拦截**：当前构建为 ad-hoc 签名，尚未通过 Apple Developer ID 签名和公证，macOS 会在第一次打开时阻止。核对下载来源后：在提示框点“完成” → 打开「系统设置 → 隐私与安全性」→ 在底部“已阻止 claude-mirror”旁点“仍要打开”并输入密码 → 再次打开应用并点“打开”。只需一次，不要关闭全局 Gatekeeper。
 
 ## 界面预览
 

@@ -15,11 +15,13 @@ dotnet test windows/ClaudeMirror.Tests -c Release
 dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o windows/dist/claude-mirror
 ```
 
-构建机安装 Inno Setup 6 后执行 `./windows/build-installer.ps1`，生成自包含安装程序。也可保留完整发布目录以便携方式运行。本机用户无需安装 .NET、Node.js 或 Claude；远端需要 Linux/macOS、SSH、Node.js 18.14+ 及已认证的 Claude Code。
+构建机安装 Inno Setup 6 后执行 `./windows/build-installer.ps1`，生成自包含安装程序。也可保留完整发布目录以便携方式运行。本机用户无需安装 .NET、Node.js 或 Claude；远端只需要 Linux/macOS 和 SSH。连接后应用会检查服务器环境：缺少 Claude Code 或 Node.js 时可一键安装（装在用户目录，无需管理员权限），Claude 未登录时可打开终端登录。新手请先看[入门指南](../docs/getting-started.md)。
 
 ## 已接入
 
-- 多主机命名，地址/端口/用户名，密码或私钥文件认证；密码仅保存在当前连接过程内存中。
+- 多主机命名，地址可直接写 `用户名@主机`，端口和名称收在高级选项；密码或私钥文件认证；密码仅保存在当前连接过程内存中。
+- 服务器环境检查：缺 Node.js / Claude Code 一键安装，Claude 未登录引导终端登录，SSH 断开会结束后台任务时给出处理命令；连接失败给出原因说明。
+- 密码登录成功后可一键设置免密登录（使用 Windows 自带的 ssh-keygen 生成专用密钥）。
 - 首次确认主机指纹，指纹变更拒绝连接；SSH keepalive。
 - 项目分组、分页同步历史索引、选中后读取消息。
 - 新会话、历史续聊、远端持久任务、停止、工具权限确认与 AskUserQuestion 回答。

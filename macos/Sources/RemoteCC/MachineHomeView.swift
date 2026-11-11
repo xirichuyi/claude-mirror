@@ -10,30 +10,31 @@ struct MachineHomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(model.currentConfig == nil ? "连接服务器" : "新对话")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(WorkbenchTheme.ink)
-                    Text(model.currentConfig == nil ? "使用服务器上的 Claude Code。" : model.currentConfig!.displayName)
-                        .font(.body).foregroundStyle(WorkbenchTheme.inkMuted).lineSpacing(6)
-                    if model.currentConfig == nil || !model.isConnected {
-                    HStack(spacing: 12) {
-                        if let config = model.currentConfig {
-                            if !model.isConnected {
-                                Button("连接机器") { model.perform { try await model.connect(config) } }
-                                    .buttonStyle(WorkbenchButtonStyle()).disabled(syncing)
-                            }
-                        } else {
-                            Button { model.showConnect = true } label: { Label("添加服务器", systemImage: "plus") }
-                                .buttonStyle(WorkbenchButtonStyle(prominent: true))
-                            Text("支持 SSH 别名与 user@host").font(WorkbenchMetrics.caption).foregroundStyle(WorkbenchTheme.inkDim)
-                        }
-                    }.padding(.top, 4)
+                if model.currentConfig == nil {
+                    GettingStartedView()
+                } else if let config = model.currentConfig {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("新对话").font(.system(size: 22, weight: .semibold)).foregroundStyle(WorkbenchTheme.ink)
+                        Text(config.displayName).font(.body).foregroundStyle(WorkbenchTheme.inkMuted).lineSpacing(6)
                     }
-                }
-                if model.currentConfig != nil {
-                    Button { model.openProjectPicker() } label: { Label("打开或新建项目", systemImage: "folder.badge.plus") }
-                        .buttonStyle(WorkbenchButtonStyle()).disabled(!model.isConnected)
+                    if !model.isConnected {
+                        if model.connectionState.status == .error, !model.connectionState.error.isEmpty {
+                            ConnectionFailureNotice(config: config, error: model.connectionState.error)
+                        } else {
+                            HStack(spacing: 12) {
+                                Button(syncing ? "正在连接…" : "连接机器") { model.perform { try await model.connect(config) } }
+                                    .buttonStyle(WorkbenchButtonStyle(prominent: true)).disabled(syncing)
+                                if syncing { ProgressView().controlSize(.small) }
+                            }
+                        }
+                    }
+                    MachineHealthBanner()
+                    HStack(spacing: 10) {
+                        Button { model.perform { try await model.chooseProject("~") } } label: { Label("在主目录开始对话", systemImage: "house") }
+                            .buttonStyle(WorkbenchButtonStyle(prominent: model.isConnected && recent.isEmpty)).disabled(!model.isConnected)
+                        Button { model.openProjectPicker() } label: { Label("打开或新建项目", systemImage: "folder.badge.plus") }
+                            .buttonStyle(WorkbenchButtonStyle()).disabled(!model.isConnected)
+                    }
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Text("最近对话").font(.callout.weight(.medium)).foregroundStyle(WorkbenchTheme.inkMuted)
@@ -77,5 +78,43 @@ struct MachineHomeView: View {
         }
     }
 
+}
+
+/// First launch: what the app needs and the three steps to a working conversation.
+struct GettingStartedView: View {
+    @EnvironmentObject private var model: AppModel
+    static let helpURL = URL(string: "https://github.com/xirichuyi/claude-mirror/blob/HEAD/docs/getting-started.md")!
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("开始使用").font(.system(size: 22, weight: .semibold)).foregroundStyle(WorkbenchTheme.ink)
+                Text("镜像 Claude 让你在这台 Mac 上使用服务器里的 Claude Code：代码和 Claude 都在服务器上运行，这里负责对话、审批和查看文件。")
+                    .font(.body).foregroundStyle(WorkbenchTheme.inkMuted).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                step(1, "准备一台服务器", "Linux 或 macOS，能用 SSH 登录即可，比如云服务器、公司开发机或家里的电脑。")
+                step(2, "添加服务器", "填写地址和密码。连接成功后可以一键设置免密登录。")
+                step(3, "自动检查环境", "缺少 Claude Code 或 Node.js 时一键安装；第一次使用需要在服务器上登录 Claude。")
+            }
+            HStack(spacing: 12) {
+                Button { model.showConnect = true } label: { Label("添加服务器", systemImage: "plus") }
+                    .buttonStyle(WorkbenchButtonStyle(prominent: true))
+                Link("没有服务器？查看入门指南", destination: Self.helpURL).font(.callout)
+            }.padding(.top, 4)
+        }
+    }
+
+    private func step(_ number: Int, _ title: String, _ detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(number)").font(.callout.weight(.semibold)).frame(width: 24, height: 24)
+                .background(WorkbenchTheme.surface, in: Circle())
+                .overlay(Circle().strokeBorder(WorkbenchTheme.border))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.callout.weight(.semibold))
+                Text(detail).font(.callout).foregroundStyle(WorkbenchTheme.inkMuted).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 }
 #endif

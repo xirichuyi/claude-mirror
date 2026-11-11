@@ -25,6 +25,9 @@ final class AppModel: ObservableObject {
     @Published var syncingMachines = Set<String>()
     @Published var machineHistoryStatus: [String: String] = [:]
     @Published var reverseStates: [String: ReverseAccess] = [:]
+    /// Setup problems found while connecting (missing Node.js or Claude, not logged in, …), per machine.
+    @Published var machineHealth: [String: [HealthIssue]] = [:]
+    @Published var checkingHealth = Set<String>()
     /// Held while any server can reach this Mac, so idle sleep does not cut it off. Lid close still sleeps.
     private var sleepAssertion: IOPMAssertionID = 0
     @Published var availableUpdate: String?
@@ -263,7 +266,7 @@ final class AppModel: ObservableObject {
         do { try await connections.connect(config, password: password) }
         catch {
             await connections.disconnect(config)
-            throw error
+            throw RemoteError(ConnectionAdvice.explain(error.localizedDescription))
         }
         let affected = engine.sessions.filter { $0.config.key == original.key }.map(\.id)
         try engine.replaceMachine(original, with: config)
@@ -288,6 +291,15 @@ final class AppModel: ObservableObject {
     }
 
     func setReverseAccess(_ machine: ConnectionConfig, enabled: Bool) {
+        if enabled {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "允许 \(machine.displayName) 登录这台 Mac？"
+            alert.informativeText = "开启后，服务器上的程序可以通过本应用的连接，以你的身份登录这台 Mac 并执行命令。只在你完全信任这台服务器、并且确实需要从服务器访问本机时开启。关闭后立即撤销。"
+            alert.addButton(withTitle: "仍要开启")
+            alert.addButton(withTitle: "取消")
+            guard alert.runModal() == .alertFirstButtonReturn else { objectWillChange.send(); return }
+        }
         var updated = savedMachines.first { $0.key == machine.key } ?? machine
         updated.reverseAccess = enabled ? true : nil
         rememberMachine(updated)
@@ -415,7 +427,7 @@ final class AppModel: ObservableObject {
     }
 
     func connect(_ input: ConnectionConfig, password: String? = nil) async throws {
-        guard let engine, let connections else { return }
+        guard engine != nil, let connections else { return }
         var config = try input.validated()
         // Connecting a machine never depends on a remembered project's existence.
         config.directory = "~"
@@ -425,23 +437,121 @@ final class AppModel: ObservableObject {
         selectedMachine = config
         activeId = nil
         searchText = ""; showArchived = false
-        try await connections.connect(config, password: password)
+        do { try await connections.connect(config, password: password) }
+        catch { throw RemoteError(ConnectionAdvice.explain(error.localizedDescription)) }
         rememberMachine(config)
         if selectedMachine?.key == config.key { lastConnection = config }
+        await prepareMachine(config)
+    }
+
+    /// Everything after SSH itself: start the agent, check the server's setup, then load history.
+    /// Setup problems become a persistent checklist on the machine instead of a passing toast.
+    private func prepareMachine(_ input: ConnectionConfig) async {
+        guard let engine else { return }
+        var config = input
         do {
             let info = try await engine.agents.info(config)
             config.directory = info.home
             rememberMachine(config)
             if selectedMachine?.key == config.key { selectedMachine = config; lastConnection = config }
-            if info.claude == nil { show("SSH 已连接。远端未找到 Claude Code，仍可查看可用历史。") }
-            else if let warning = info.persistenceWarning { show(warning) }
+            machineHealth[config.key] = MachineHealth.issues(startError: nil, info: info, status: nil)
+            let checking = Task { await self.refreshHealth(config, info: info) }
             await discoverHistory(config)
             await engine.restore(config)
+            await checking.value
         } catch {
-            machineHistoryStatus[config.key] = "SSH 已连接，历史加载失败，可重试"
+            let issues = MachineHealth.issues(startError: error, info: nil, status: nil)
+            machineHealth[config.key] = issues
+            machineHistoryStatus[config.key] = issues.isEmpty ? "SSH 已连接，历史加载失败，可重试" : "SSH 已连接，服务器还需要设置"
             if selectedMachine?.key == config.key { historyStatus = machineHistoryStatus[config.key]! }
-            show(error.localizedDescription)
+            if issues.isEmpty { show(error.localizedDescription) }
         }
+    }
+
+    /// Asks the server whether Claude is installed and logged in. Failures leave the checklist as it was.
+    func refreshHealth(_ config: ConnectionConfig, info: ServerInfo? = nil) async {
+        guard let engine, !checkingHealth.contains(config.key) else { return }
+        checkingHealth.insert(config.key)
+        defer { checkingHealth.remove(config.key) }
+        do {
+            let server: ServerInfo
+            if let info { server = info } else { server = try await engine.agents.info(config) }
+            let status = ClaudeStatus(json: try await engine.agents.call(config, "file", ["operation": "claudeStatus"], timeout: 45))
+            machineHealth[config.key] = MachineHealth.issues(startError: nil, info: server, status: status)
+        } catch let error as RemoteSetupError {
+            machineHealth[config.key] = MachineHealth.issues(startError: error, info: nil, status: nil)
+        } catch {
+            if info == nil { show("检查服务器失败：" + error.localizedDescription) }
+        }
+    }
+
+    /// "重新检查": after installing or logging in, rerun the whole preparation for this machine.
+    func recheckMachine(_ config: ConnectionConfig) {
+        Task {
+            guard engine?.connectionState(config).status == .connected else {
+                perform { try await self.connect(config) }
+                return
+            }
+            let blockedBefore = machineHealth[config.key]?.contains { $0.kind == .node } == true
+            if blockedBefore { await prepareMachine(config) } else { await refreshHealth(config) }
+            if machineHealth[config.key]?.isEmpty ?? true { show("\(config.displayName) 已准备就绪") }
+        }
+    }
+
+    func openRemoteSetup(_ config: ConnectionConfig) { presentation = .remoteSetup(config) }
+
+    /// Opens Terminal on the server running `command`, reusing this app's SSH connection.
+    func runInTerminal(_ config: ConnectionConfig, command: String) {
+        guard let connections else { return }
+        let line = connections.terminalCommand(config, remoteCommand: command)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("claude-mirror-\(UUID().uuidString.prefix(8)).command")
+        let script = "#!/bin/sh\nrm -f \"$0\"\nclear\necho '正在连接 \(config.displayName.replacingOccurrences(of: "'", with: ""))，完成后可以关闭此窗口。'\n" + line + "\n"
+        do {
+            try script.write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+            NSWorkspace.shared.open(file)
+        } catch { copyCommand(line, note: "无法打开终端，已复制命令，请粘贴到终端运行") }
+    }
+
+    func copyCommand(_ command: String, note: String = "已复制命令") {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        show(note)
+    }
+
+    // MARK: Password-free login
+
+    private func keyOfferKey(_ config: ConnectionConfig) -> String { "declined-key-login:" + config.key }
+
+    /// After a password login, offer once per machine to switch to a dedicated key.
+    func offerKeyLogin(_ config: ConnectionConfig) {
+        guard config.authentication == .password, !UserDefaults.standard.bool(forKey: keyOfferKey(config)) else { return }
+        presentation = .keyLogin(config)
+    }
+
+    func declineKeyLogin(_ config: ConnectionConfig) {
+        UserDefaults.standard.set(true, forKey: keyOfferKey(config))
+        presentation = nil
+    }
+
+    /// Creates ~/.ssh/claude_mirror_ed25519 if needed, authorizes it on the server over the
+    /// current connection, proves it logs in alone, and only then switches the machine to it.
+    func setUpKeyLogin(_ input: ConnectionConfig) async throws {
+        guard let connections else { throw RemoteError("连接服务尚未就绪") }
+        let config = savedMachines.first { $0.key == input.key } ?? input
+        let path = LoginKeySetup.defaultKeyPath
+        let publicKey = try LoginKeySetup.ensureKey(at: path)
+        let output = try await connections.runScript(config, script: LoginKeySetup.authorizeScript(publicKey: publicKey))
+        guard output.contains("__RCC_KEY_OK__") else { throw RemoteError("服务器没有确认添加密钥") }
+        var updated = config
+        updated.authentication = .keyFile
+        updated.identityFile = path
+        do { try await connections.verifyLogin(updated) }
+        catch { throw RemoteError("密钥已添加，但服务器不接受密钥登录（可能禁用了公钥认证）。仍可继续使用密码。\n" + error.localizedDescription) }
+        rememberMachine(updated)
+        connections.updateConfig(updated)
+        if selectedMachine?.key == updated.key { selectedMachine = updated; lastConnection = updated }
+        show("已设置免密登录，以后会自动连接 \(updated.displayName)")
     }
 
     func disconnect() {

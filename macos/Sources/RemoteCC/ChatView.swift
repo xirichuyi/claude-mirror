@@ -42,6 +42,9 @@ private struct ChatContent: View {
                         Button("选择项目") { model.showProjectPicker = true }
                     }.font(.callout).padding(12).background(WorkbenchTheme.warning.opacity(0.08))
                 }
+                if transcript.session != nil {
+                    MachineHealthBanner(compact: true)
+                }
                 if transcript.session == nil {
                     MachineHomeView()
                 } else if let session = transcript.session, !session.messages.isEmpty || session.remoteHistoryRef != nil {
