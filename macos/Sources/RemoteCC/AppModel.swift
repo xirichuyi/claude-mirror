@@ -403,7 +403,7 @@ final class AppModel: ObservableObject {
     }
 
     func connect(_ input: ConnectionConfig, password: String? = nil) async throws {
-        guard let engine, let connections else { return }
+        guard engine != nil, let connections else { return }
         var config = try input.validated()
         // Connecting a machine never depends on a remembered project's existence.
         config.directory = "~"

@@ -57,7 +57,7 @@ final class RemoteSetupTests: XCTestCase {
         let key = "ssh-ed25519 " + String(repeating: "A", count: 68)
         let script = LoginKeySetup.authorizeScript(publicKey: key)
         for _ in 0..<2 {
-            let output = try run("/usr/bin/env", ["HOME=" + home, "/bin/sh", "-c", script])
+            let output = try RemoteCCCoreTests.run("/usr/bin/env", ["HOME=" + home, "/bin/sh", "-c", script])
             XCTAssertTrue(String(decoding: output, as: UTF8.self).contains("__RCC_KEY_OK__"))
         }
         let text = try String(contentsOfFile: home + "/.ssh/authorized_keys", encoding: .utf8)
