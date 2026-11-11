@@ -52,7 +52,11 @@ struct WorkspaceStatusBar: View {
                 Label(branch.components(separatedBy: "...").first ?? branch, systemImage: "arrow.triangle.branch").lineLimit(1).help(branch)
             }
             Spacer(minLength: 8)
-            Text(model.active.map { statusLabel($0.status) } ?? (model.isConnected ? "SSH 已连接" : "离线"))
+            Text(model.isConnected ? "SSH 已连接" : "未连接")
+            if let session = model.active {
+                Button { model.showActivity = true } label: { Text(model.activityLabel(session)) }
+                    .buttonStyle(QuietButtonStyle()).help("查看任务状态")
+            }
             AccountQuotaView(store: model.accountStore)
             Button { model.showSettings = true } label: { WorkbenchIcon(symbol: "gearshape") }
                 .buttonStyle(WorkbenchIconButtonStyle()).help("设置").accessibilityLabel("设置")

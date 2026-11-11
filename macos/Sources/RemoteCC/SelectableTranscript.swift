@@ -97,10 +97,36 @@ struct SelectableTranscriptText: NSViewRepresentable {
         context.coordinator.source = text
         context.coordinator.measuredWidth = nil
         let range = view.selectedRange()
-        view.textStorage?.setAttributedString(attributed ?? Self.render(text, markdown: markdown))
+        if let storage = view.textStorage {
+            let rendered = attributed ?? Self.render(text, markdown: markdown)
+            Self.replaceChangedSuffix(in: storage, with: rendered, previous: context.coordinator.rendered)
+            context.coordinator.rendered = rendered
+        }
         if NSMaxRange(range) <= (view.string as NSString).length { view.setSelectedRange(range) }
         view.invalidateIntrinsicContentSize()
     }
+    /// Preserve TextKit's layout for unchanged paragraphs during streaming. Compare
+    /// attributes as well as text: closing Markdown can restyle an earlier prefix.
+    static func replaceChangedSuffix(in storage: NSTextStorage, with content: NSAttributedString, previous: NSAttributedString? = nil) {
+        let old = storage.string as NSString, new = content.string as NSString
+        var prefix = 0
+        let limit = min(old.length, new.length)
+        while prefix < limit, old.character(at: prefix) == new.character(at: prefix) { prefix += 1 }
+        // Edit on a paragraph boundary, never inside a composed character.
+        if prefix < old.length || prefix < new.length {
+            while prefix > 0, new.character(at: prefix - 1) != 10 { prefix -= 1 }
+        }
+        if prefix > 0 {
+            let range = NSRange(location: 0, length: prefix)
+            // Compare source attributes, not TextKit’s substituted CJK/emoji fonts.
+            let original = previous ?? storage
+            if original.length < prefix || !original.attributedSubstring(from: range).isEqual(to: content.attributedSubstring(from: range)) { prefix = 0 }
+        }
+        guard prefix != old.length || prefix != new.length else { return }
+        storage.replaceCharacters(in: NSRange(location: prefix, length: old.length - prefix),
+            with: content.attributedSubstring(from: NSRange(location: prefix, length: new.length - prefix)))
+    }
+
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: TranscriptTextView, context: Context) -> CGSize? {
         let proposed = proposal.width ?? 600
         let available = max(1, floor(proposed.isFinite ? proposed : 600))
@@ -121,6 +147,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
     final class Coordinator: NSObject, NSTextViewDelegate {
+        var rendered: NSAttributedString?
         var source: String?
         var attributed: NSAttributedString?
         var measuredWidth: CGFloat?

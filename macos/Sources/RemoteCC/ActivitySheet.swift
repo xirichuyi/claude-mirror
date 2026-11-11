@@ -36,11 +36,16 @@ struct ActivitySheet: View {
                                         HStack {
                                             Text(historyDisplayTitle(session.name)).lineLimit(1)
                                             Spacer()
-                                            Text(!session.permissions.isEmpty ? "等待确认" : model.unreadSessions.contains(session.id) && !session.isBusy ? "有新结果" : statusLabel(session.status))
+                                            Text(!session.permissions.isEmpty ? "等待确认" : model.unreadSessions.contains(session.id) && !session.isBusy ? "有新结果" : model.activityLabel(session))
                                                 .font(.caption).foregroundStyle(WorkbenchTheme.accent)
                                             Image(systemName: "chevron.right").font(.caption)
                                         }.contentShape(Rectangle())
                                     }.buttonStyle(SidebarNavigationStyle())
+                                    if let error = session.transportError {
+                                        Text(error).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                                        Button("重新同步任务") { Task { await model.engine?.attach(session.id) } }
+                                            .disabled(model.engine?.connectionState(session.config).status != .connected)
+                                    }
                                     ForEach(Array((session.tasks?.array ?? []).enumerated()), id: \.offset) { _, task in
                                         HStack(alignment: .top) {
                                             Image(systemName: task["status"]?.string == "running" ? "circle.dotted" : "checkmark.circle")

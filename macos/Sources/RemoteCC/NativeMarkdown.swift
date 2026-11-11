@@ -108,6 +108,9 @@ import RemoteCCCore
             prose = NSMutableAttributedString(string: "")
         }
         func paragraph(_ content: NSAttributedString, style: NSParagraphStyle, prefix: String = "") {
+            // Keep completed prose chunks stable while the last paragraph streams.
+            // A single enormous NSTextView otherwise remeasures the whole reply.
+            if prose.length >= 4096 { flush() }
             let value = NSMutableAttributedString(string: prefix, attributes: attributes())
             value.append(content); value.append(NSAttributedString(string: "\n", attributes: attributes()))
             value.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: value.length))

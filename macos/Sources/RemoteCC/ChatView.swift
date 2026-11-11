@@ -8,17 +8,43 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ChatContent(model: model, transcript: model.transcript)
+
+            // Reserve real layout space for the composer. A safe-area inset on the
+            // outer stack lets the nested native transcript draw behind the input.
+            if model.currentConfig != nil {
+                ComposerArea()
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                    .background(WorkbenchTheme.canvas)
+            }
+        }
+        .background(WorkbenchTheme.canvas)
+    }
+}
+
+@MainActor final class TranscriptState: ObservableObject {
+    @Published private(set) var session: ChatSession?
+    func update(_ value: ChatSession?) {
+        if session != value { session = value }
+    }
+}
+
+private struct ChatContent: View {
+    let model: AppModel
+    @ObservedObject var transcript: TranscriptState
+    var body: some View {
             VStack(spacing: 0) {
-                if let session = model.active, model.projectMissing(session) {
+                if let session = transcript.session, model.projectMissing(session) {
                     HStack {
                         Label("远端目录已不存在，历史对话仍可查看", systemImage: "folder.badge.questionmark")
                         Spacer()
                         Button("选择项目") { model.showProjectPicker = true }
                     }.font(.callout).padding(12).background(WorkbenchTheme.warning.opacity(0.08))
                 }
-                if model.active == nil {
+                if transcript.session == nil {
                     MachineHomeView()
-                } else if let session = model.active, !session.messages.isEmpty || session.remoteHistoryRef != nil {
+                } else if let session = transcript.session, !session.messages.isEmpty || session.remoteHistoryRef != nil {
                     if model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil || session.historyLoaded == false {
                         HistoryNotice(session: session)
                             .id(session.id)
@@ -36,16 +62,6 @@ struct ChatView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
 
-            // Reserve real layout space for the composer. A safe-area inset on the
-            // outer stack lets the nested native transcript draw behind the input.
-            if model.currentConfig != nil {
-                ComposerArea()
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity)
-                    .background(WorkbenchTheme.canvas)
-            }
-        }
-        .background(WorkbenchTheme.canvas)
     }
 }
 
@@ -96,27 +112,37 @@ struct MessagesList: View {
     @StateObject private var selection = TranscriptSelection()
     @State private var followsReply = true
     @State private var farFromBottom = false
-    @State private var visibleMessageLimit = 50
+    @State private var messageWindow = TranscriptWindow()
+    @State private var followTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    init(session: ChatSession, model: AppModel, historyError: String?, refreshing: Bool,
+         initialWindow: TranscriptWindow = TranscriptWindow()) {
+        self.session = session; self.model = model
+        self.historyError = historyError; self.refreshing = refreshing
+        _messageWindow = State(initialValue: initialWindow)
+    }
+
     var body: some View {
+        let visibleRange = messageWindow.range(in: session.messages)
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if session.messages.count > visibleMessageLimit {
-                        Button("加载更早消息") {
-                            let anchor = session.messages.suffix(visibleMessageLimit).first?.id
+                // This bounded window needs exact heights. Lazy estimates combined
+                // with bottom anchoring can repeatedly relayout long streaming replies.
+                VStack(alignment: .leading, spacing: 12) {
+                    if visibleRange.lowerBound > 0 {
+                        Button("更早消息") {
                             followsReply = false
-                            visibleMessageLimit += 50
+                            let anchor = session.messages[visibleRange.lowerBound].id
+                            messageWindow.earlier(in: session.messages)
                             Task { @MainActor in
                                 await Task.yield()
-                                if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                                proxy.scrollTo(anchor, anchor: .top)
                             }
-                        }
-                            .font(.caption)
+                        }.font(.caption)
                     }
-                    if session.remoteHistoryRef != nil,
+                    if visibleRange.lowerBound == 0, session.remoteHistoryRef != nil,
                        session.historyBefore != nil && session.historyLoaded != false,
                        historyError == nil,
                        !refreshing {
@@ -131,9 +157,9 @@ struct MessagesList: View {
                             }
                         }
                     }
-                    ForEach(Array(session.messages.enumerated().suffix(visibleMessageLimit)), id: \.element.id) { index, message in
+                    ForEach(session.messages[visibleRange]) { message in
                         // Equatable lets unchanged messages skip rendering while the last one streams.
-                        MessageRow(message: message, busy: index == session.messages.count - 1 && session.isBusy, sessionStatus: session.status, showHeader: index == 0 || session.messages[index - 1].role != "assistant", actions: FileActions(open: { model.open($0, line: $1) }))
+                        MessageRow(message: message, busy: message.id == session.messages.last?.id && session.isBusy, sessionStatus: session.status, actions: FileActions(open: { model.open($0, line: $1) }))
                             .equatable()
                             .id(message.id)
                     }
@@ -148,6 +174,16 @@ struct MessagesList: View {
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                             .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 12))
                     }
+                    if visibleRange.upperBound < session.messages.count {
+                        Button("较新消息") {
+                            let anchor = session.messages[visibleRange.upperBound - 1].id
+                            messageWindow.later(in: session.messages)
+                            Task { @MainActor in
+                                await Task.yield()
+                                proxy.scrollTo(anchor, anchor: .bottom)
+                            }
+                        }.font(.caption)
+                    }
                     Color.clear.frame(height: 1).id("bottom")
                         .onAppear { if #unavailable(macOS 15) { farFromBottom = false } }
                         .onDisappear { if #unavailable(macOS 15) { farFromBottom = true } }
@@ -158,22 +194,31 @@ struct MessagesList: View {
                 .frame(maxWidth: .infinity)
             }
             .clipped()
-            .defaultScrollAnchor(.bottom)
             .coordinateSpace(name: "replyViewport")
-            .task(id: session.messages.last) {
-                // Follow actual message updates, never height estimates produced by scrolling.
-                do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
-                guard followsReply else { return }
-                proxy.scrollTo("bottom", anchor: .bottom)
+            .onChange(of: session.messages.last, initial: true) { scheduleFollow(proxy) }
+            .onChange(of: followsReply) {
+                // Reaching the bottom only arms future streaming updates. A scrollTo
+                // here fights the trackpad momentum/rubber-band settling.
+                if !followsReply {
+                    cancelFollow()
+                    messageWindow.pin(in: session.messages)
+                } else if messageWindow.range(in: session.messages).upperBound == session.messages.count {
+                    messageWindow.latest()
+                }
             }
+            .onDisappear { cancelFollow() }
             .modifier(TranscriptScrollTracking(farFromBottom: $farFromBottom, following: $followsReply))
             .overlay(alignment: .bottomTrailing) {
                 // AX scrolling does not necessarily emit wheel events. The return
                 // control is available whenever the latest message is off screen.
-                if farFromBottom {
+                if farFromBottom || visibleRange.upperBound < session.messages.count {
                     Button {
+                        messageWindow.latest()
                         followsReply = true
+                        Task { @MainActor in
+                        await Task.yield()
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                        }
                     } label: {
                         Image(systemName: "arrow.down").font(.system(size: 14, weight: .medium))
                             .frame(width: 34, height: 34)
@@ -183,11 +228,27 @@ struct MessagesList: View {
                         .shadow(color: .black.opacity(0.06), radius: 5, y: 2).padding(16)
                 }
             }
-            .onChange(of: session.messages.count) { oldCount, newCount in
-                // New replies must not evict the messages the user is reading.
-                visibleMessageLimit += max(0, newCount - oldCount)
-            }
+
         }
+        }
+    }
+
+    private func cancelFollow() {
+        followTask?.cancel()
+        followTask = nil
+    }
+
+    private func scheduleFollow(_ proxy: ScrollViewProxy) {
+        guard followsReply, messageWindow.range(in: session.messages).upperBound == session.messages.count, followTask == nil else { return }
+        followTask = Task { @MainActor in
+            // Coalesce streaming updates without cancelling every pending scroll.
+            do { try await Task.sleep(for: .milliseconds(50)) }
+            catch { return }
+            followTask = nil
+            guard followsReply, model.activeId == session.id else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
         }
     }
 }
@@ -262,8 +323,6 @@ struct MessageRow: View, Equatable {
     var showHeader = true
     let actions: FileActions
     @EnvironmentObject private var model: AppModel
-    @State private var copied = false
-    @State private var hovered = false
     @Environment(\.transcriptSelection) private var selection
 
 
@@ -271,7 +330,6 @@ struct MessageRow: View, Equatable {
 
     var body: some View {
         Group { if message.role == "user" { userBody } else { assistantBody } }
-            .onHover { hovered = $0 }
 
     }
 
@@ -295,6 +353,7 @@ struct MessageRow: View, Equatable {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array((message.blocks ?? []).enumerated()).filter { !isDuplicateError($0.element) }, id: \.offset) { index, block in
                 BlockView(block: block, actions: actions, thinkingActive: busy && sessionStatus == "working" && index == (message.blocks?.count ?? 0) - 1)
+                    .equatable()
             }
             if let issue = message.serviceIssue {
                 VStack(alignment: .leading, spacing: 6) {
@@ -317,7 +376,7 @@ struct MessageRow: View, Equatable {
                 }.padding(.vertical, 8).accessibilityElement(children: .combine)
             }
             if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
-            if !busy { footer.opacity(hovered || copied ? 1 : 0.25) }
+            if !busy { MessageFooter(message: message) }
         }
     }
 
@@ -351,7 +410,16 @@ struct MessageRow: View, Equatable {
         model.composerFocus = UUID()
     }
 
-    @ViewBuilder private var footer: some View {
+}
+
+// Keep pointer feedback local to the controls; hovering must not invalidate
+// the message body and its native text layout.
+private struct MessageFooter: View {
+    let message: ChatMessage
+    @EnvironmentObject private var model: AppModel
+    @State private var copied = false
+
+    @ViewBuilder var body: some View {
         let text = (message.blocks ?? []).filter { $0.type == "text" && !isDuplicateError($0) }.compactMap(\.text).joined(separator: "\n\n")
         let isUsageReport = (message.blocks ?? []).contains { UsageReport($0.text ?? "") != nil }
         let parts = isUsageReport ? [] : [message.model, message.durationMs.map { String(format: "%.1fs", $0 / 1000) }, message.costUSD.map { String(format: "$%.4f", $0) }].compactMap { $0 }
@@ -371,6 +439,10 @@ struct MessageRow: View, Equatable {
             }
             .font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
         }
+    }
+
+    private func isDuplicateError(_ block: Block) -> Bool {
+        message.error.map { ReplyFailure($0).duplicates(block) } ?? false
     }
 }
 
@@ -414,10 +486,14 @@ struct ReplyFailureView: View {
     }
 }
 
-struct BlockView: View {
+struct BlockView: View, Equatable {
     let block: Block
     let actions: FileActions
     var thinkingActive = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.block == rhs.block && lhs.thinkingActive == rhs.thinkingActive
+    }
 
     var body: some View {
         switch block.type {

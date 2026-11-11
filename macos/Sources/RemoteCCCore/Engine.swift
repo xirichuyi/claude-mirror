@@ -30,6 +30,9 @@ public final class ChatEngine {
     public let files: RemoteFiles
     /// Fires at most once per frame; the UI reads current state afterwards.
     public var onChange: (() -> Void)?
+    public var onTranscriptChange: ((Set<String>) -> Void)?
+    private var transcriptChanges = Set<String>()
+    private var metadataChanged = false
     public var onError: ((String) -> Void)?
 
     private let store: ChatStore
@@ -69,20 +72,38 @@ public final class ChatEngine {
     public func session(_ id: String) -> ChatSession? { sessions.first { $0.id == id } }
     public func isRunning(_ id: String) -> Bool { running.contains(id) }
 
-    private func notify() {
+    public enum TaskConnection: Equatable { case none, offline, restoring, connected, failed }
+
+    /// A subscribed socket is not enough: wait for the first remote snapshot.
+    public func taskConnection(_ id: String) -> TaskConnection {
+        guard let session = session(id), session.remoteTask != nil || session.remoteOwner != nil else { return .none }
+        guard connectionState(session.config).status == .connected else { return .offline }
+        if watchers[id]?.previous != nil { return .connected }
+        if session.transportError != nil { return .failed }
+        return .restoring
+    }
+
+    private func notify(transcript: String? = nil) {
+        if let transcript { transcriptChanges.insert(transcript) }
+        else { metadataChanged = true }
         guard !changeQueued else { return }
         changeQueued = true
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 16_000_000)
-            self?.changeQueued = false
-            self?.onChange?()
+            guard let self else { return }
+            self.changeQueued = false
+            let ids = self.transcriptChanges
+            let metadata = self.metadataChanged
+            self.transcriptChanges = []; self.metadataChanged = false
+            if metadata || self.onTranscriptChange == nil { self.onChange?() }
+            if !ids.isEmpty { self.onTranscriptChange?(ids) }
         }
     }
 
     /// `immediate` is for approvals, turn ends and anything that must survive a crash.
-    private func changed(_ id: String?, immediate: Bool = true) {
+    private func changed(_ id: String?, immediate: Bool = true, transcriptOnly: Bool = false) {
         if let id { dirty.insert(id) }
-        notify()
+        notify(transcript: transcriptOnly ? id : nil)
         if immediate { flushSaves() }
         else if !saveQueued {
             saveQueued = true
@@ -361,7 +382,7 @@ public final class ChatEngine {
     }
 
     private func attachOnce(_ id: String) async throws {
-        try hydrate(id)
+        try await hydrateAsync(id)
         let position = try index(id)
         let session = sessions[position]
         guard session.remoteTask != nil || session.remoteOwner != nil, watchers[id] == nil else { return }
@@ -455,6 +476,7 @@ public final class ChatEngine {
             return
         }
         guard let target = sessions[position].messages.firstIndex(where: { $0.id == messageId }), let message = state["message"] else { throw RemoteError("远端任务与本地消息不匹配") }
+        let previousMetadata = sessions[position].transcriptIndependentState
         sessions[position].messages[target] = try message.decode(ChatMessage.self)
         sessions[position].status = status
         sessions[position].permissions = (try? state["permissions"]?.decode([PermissionRequest].self)) ?? []
@@ -490,7 +512,8 @@ public final class ChatEngine {
             Task { _ = try? await agents.call(config, "task", ["operation": "acknowledge", "taskId": .string(ownerId)]) }
         }
         sessions[position].transportError = nil
-        changed(id, immediate: turnEnded || !sessions[position].permissions.isEmpty)
+        changed(id, immediate: turnEnded || !sessions[position].permissions.isEmpty,
+            transcriptOnly: !turnEnded && previousMetadata == sessions[position].transcriptIndependentState)
         if turnEnded, task != nil, sessions[position].queuePaused != true { drainQueue(id) }
     }
 

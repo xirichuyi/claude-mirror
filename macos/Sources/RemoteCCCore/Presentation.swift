@@ -261,3 +261,20 @@ public func remotePathReference(_ text: String) -> (path: String, line: Int?)? {
     if path.range(of: "^[\\w.@-]+\\.(js|cjs|mjs|ts|tsx|jsx|py|go|rs|java|c|h|cpp|cs|rb|php|swift|sh|md|txt|json|yaml|yml|toml|html|css|sql|csv|png|jpg|jpeg|gif|webp|svg|pdf|xlsx|xls|tsv|docx|pptx|mp4|mov|mp3|log)$", options: [.regularExpression, .caseInsensitive]) != nil { return (path, line) }
     return nil
 }
+
+public extension ChatSession {
+    var runningBackgroundTaskCount: Int {
+        (tasks?.array ?? []).filter { $0["status"]?.string == "running" && $0["ambient"]?.bool != true }.count
+    }
+}
+
+// Version counters advance on every text delta but do not change surrounding UI.
+extension ChatSession {
+    var transcriptIndependentState: ChatSession {
+        var value = self
+        value.messages = []
+        value.remoteTask?.version = 0
+        value.remoteOwner?.version = 0
+        return value
+    }
+}

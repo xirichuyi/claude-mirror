@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import AppKit
+import RemoteCCCore
 
 struct ThinkingCard: View {
     let text: String
@@ -59,16 +60,23 @@ struct FencedCodeView: View {
 /// message viewport, return every event unchanged, and remove the monitor on teardown.
 struct ScrollReadingDetector: NSViewRepresentable {
     let onReadEarlier: () -> Void
+    let onReachedBottom: () -> Void
     func makeNSView(context: Context) -> ReadingView {
-        let view = ReadingView(); view.onReadEarlier = onReadEarlier; return view
+        let view = ReadingView()
+        view.onReadEarlier = onReadEarlier; view.onReachedBottom = onReachedBottom
+        return view
     }
-    func updateNSView(_ view: ReadingView, context: Context) { view.onReadEarlier = onReadEarlier }
+    func updateNSView(_ view: ReadingView, context: Context) {
+        view.onReadEarlier = onReadEarlier; view.onReachedBottom = onReachedBottom
+    }
     static func dismantleNSView(_ view: ReadingView, coordinator: ()) { view.removeMonitor() }
 
     final class ReadingView: NSView {
         var onReadEarlier: (() -> Void)?
+        var onReachedBottom: (() -> Void)?
         private var monitor: Any?
         private var liveScrollObserver: NSObjectProtocol?
+        private var endScrollObserver: NSObjectProtocol?
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -80,13 +88,20 @@ struct ScrollReadingDetector: NSViewRepresentable {
                 let rect = self.convert(scroll.bounds, from: scroll)
                 if rect.intersects(self.bounds), rect.height > self.bounds.height / 2 { self.onReadEarlier?() }
             }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDown]) { [weak self] event in
+            endScrollObserver = NotificationCenter.default.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: nil, queue: .main) { [weak self] notification in
+                guard let self, let scroll = notification.object as? NSScrollView,
+                      scroll.window === self.window, let document = scroll.documentView else { return }
+                let rect = self.convert(scroll.bounds, from: scroll)
+                guard rect.intersects(self.bounds), rect.height > self.bounds.height / 2 else { return }
+                let visible = scroll.documentVisibleRect
+                let distance = document.isFlipped ? document.bounds.maxY - visible.maxY : visible.minY - document.bounds.minY
+                if ReplyScrollPolicy.isNearBottom(distance) { self.onReachedBottom?() }
+            }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
                 guard let self, let window = self.window, event.window === window else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
                 if self.bounds.contains(point) {
-                    if event.type == .scrollWheel && event.scrollingDeltaY > 0 { self.onReadEarlier?() }
-                    // Clicking a message may start text selection or drag the scrollbar.
-                    if event.type == .leftMouseDown { self.onReadEarlier?() }
+                    if event.scrollingDeltaY != 0 { self.onReadEarlier?() }
                 }
                 return event
             }
@@ -94,10 +109,12 @@ struct ScrollReadingDetector: NSViewRepresentable {
         func removeMonitor() {
             if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil
             if let liveScrollObserver { NotificationCenter.default.removeObserver(liveScrollObserver) }; liveScrollObserver = nil
+            if let endScrollObserver { NotificationCenter.default.removeObserver(endScrollObserver) }; endScrollObserver = nil
         }
         deinit {
             if let monitor { NSEvent.removeMonitor(monitor) }
             if let liveScrollObserver { NotificationCenter.default.removeObserver(liveScrollObserver) }
+            if let endScrollObserver { NotificationCenter.default.removeObserver(endScrollObserver) }
         }
     }
 }
@@ -107,17 +124,26 @@ struct ScrollReadingDetector: NSViewRepresentable {
 struct TranscriptScrollTracking: ViewModifier {
     @Binding var farFromBottom: Bool
     @Binding var following: Bool
+    @State private var userScrolling = false
     func body(content: Content) -> some View {
         if #available(macOS 15, *) {
             content
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     geometry.contentSize.height - geometry.visibleRect.maxY > 180
                 } action: { _, far in farFromBottom = far }
-                .onScrollPhaseChange { _, phase in
-                    if phase == .tracking || phase == .interacting { following = false }
+                .onScrollPhaseChange { _, phase, context in
+                    if phase == .tracking || phase == .interacting || phase == .decelerating {
+                        userScrolling = true
+                        following = false
+                    } else if phase == .idle && userScrolling {
+                        userScrolling = false
+                        let distance = context.geometry.contentSize.height - context.geometry.visibleRect.maxY
+                        following = ReplyScrollPolicy.isNearBottom(distance)
+                    }
                 }
         } else {
-            content.background(ScrollReadingDetector { if following { following = false } }
+            content.background(ScrollReadingDetector(onReadEarlier: { following = false }, onReachedBottom: { following = true })
                 .frame(maxWidth: .infinity, maxHeight: .infinity))
         }
     }

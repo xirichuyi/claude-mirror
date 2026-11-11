@@ -83,8 +83,12 @@ struct WorkArea: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.active.map { historyDisplayTitle($0.name) } ?? "新对话")
                     .font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                if let session = model.active, session.isBusy {
-                    Text(statusLabel(session.status)).font(.system(size: 10)).foregroundStyle(WorkbenchTheme.inkMuted)
+                if let session = model.active,
+                   session.isBusy || session.runningBackgroundTaskCount > 0 || session.transportError != nil {
+                    Button { model.showActivity = true } label: {
+                        Text(model.activityLabel(session)).font(.system(size: 10))
+                    }.buttonStyle(.plain).foregroundStyle(WorkbenchTheme.inkMuted)
+                        .help("查看远端任务")
                 }
             }
             Spacer(minLength: 4)

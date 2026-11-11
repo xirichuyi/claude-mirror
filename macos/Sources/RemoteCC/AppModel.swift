@@ -15,6 +15,7 @@ enum SidePanel: String, CaseIterable, Identifiable {
 @MainActor
 final class AppModel: ObservableObject {
     let accountStore = AccountStore()
+    let transcript = TranscriptState()
     private(set) var engine: ChatEngine?
     private(set) var connections: SSHConnections?
     private var workspaces: [String: Workspace] = [:]
@@ -32,7 +33,7 @@ final class AppModel: ObservableObject {
     @Published var checkingForUpdates = false
     @Published var activeId: String? {
         didSet {
-            if activeId != oldValue { showSessionDetails = false }
+            if activeId != oldValue { showSessionDetails = false; transcript.update(active) }
         }
     }
     @Published var showArchived = false
@@ -112,6 +113,12 @@ final class AppModel: ObservableObject {
     private var capabilityRequests = Set<String>()
     private let lastConnectionKey = "last-connection"
 
+    /// Isolated UI previews and rendering tests never connect to saved machines.
+    init(previewSession: ChatSession) {
+        activeId = previewSession.id
+        transcript.update(previewSession)
+    }
+
     init() {
         drafts = UserDefaults.standard.dictionary(forKey: "composer-drafts") as? [String: String] ?? [:]
         if let data = UserDefaults.standard.data(forKey: "composer-attachments") {
@@ -135,7 +142,8 @@ final class AppModel: ObservableObject {
                 try engine.hydrate(examples[0].id)
                 engine.updateConnection(DemoData.config, ConnectionState(status: .connected))
                 historyStatus = "已同步 3 条对话"
-                engine.onChange = { [weak self] in self?.objectWillChange.send() }
+                transcript.update(active)
+                engine.onChange = { [weak self] in self?.engineChanged() }
             } catch { fatalError = error.localizedDescription }
             return
         }
@@ -151,6 +159,10 @@ final class AppModel: ObservableObject {
             let engine = try ChatEngine(store: try ChatStore(directory: support), agents: agents, files: files)
             self.connections = connections; self.engine = engine
             engine.onChange = { [weak self] in self?.engineChanged() }
+            engine.onTranscriptChange = { [weak self] ids in
+                guard let self, let id = self.activeId, ids.contains(id) else { return }
+                self.transcript.update(self.active)
+            }
             engine.onError = { [weak self] in self?.show($0) }
             connections.onState = { [weak self] config, state in
                 Task { @MainActor in self?.connectionChanged(config, state) }
@@ -197,6 +209,17 @@ final class AppModel: ObservableObject {
 
     var sessions: [ChatSession] { engine?.sessions ?? [] }
     var active: ChatSession? { activeId.flatMap { engine?.session($0) } }
+    func activityLabel(_ session: ChatSession) -> String {
+        switch engine?.taskConnection(session.id) {
+        case .offline: return "远端任务待重连"
+        case .restoring: return "正在恢复远端任务…"
+        case .failed: return "任务同步失败"
+        default: break
+        }
+        if session.isBusy { return statusLabel(session.status) }
+        if session.runningBackgroundTaskCount > 0 { return "后台运行 · \(session.runningBackgroundTaskCount) 项" }
+        return statusLabel(session.status)
+    }
     var sortedSessions: [ChatSession] {
         sessions.sorted { a, b in
             if (a.pinned ?? false) != (b.pinned ?? false) { return a.pinned ?? false }
@@ -343,6 +366,7 @@ final class AppModel: ObservableObject {
 
     private var lastBusy: [String: Bool] = [:]
     private func engineChanged() {
+        transcript.update(active)
         objectWillChange.send()
         for session in sessions {
             let background = Set((session.tasks?.array ?? []).filter { $0["status"]?.string == "running" && $0["ambient"]?.bool != true }.compactMap { $0["id"]?.string })
@@ -481,6 +505,10 @@ final class AppModel: ObservableObject {
                 try await Task.sleep(for: .milliseconds(150))
                 guard activeId == id, let current = engine.session(id),
                       engine.connectionState(current.config).status == .connected else { return }
+                if engine.taskConnection(id) == .restoring || engine.taskConnection(id) == .failed {
+                    await engine.attach(id)
+                    try Task.checkCancellation()
+                }
                 let workspace = workspace(for: current)
                 if workspace?.root == nil { Task { await workspace?.browse(current.directory) } }
                 if current.historyLoaded == false {
@@ -518,7 +546,7 @@ final class AppModel: ObservableObject {
 
     var attentionSessions: [ChatSession] {
         sortedSessions.filter { $0.isBusy || !$0.permissions.isEmpty || unreadSessions.contains($0.id) ||
-            ($0.tasks?.array ?? []).contains { $0["status"]?.string == "running" && $0["ambient"]?.bool != true } }
+            $0.runningBackgroundTaskCount > 0 || $0.transportError != nil || engine?.taskConnection($0.id) == .restoring }
     }
 
     func newConversation() {
