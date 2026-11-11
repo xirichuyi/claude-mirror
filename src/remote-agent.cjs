@@ -392,6 +392,31 @@ async function hello() {
     claude: located.code ? null : located.stdout.trim(), persistenceWarning: persistenceWarning() };
 }
 
+// Classifies `claude auth status`. Older Claude builds lack the command; that is "unknown",
+// never "logged out", so the client does not nag users whose setup it cannot see.
+function parseAuthStatus(result, env = process.env) {
+  const text = (result.stdout || '') + '\n' + (result.stderr || '');
+  let parsed = null;
+  try { parsed = JSON.parse(String(result.stdout || '').trim()); } catch { /* Plain-text output. */ }
+  if (parsed && typeof parsed.loggedIn === 'boolean') return parsed.loggedIn ? 'loggedIn' : 'loggedOut';
+  if (result.code === 0) return 'loggedIn';
+  if (/unknown (command|option)|did you mean|invalid command/i.test(text)) return 'unknown';
+  if (['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX'].some(name => env[name])) return 'loggedIn';
+  if (/not (logged|signed|authenticated)|log ?in|sign ?in|unauthenticated/i.test(text) || result.code === 1) return 'loggedOut';
+  return 'unknown';
+}
+
+async function claudeStatus() {
+  const located = await run('sh', ['-c', 'command -v claude']);
+  if (located.code) return { claude: null, auth: 'unknown' };
+  const claude = located.stdout.trim();
+  const result = await run(claude, ['auth', 'status'], { timeout: 20000 });
+  if (result.missing) return { claude: null, auth: 'unknown' };
+  return { claude, auth: parseAuthStatus(result), loginCommand: shellWord(claude) + ' auth login' };
+}
+
+const shellWord = value => /^[\w@%+=:,./-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'";
+
 async function attachmentLocation(request) {
   if (!/^[a-f0-9]{64}$/.test(request.digest || '')) throw new Error('无效附件摘要');
   const root = path.join(os.tmpdir(), 'claudock-attachments-' + (process.getuid?.() ?? os.userInfo().username));
@@ -421,7 +446,7 @@ async function attachmentLookup(request) {
 }
 
 const fileOperations = {
-  attachmentLookup, hello, list: listing, preview, textPage, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
+  attachmentLookup, hello, claudeStatus, list: listing, preview, textPage, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
   pathInfo: request => metadata(resolve(request.path, request.base)),
   diff: gitDiffText, gitStatus, gitFileDiff, createWorktree, create: createEntry, rename: renameEntry, remove: removeEntry,
 };
@@ -1226,4 +1251,4 @@ if (require.main === module) {
 }
 
 module.exports = { fileOperations, historyOperations, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
-  processCommand, persistenceWarning, workerCommand };
+  processCommand, persistenceWarning, workerCommand, parseAuthStatus };

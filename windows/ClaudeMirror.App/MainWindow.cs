@@ -87,43 +87,68 @@ public sealed partial class MainWindow : Window
     }
     private async Task ConnectDialogAsync(HostProfile? existing)
     {
-        var name = new TextBox { Header = "主机名称", Text = existing?.Name ?? "" };
-        var address = new TextBox { Header = "地址", Text = existing?.Host ?? "" };
-        var user = new TextBox { Header = "用户名", Text = existing?.User ?? "" };
+        var name = new TextBox { Header = "显示名称", Text = existing?.Name ?? "", PlaceholderText = "例如：开发服务器（可选）" };
+        var address = new TextBox { Header = "服务器地址", Text = existing is null ? "" : existing.User + "@" + existing.Host, PlaceholderText = "例如 ubuntu@192.168.1.10" };
+        var user = new TextBox { Header = "用户名", PlaceholderText = "地址里没写 用户名@ 时填写" };
         var port = new NumberBox { Header = "端口", Value = existing?.Port ?? 22, Minimum = 1, Maximum = 65535 };
-        var mode = new ComboBox { Header = "认证", ItemsSource = new[] { "密码", "私钥" }, SelectedIndex = existing?.KeyFile is null ? 0 : 1 };
-        var password = new PasswordBox { Header = "密码" }; var phrase = new PasswordBox { Header = "私钥口令（可选）" };
+        var mode = new ComboBox { Header = "登录方式", ItemsSource = new[] { "密码", "私钥文件" }, SelectedIndex = existing?.KeyFile is null ? 0 : 1 };
+        var password = new PasswordBox { Header = "密码", PlaceholderText = "服务器登录密码" }; var phrase = new PasswordBox { Header = "私钥口令（可选）" };
         var key = new TextBox { Header = "私钥文件", Text = existing?.KeyFile ?? "" };
         var pick = Button("选择私钥", async () => { var file = await PickAsync(); if (file is not null) key.Text = file; });
-        void UpdateMode() { password.Visibility = mode.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed; phrase.Visibility = key.Visibility = pick.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed; }
+        var note = new TextBlock { Foreground = muted, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        void UpdateMode()
+        {
+            password.Visibility = mode.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+            phrase.Visibility = key.Visibility = pick.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+            note.Text = mode.SelectedIndex == 0 ? "密码只用于这次连接，不会保存。连接成功后可以一键设置免密登录。首次连接会请你确认服务器指纹。" : "使用所选私钥登录，私钥不会上传。首次连接会请你确认服务器指纹。";
+        }
         mode.SelectionChanged += (_, _) => UpdateMode(); UpdateMode();
-        name.PlaceholderText = "例如：开发服务器（可选）"; address.Header = "SSH 主机"; address.PlaceholderText = "IP 地址或域名";
-        user.PlaceholderText = "远端用户名"; mode.Header = "认证方式";
-        var endpoint = new Grid { ColumnSpacing = 12 };
-        endpoint.ColumnDefinitions.Add(new ColumnDefinition()); endpoint.ColumnDefinitions.Add(new ColumnDefinition());
-        endpoint.Children.Add(user); Grid.SetColumn(port,1); endpoint.Children.Add(port);
+        var advanced = new StackPanel { Spacing = 14 };
+        foreach (var element in new UIElement[] { name, user, port }) advanced.Children.Add(element);
+        var expander = new Expander { Header = "高级选项：名称、用户名、端口", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            IsExpanded = existing is not null && (existing.Port != 22 || existing.Name != existing.Host) };
         var panel = new StackPanel { Spacing = 14 };
-        panel.Children.Add(new TextBlock { Text = "连接 SSH，找回这台机器上的 Claude Code 对话。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
-        foreach (var element in new UIElement[] { name, address, endpoint, mode, password, key, pick, phrase }) panel.Children.Add(element);
-        panel.Children.Add(new TextBlock { Text = "首次连接时会显示主机指纹。", Foreground = muted, FontSize = 12 });
-        var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = existing == null ? "添加机器" : "连接机器", Content = new ScrollViewer { Content = panel }, Background = canvas, PrimaryButtonText = "连接机器", CloseButtonText = "取消" };
-        void Validate() => dialog.IsPrimaryButtonEnabled = !string.IsNullOrWhiteSpace(address.Text) && !string.IsNullOrWhiteSpace(user.Text) && port.Value is >= 1 and <= 65535 &&
-            (mode.SelectedIndex == 0 || !string.IsNullOrWhiteSpace(key.Text));
+        panel.Children.Add(new TextBlock { Text = "填写服务器地址和登录方式。Claude Code 和项目都在服务器上运行，本机只负责显示和操作。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
+        foreach (var element in new UIElement[] { address, mode, password, key, pick, phrase, note, expander }) panel.Children.Add(element);
+        var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = existing == null ? "添加服务器" : "连接服务器", Content = new ScrollViewer { Content = panel }, Background = canvas, PrimaryButtonText = "连接", CloseButtonText = "取消" };
+        (string User, string Host) Target()
+        {
+            var text = address.Text.Trim(); var at = text.LastIndexOf('@');
+            return at > 0 ? (text[..at], text[(at + 1)..]) : (user.Text.Trim(), text);
+        }
+        void Validate()
+        {
+            var (u, h) = Target();
+            dialog.IsPrimaryButtonEnabled = !string.IsNullOrWhiteSpace(h) && !string.IsNullOrWhiteSpace(u) && port.Value is >= 1 and <= 65535 && (mode.SelectedIndex == 0 || !string.IsNullOrWhiteSpace(key.Text));
+            if (string.IsNullOrWhiteSpace(u) && !string.IsNullOrWhiteSpace(h)) { note.Text = "请在地址前写上用户名，例如 root@" + h + "，或在高级选项里填写。"; }
+            else if (!string.IsNullOrWhiteSpace(h)) UpdateMode();
+        }
         address.TextChanged += (_,_) => Validate(); user.TextChanged += (_,_) => Validate(); key.TextChanged += (_,_) => Validate();
         mode.SelectionChanged += (_,_) => Validate(); port.ValueChanged += (_,_) => Validate(); Validate();
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? address.Text.Trim() : name.Text.Trim(), address.Text.Trim(), (int)port.Value, user.Text.Trim(), mode.SelectedIndex == 1 ? key.Text : null);
-        agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…";
-        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => { if (agent == next) { status.Text = error; busy = false; RefreshWorkbench(); } });
-        try { await next.ConnectAsync(profile, password.Password, phrase.Password, Path.Combine(AppContext.BaseDirectory, "server"), fingerprint => ConfirmHostAsync(profile, fingerprint)); }
-        catch { next.Dispose(); RefreshWorkbench(); throw; }
+        var (login, server) = Target();
+        var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? server : name.Text.Trim(), server, (int)port.Value, login, mode.SelectedIndex == 1 ? key.Text : null);
+        agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
+        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => { if (agent == next) { status.Text = ConnectionAdvice.Explain(error); busy = false; RefreshWorkbench(); } });
+        RemoteSetupException? setup = null;
+        var usedPassword = mode.SelectedIndex == 0;
+        try { await next.ConnectAsync(profile, password.Password, phrase.Password, ServerResources, fingerprint => ConfirmHostAsync(profile, fingerprint)); }
+        catch (RemoteSetupException e) { setup = e; }
+        catch (Exception e) { next.Dispose(); RefreshWorkbench(); throw new IOException(ConnectionAdvice.Explain(e.Message), e); }
         finally { password.Password = ""; phrase.Password = ""; }
-        availableModels.Clear(); availableCommands.Clear(); selectedModel=null;
-        busy = false; host = profile; local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(profile)); local.Hosts.Add(profile); local.Save();
-        hosts.ItemsSource = local.Hosts.ToList(); hosts.SelectedItem = profile; directory.Text = next.Home;
-        await NewConversationAsync(); await RefreshHistoryAsync(); status.Text = "已连接";
+        host = profile; local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(profile)); local.Hosts.Add(profile); local.Save();
+        hosts.ItemsSource = local.Hosts.ToList(); hosts.SelectedItem = profile;
+        if (setup is not null)
+        {
+            // SSH works; the server only needs setting up. Keep the connection for one-click install.
+            health = MachineHealth.Issues(setup, null, null); status.Text = "SSH 已连接，服务器还需要设置"; RenderHealth();
+            return;
+        }
+        await AfterAgentStartedAsync(next);
+        await RefreshHealthAsync();
+        if (usedPassword) await RunAsync(() => OfferKeyLoginAsync(profile, next));
     }
-    private RemoteAgent RequireAgent() => agent?.Connected == true ? agent : throw new IOException("请先连接服务器");
+    private RemoteAgent RequireAgent() => agent?.Connected == true ? agent : throw new IOException(agent?.SshConnected == true ? "服务器还需要设置，请先按首页提示完成" : "请先连接服务器");
     private async Task RefreshHistoryAsync()
     {
         var remote = RequireAgent(); var sessions = new List<Conversation>(); object offset = 0;

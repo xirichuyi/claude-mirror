@@ -16,6 +16,9 @@ struct ChatView: View {
                         Button("选择项目") { model.showProjectPicker = true }
                     }.font(.callout).padding(12).background(WorkbenchTheme.warning.opacity(0.08))
                 }
+                if model.active != nil {
+                    MachineHealthBanner(compact: true)
+                }
                 if model.active == nil {
                     MachineHomeView()
                 } else if let session = model.active, !session.messages.isEmpty || session.remoteHistoryRef != nil {

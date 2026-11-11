@@ -6,8 +6,11 @@ public struct ServerResources: Sendable {
     public let agentDigest: String
     public let bundleDigest: String
     public let bundlePayload: String
+    /// scripts/install-claude-remote.sh, run over SSH for one-click server setup.
+    public let installScript: Data?
 
     public init(directory: URL) throws {
+        installScript = try? Data(contentsOf: directory.appendingPathComponent("install-claude-remote.sh"))
         agentSource = try Data(contentsOf: directory.appendingPathComponent("remote-agent.cjs"))
         let manifest = try JSON.parse(try Data(contentsOf: directory.appendingPathComponent("manifest.json")))
         guard let agent = manifest["agentDigest"]?.string, let digest = manifest["bundleDigest"]?.string, let payload = manifest["bundlePayload"]?.string else {
@@ -49,7 +52,10 @@ public final class AgentChannel: @unchecked Sendable {
     private var bootstrap: String {
         """
         A="\(agentFile)"
-        if ! command -v node >/dev/null 2>&1; then
+        M="$HOME/.local/share/claude-mirror/node/bin"
+        if [ -x "$M/node" ]; then
+          PATH="$M:$PATH"
+        elif ! command -v node >/dev/null 2>&1; then
           for N in "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.local/share/fnm/node-versions/*/installation/bin/node "$HOME"/.fnm/node-versions/*/installation/bin/node "$HOME"/.volta/bin/node "$HOME"/.asdf/shims/node /usr/local/bin/node /opt/homebrew/bin/node; do
             [ -x "$N" ] && PATH="$(dirname "$N"):$PATH"
           done
@@ -57,6 +63,8 @@ public final class AgentChannel: @unchecked Sendable {
         PATH="$PATH:$HOME/.local/bin:$HOME/.claude/local:$HOME/.npm-global/bin"
         export PATH
         command -v node >/dev/null 2>&1 || { echo __RCC_NO_NODE__; exit 0; }
+        V="$(node --version 2>/dev/null)"; V="${V#v}"; J="${V%%.*}"; R="${V#*.}"; R="${R%%.*}"
+        case "$J$R" in *[!0-9]*|"") ;; *) if [ "$J" -lt 18 ] || { [ "$J" -eq 18 ] && [ "$R" -lt 14 ]; }; then echo "__RCC_OLD_NODE__ v$V"; exit 0; fi ;; esac
         [ -f "$A" ] || { echo __RCC_INSTALL__; exit 0; }
         exec node "$A"
         """
@@ -82,7 +90,7 @@ public final class AgentChannel: @unchecked Sendable {
         let server = try hello.decode(ServerInfo.self)
         guard server.nodeSupported else {
             close()
-            throw RemoteError("服务器 Node.js 版本过低（\(server.node ?? "未知")），需要 18.14 或更高版本")
+            throw RemoteSetupError.nodeOutdated(server.node ?? "未知版本")
         }
         lock.withLock { info = server }
     }
@@ -116,7 +124,8 @@ public final class AgentChannel: @unchecked Sendable {
                     // Profile scripts may print anything; ignore lines until the handshake.
                     let text = String(decoding: line, as: UTF8.self)
                     if text == "__RCC_INSTALL__" { timer.cancel(); state.settle(.success("install")) }
-                    else if text == "__RCC_NO_NODE__" { timer.cancel(); state.settle(.failure(RemoteError("服务器未找到 Node.js。Claude 控制通道需要 Node.js 18.14 或更高版本，请先在服务器上安装。"))) }
+                    else if text == "__RCC_NO_NODE__" { timer.cancel(); state.settle(.failure(RemoteSetupError.nodeMissing)) }
+                    else if text.hasPrefix("__RCC_OLD_NODE__ ") { timer.cancel(); state.settle(.failure(RemoteSetupError.nodeOutdated(String(text.dropFirst("__RCC_OLD_NODE__ ".count))))) }
                     else if text.hasPrefix("{\"rcc\":\"ready\"") {
                         state.ready = true
                         self?.setChild(process)

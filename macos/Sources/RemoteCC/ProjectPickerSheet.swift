@@ -11,6 +11,17 @@ struct ProjectPickerSheet: View {
     @State private var folderName = ""
     @State private var busy = false
     @State private var error = ""
+    @State private var home: DirectoryListing?
+
+    /// Folders in the home directory, likely project roots first, so new users can pick instead of typing a path.
+    private var homeFolders: [FileEntry] {
+        let common = ["projects", "project", "code", "src", "workspace", "work", "dev", "repos", "git", "github"]
+        let folders = (home?.entries ?? []).filter { $0.directory && !$0.name.hasPrefix(".") }
+        return Array(folders.sorted { a, b in
+            let ra = common.firstIndex(of: a.name.lowercased()) ?? common.count, rb = common.firstIndex(of: b.name.lowercased()) ?? common.count
+            return ra != rb ? ra < rb : a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }.prefix(12))
+    }
 
     private var recent: [String] {
         Array(Set(model.sessions.filter { $0.config.key == model.currentConfig?.key && !model.projectMissing($0) }.map(\.directory))).sorted()
@@ -29,6 +40,17 @@ struct ProjectPickerSheet: View {
                 TextField("远端目录", text: $directory).textFieldStyle(WorkbenchTextFieldStyle()).focused($pathFocused).disabled(busy)
                 if creating {
                     TextField("文件夹名称", text: $folderName).textFieldStyle(WorkbenchTextFieldStyle()).disabled(busy)
+                }
+            }
+            if let home {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(creating ? "放在哪里（不确定就选主目录）" : "常用位置（不确定就从主目录开始）").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            locationChip("主目录", path: home.path, icon: "house")
+                            ForEach(homeFolders) { folder in locationChip(folder.name, path: folder.path, icon: "folder") }
+                        }
+                    }
                 }
             }
             if !recent.isEmpty {
@@ -75,6 +97,19 @@ struct ProjectPickerSheet: View {
         .interactiveDismissDisabled(busy)
         .task { await Task.yield(); pathFocused = true }
         .onAppear { directory = model.proposedProject ?? model.active?.directory ?? model.currentConfig?.directory ?? "~" }
+        .task {
+            guard let engine = model.engine, let config = model.currentConfig, model.isConnected else { return }
+            home = try? await engine.files.list(config, "~", hidden: false)
+        }
+    }
+
+    private func locationChip(_ title: String, path: String, icon: String) -> some View {
+        Button { directory = path } label: {
+            Label { Text(title).lineLimit(1) } icon: { WorkbenchIcon(symbol: icon) }
+                .font(.callout).padding(.horizontal, 10).padding(.vertical, 5)
+                .background(directory == path ? WorkbenchTheme.accent.opacity(0.15) : WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(directory == path ? WorkbenchTheme.accent : WorkbenchTheme.border))
+        }.buttonStyle(.plain).disabled(busy).help(path)
     }
 }
 #endif
