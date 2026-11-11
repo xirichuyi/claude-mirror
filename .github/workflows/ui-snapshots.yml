@@ -1,0 +1,42 @@
+name: UI snapshots
+
+# Renders the demo build's scenes (fictional data, no network) for UI review.
+# Runs on demand, or when this file or the macOS UI sources change on a non-main branch.
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths: ['.github/workflows/ui-snapshots.yml', 'macos/Sources/RemoteCC/**']
+
+jobs:
+  snapshots:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use the newest stable Xcode on the runner
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - run: sh macos/scripts/build-demo.sh
+      - name: Render scenes
+        run: |
+          mkdir -p snapshots
+          for scene in chat home connect files diff settings tools; do
+            sh macos/scripts/snapshot.sh "$PWD/snapshots/$scene-light" "$scene" light 1280x820 || echo "::warning::$scene light failed"
+          done
+          for scene in chat home; do
+            sh macos/scripts/snapshot.sh "$PWD/snapshots/$scene-dark" "$scene" dark 1280x820 || echo "::warning::$scene dark failed"
+          done
+          ls -la snapshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-snapshots
+          path: snapshots/*.png
+          if-no-files-found: error
