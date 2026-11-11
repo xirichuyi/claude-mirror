@@ -112,6 +112,7 @@ struct WorkArea: View {
             Button { model.sessionMenuVisible.toggle() } label: { WorkbenchIcon(symbol: "ellipsis") }
                 .buttonStyle(WorkbenchIconButtonStyle(selected: model.sessionMenuVisible))
                 .help("对话操作：同步、分支、导出").accessibilityLabel("对话操作")
+                .anchorPreference(key: SessionMenuAnchorKey.self, value: .bounds) { $0 }
         }
     }
 

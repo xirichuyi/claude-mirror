@@ -256,9 +256,9 @@ struct RemoteSetupSheet: View {
                                 .foregroundStyle(line.hasPrefix("==>") ? WorkbenchTheme.ink : WorkbenchTheme.inkMuted)
                                 .frame(maxWidth: .infinity, alignment: .leading).id(index)
                         }
-                    }.padding(10).textSelection(.enabled)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(10).textSelection(.enabled)
                 }
-                .frame(height: 220)
+                .frame(maxWidth: .infinity).frame(height: 220)
                 .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(WorkbenchTheme.border))
                 .onChange(of: lines.count) { _, count in proxy.scrollTo(count - 1, anchor: .bottom) }

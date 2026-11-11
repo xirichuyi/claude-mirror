@@ -130,7 +130,7 @@ struct TranscriptScrollTracking: ViewModifier {
             content
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentSize.height - geometry.visibleRect.maxY > 180
+                    geometry.contentSize.height - geometry.visibleRect.maxY > 24
                 } action: { _, far in farFromBottom = far }
                 .onScrollPhaseChange { _, phase, context in
                     if phase == .tracking || phase == .interacting || phase == .decelerating {

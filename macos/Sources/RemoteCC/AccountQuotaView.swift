@@ -14,10 +14,11 @@ struct AccountQuotaView: View {
             Button { model.presentation = .account } label: {
                 HStack(spacing: 5) {
                     WorkbenchIcon(symbol: "person.crop.circle")
-                    // Truncate the string, not a flexible frame: a flexible frame leaves a gap around short names.
-                    Text(email.count > 26 ? String(email.prefix(12)) + "…" + String(email.suffix(12)) : email).lineLimit(1).fixedSize()
+                    // Fixed slots keep the hit targets still while account and quota refresh.
+                    Text(email).lineLimit(1).truncationMode(.middle)
                 }
             }
+            .frame(width: 150, alignment: .leading)
             .help(email).accessibilityLabel("账户信息")
             Button { model.presentation = .accountUsage } label: {
                 HStack(spacing: 5) {
@@ -31,7 +32,7 @@ struct AccountQuotaView: View {
                     } else {
                         Text(store.refreshing ? "用量读取中…" : "用量未报告")
                     }
-                }.fixedSize()
+                }.frame(width: 132, alignment: .leading)
             }
             .help(store.failure ?? "查看订阅已用额度与重置时间")
             .accessibilityLabel("订阅用量")

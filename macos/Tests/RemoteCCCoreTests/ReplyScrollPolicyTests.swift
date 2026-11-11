@@ -3,16 +3,16 @@ import XCTest
 
 final class ReplyScrollPolicyTests: XCTestCase {
     func testSmallScrollAndContentClickDoNotShowJump() {
-        for distance in [0.0, 24, 80, 180] {
+        for distance in [0.0, 24] {
             XCTAssertFalse(ReplyScrollPolicy.showsJump(distance: distance, following: false))
         }
-        XCTAssertTrue(ReplyScrollPolicy.showsJump(distance: 181, following: false))
+        XCTAssertTrue(ReplyScrollPolicy.showsJump(distance: 25, following: false))
         XCTAssertFalse(ReplyScrollPolicy.showsJump(distance: 250, following: true))
     }
 
     func testReturningToBottomResumesFollowing() {
-        XCTAssertTrue(ReplyScrollPolicy.isNearBottom(24))
-        XCTAssertFalse(ReplyScrollPolicy.isNearBottom(25))
+        XCTAssertTrue(ReplyScrollPolicy.isNearBottom(48))
+        XCTAssertFalse(ReplyScrollPolicy.isNearBottom(49))
     }
 
     func testHistoricalUsageOutputIsAssistantTextWithOriginalLineBreaks() throws {

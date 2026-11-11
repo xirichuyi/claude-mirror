@@ -24,10 +24,6 @@ struct FilePanel: View {
     var body: some View {
         VStack(spacing: 0) {
             if let workspace = model.activeWorkspace {
-                if !model.isConnected {
-                    Label("连接已断开", systemImage: "network.slash")
-                        .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).padding(8)
-                }
                 RetainedPaneLayout(selection: model.panel == .files ? 0 : model.panel == .changes ? 1 : 2, parkInactive: false) {
                     FileTreeView(workspace: workspace).sidebarPaneVisible(model.showFiles && model.panel == .files)
                     VStack(spacing: 0) {
@@ -45,6 +41,12 @@ struct FilePanel: View {
                     .frame(maxHeight: .infinity)
             }
         }.background { FrostedBackground() }
+        .overlay(alignment: .topTrailing) {
+            if !model.isConnected {
+                Image(systemName: "network.slash").foregroundStyle(WorkbenchTheme.inkMuted)
+                    .padding(8).help("连接已断开")
+            }
+        }
     }
 
     private func workspacePath(_ workspace: Workspace) -> some View {
@@ -52,7 +54,7 @@ struct FilePanel: View {
             .font(.system(size: 11)).foregroundStyle(WorkbenchTheme.inkMuted)
             .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10).frame(height: 28)
+            .padding(.horizontal, 10).frame(height: 32)
     }
 }
 
@@ -364,7 +366,7 @@ struct ChangesView: View {
         let status = workspace.gitStatus
         VStack(alignment: .leading, spacing: 0) {
             Text(summary(status))
-                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).padding(10)
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1).padding(.horizontal, 10).frame(height: 28)
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(status?.files ?? []) { file in
@@ -421,12 +423,7 @@ struct SearchView: View {
                     Button { state.query = "" } label: { WorkbenchIcon(symbol: "xmark") }
                         .buttonStyle(QuietButtonStyle()).help("清空").accessibilityLabel("清空搜索")
                 }
-            }.padding(8)
-            if !state.status.isEmpty {
-                Text(state.matches.isEmpty ? state.status : "\(state.matches.count) 处 · \(groups.count) 个文件" + (state.status.contains("部分") ? " · 部分结果" : ""))
-                    .font(.system(size: 11)).foregroundStyle(WorkbenchTheme.inkMuted)
-                    .padding(.horizontal, 12).padding(.bottom, 8)
-            }
+            }.padding(.horizontal, 8).frame(height: 28)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(groups, id: \.path) { group in
@@ -455,7 +452,17 @@ struct SearchView: View {
                             }
                         }
                     }
-                }.padding(.horizontal, 4)
+                }.padding(.horizontal, 4).padding(.bottom, 24)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if !state.status.isEmpty {
+                Text(state.matches.isEmpty ? state.status : "\(state.matches.count) 处 · \(groups.count) 个文件")
+                    .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                    .lineLimit(1).padding(.horizontal, 10).frame(height: 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(WorkbenchTheme.sidebar)
+                    .help(state.status)
             }
         }
         .task(id: state.query) { if model.isConnected { state.run(in: workspace, delay: true) } }

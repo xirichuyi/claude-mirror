@@ -34,39 +34,50 @@ private struct ChatContent: View {
     let model: AppModel
     @ObservedObject var transcript: TranscriptState
     var body: some View {
-            VStack(spacing: 0) {
-                if let session = transcript.session, model.projectMissing(session) {
-                    HStack {
-                        Label("远端目录已不存在，历史对话仍可查看", systemImage: "folder.badge.questionmark")
-                        Spacer()
-                        Button("选择项目") { model.showProjectPicker = true }
-                    }.font(.callout).padding(12).background(WorkbenchTheme.warning.opacity(0.08))
-                }
-                if transcript.session != nil {
-                    MachineHealthBanner(compact: true)
-                }
-                if transcript.session == nil {
-                    MachineHomeView()
-                } else if let session = transcript.session, !session.messages.isEmpty || session.remoteHistoryRef != nil {
-                    if model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil || session.historyLoaded == false {
-                        HistoryNotice(session: session)
-                            .id(session.id)
-                            .padding(.horizontal, 24).padding(.vertical, 4)
-                            .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
-                            .frame(maxWidth: .infinity)
-                    }
-                    MessagesList(session: session, model: model,
-                        historyError: model.historyRefreshErrors[session.id], refreshing: model.refreshingHistory.contains(session.id))
-                        .id(session.id)
-                } else {
-                    WelcomeView()
-                }
+        Group {
+            if transcript.session == nil {
+                MachineHomeView()
+            } else if let session = transcript.session, !session.messages.isEmpty || session.remoteHistoryRef != nil {
+                MessagesList(session: session, model: model,
+                    historyError: model.historyRefreshErrors[session.id], refreshing: model.refreshingHistory.contains(session.id))
+                    .id(session.id)
+                    .padding(.top, 32)
+            } else {
+                WelcomeView()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .top) {
+            if let session = transcript.session {
+                HStack(spacing: 8) {
+                    if model.projectMissing(session) {
+                        Label("目录已不存在", systemImage: "folder.badge.questionmark")
+                        Button("选择项目") { model.showProjectPicker = true }
+                    } else if let config = model.currentConfig,
+                              let issue = model.machineHealth[config.key]?.first(where: { $0.blocking }) {
+                        Label(issue.title, systemImage: "exclamationmark.triangle").lineLimit(1)
+                        switch issue.action {
+                        case .install: Button("安装") { model.openRemoteSetup(config) }
+                        case .login(let command): Button("登录") { model.runInTerminal(config, command: command) }
+                        case .copy(let command): Button("复制命令") { model.copyCommand(command, note: "已复制") }
+                        case nil: EmptyView()
+                        }
+                        Button("重试") { model.recheckMachine(config) }
+                            .disabled(model.checkingHealth.contains(config.key))
+                    } else if model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil || session.historyLoaded == false {
+                        HistoryNotice(session: session).id(session.id)
+                    }
+                    Spacer(minLength: 0)
+                }.font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                    .padding(.horizontal, 24).frame(height: 32)
+                    .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
+                    .background(WorkbenchTheme.canvas)
+            }
+        }
+        .clipped()
     }
 }
+
 
 struct WelcomeView: View {
     @EnvironmentObject private var model: AppModel
@@ -112,6 +123,7 @@ struct MessagesList: View {
     let historyError: String?
     let refreshing: Bool
 
+    private let viewportState: TranscriptViewport
     @StateObject private var selection = TranscriptSelection()
     @State private var followsReply = true
     @State private var farFromBottom = false
@@ -120,10 +132,13 @@ struct MessagesList: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(session: ChatSession, model: AppModel, historyError: String?, refreshing: Bool,
-         initialWindow: TranscriptWindow = TranscriptWindow()) {
+         initialWindow: TranscriptWindow? = nil) {
         self.session = session; self.model = model
         self.historyError = historyError; self.refreshing = refreshing
-        _messageWindow = State(initialValue: initialWindow)
+        let state = model.transcriptViewport(for: session.id)
+        viewportState = state
+        _followsReply = State(initialValue: state.following)
+        _messageWindow = State(initialValue: initialWindow ?? state.window)
     }
 
     var body: some View {
@@ -162,7 +177,7 @@ struct MessagesList: View {
                     }
                     ForEach(session.messages[visibleRange]) { message in
                         // Equatable lets unchanged messages skip rendering while the last one streams.
-                        MessageRow(message: message, busy: message.id == session.messages.last?.id && session.isBusy, sessionStatus: session.status, actions: FileActions(open: { model.open($0, line: $1) }))
+                        MessageRow(message: message, busy: message.id == session.messages.last?.id && session.isBusy, sessionStatus: session.status, actions: FileActions(open: { model.open($0, line: $1) }, model: model, connected: model.isConnected))
                             .equatable()
                             .id(message.id)
                     }
@@ -191,6 +206,7 @@ struct MessagesList: View {
                         .onAppear { if #unavailable(macOS 15) { farFromBottom = false } }
                         .onDisappear { if #unavailable(macOS 15) { farFromBottom = true } }
                 }
+                .background(TranscriptViewportBridge(state: viewportState))
                 .environment(\.transcriptSelection, selection)
                 .padding(.horizontal, 24).padding(.vertical, 20)
                 .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
@@ -209,7 +225,13 @@ struct MessagesList: View {
                     messageWindow.latest()
                 }
             }
-            .onDisappear { cancelFollow() }
+            .onChange(of: messageWindow) { viewportState.window = messageWindow }
+            .onChange(of: followsReply) { viewportState.following = followsReply }
+            .onDisappear {
+                cancelFollow()
+                viewportState.window = messageWindow
+                viewportState.following = followsReply
+            }
             .modifier(TranscriptScrollTracking(farFromBottom: $farFromBottom, following: $followsReply))
             .overlay(alignment: .bottomTrailing) {
                 // AX scrolling does not necessarily emit wheel events. The return
@@ -317,6 +339,8 @@ struct HistoryNotice: View {
 /// Closures are not comparable, so they are left out of MessageRow's equality.
 struct FileActions {
     let open: (String, Int?) -> Void
+    var model: AppModel? = nil
+    var connected = false
 }
 
 struct MessageRow: View, Equatable {
@@ -325,11 +349,11 @@ struct MessageRow: View, Equatable {
     var sessionStatus: String = "idle"
     var showHeader = true
     let actions: FileActions
-    @EnvironmentObject private var model: AppModel
+    private var model: AppModel? { actions.model }
     @Environment(\.transcriptSelection) private var selection
 
 
-    static func == (a: MessageRow, b: MessageRow) -> Bool { a.busy == b.busy && a.sessionStatus == b.sessionStatus && a.showHeader == b.showHeader && a.message == b.message }
+    static func == (a: MessageRow, b: MessageRow) -> Bool { a.busy == b.busy && a.sessionStatus == b.sessionStatus && a.showHeader == b.showHeader && a.message == b.message && a.actions.connected == b.actions.connected }
 
     var body: some View {
         Group { if message.role == "user" { userBody } else { assistantBody } }
@@ -369,17 +393,23 @@ struct MessageRow: View, Equatable {
                     .background(WorkbenchTheme.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             }
             if let error = message.error {
-                ReplyFailureView(error: error, canEdit: model.active?.isBusy != true, edit: restoreRequest)
+                ReplyFailureView(error: error, canEdit: model?.active?.isBusy != true, edit: restoreRequest)
             }
-            if busy && message.error == nil && !hasInlineProgress {
-                HStack(spacing: 8) {
-                    if sessionStatus == "permission" { Image(systemName: "hand.raised").foregroundStyle(WorkbenchTheme.accent) }
-                    else { ProgressView().controlSize(.mini) }
-                    Text(message.activity ?? activityLabel).font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
-                }.padding(.vertical, 8).accessibilityElement(children: .combine)
-            }
-            if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
-            if !busy { MessageFooter(message: message) }
+            ZStack(alignment: .leading) {
+                if busy && message.error == nil && !hasInlineProgress {
+                    HStack(spacing: 8) {
+                        if sessionStatus == "permission" { Image(systemName: "hand.raised").foregroundStyle(WorkbenchTheme.accent) }
+                        else { ProgressView().controlSize(.mini) }
+                        Text(message.activity ?? activityLabel).font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
+                    }.accessibilityElement(children: .combine)
+                } else if !busy {
+                    HStack(spacing: 8) {
+                        if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
+                        MessageFooter(message: message, model: model)
+                    }
+                }
+            }.frame(height: 28, alignment: .leading)
+
         }
     }
 
@@ -402,7 +432,7 @@ struct MessageRow: View, Equatable {
     }
 
     private func restoreRequest() {
-        guard let session = model.active,
+        guard let model, let session = model.active,
               let index = session.messages.firstIndex(where: { $0.id == message.id }),
               let request = session.messages[..<index].last(where: { $0.role == "user" }) else { return }
         guard (model.drafts[session.id] ?? "").isEmpty, (model.attachments[session.id] ?? []).isEmpty else {
@@ -419,7 +449,7 @@ struct MessageRow: View, Equatable {
 // the message body and its native text layout.
 private struct MessageFooter: View {
     let message: ChatMessage
-    @EnvironmentObject private var model: AppModel
+    let model: AppModel?
     @State private var copied = false
 
     @ViewBuilder var body: some View {
@@ -436,7 +466,7 @@ private struct MessageFooter: View {
                     }
                 }
                 if message.checkpointId != nil && message.error == nil && !isUsageReport {
-                    Button { if let checkpoint = message.checkpointId, let id = model.activeId { model.presentation = .rewind(session: id, checkpoint: checkpoint) } } label: { Label("回退文件", systemImage: "arrow.uturn.backward") }.buttonStyle(QuietButtonStyle()).disabled(model.active?.isBusy == true || !model.isConnected)
+                    Button { if let model, let checkpoint = message.checkpointId, let id = model.activeId { model.presentation = .rewind(session: id, checkpoint: checkpoint) } } label: { Label("回退文件", systemImage: "arrow.uturn.backward") }.buttonStyle(QuietButtonStyle()).disabled(model?.active?.isBusy == true || model?.isConnected != true)
                 }
                 Text(parts.joined(separator: " · ")).lineLimit(1).truncationMode(.middle)
             }
@@ -495,7 +525,7 @@ struct BlockView: View, Equatable {
     var thinkingActive = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.block == rhs.block && lhs.thinkingActive == rhs.thinkingActive
+        lhs.block == rhs.block && lhs.thinkingActive == rhs.thinkingActive && lhs.actions.connected == rhs.actions.connected
     }
 
     var body: some View {
@@ -526,7 +556,7 @@ struct BlockView: View, Equatable {
 }
 
 struct ToolCard: View {
-    @EnvironmentObject private var model: AppModel
+    private var model: AppModel? { actions.model }
     let block: Block
     let actions: FileActions
     @State private var expanded: Bool?
@@ -556,9 +586,9 @@ struct ToolCard: View {
                 if let file = view.file, ["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"].contains(block.name ?? "") {
                     HStack {
                         Button("打开文件") { actions.open(file, view.line) }
-                        Button("下载") { model.download(file) }
-                        if block.name != "Read" { Button("查看变更") { model.panel = .changes; model.showFiles = true } }
-                    }.font(.caption).disabled(!model.isConnected)
+                        Button("下载") { model?.download(file) }
+                        if block.name != "Read" { Button("查看变更") { model?.openPanel(.changes) } }
+                    }.font(.caption).disabled(model?.isConnected != true)
                 }
                 if let summary = block.summary { Text(summary).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
                 if let body = view.body { ToolBodyView(body: body, actions: actions) }
@@ -640,15 +670,22 @@ struct TodoList: View {
 struct CodeBlock: View {
     let text: String
     var color: Color = WorkbenchTheme.ink
+    @State private var expanded = false
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            Text(text).font(.system(size: 11.5, design: .monospaced)).lineSpacing(3).foregroundStyle(color).textSelection(.enabled)
-                .padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal) {
+                Text(expanded ? text : lines.prefix(18).joined(separator: "\n"))
+                    .font(.system(size: 12, design: .monospaced)).lineSpacing(3)
+                    .foregroundStyle(color).textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: true).padding(10)
+            }.fixedSize(horizontal: false, vertical: true)
+            if lines.count > 18 {
+                Button(expanded ? "收起" : "展开全部 \(lines.count) 行") { expanded.toggle() }
+                    .buttonStyle(QuietButtonStyle()).font(.caption).padding(.horizontal, 8).padding(.bottom, 4)
+            }
         }
-        .defaultScrollAnchor(.topLeading)
-        .frame(maxHeight: 320)
-        .fixedSize(horizontal: false, vertical: true)
         .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
         .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small).strokeBorder(WorkbenchTheme.border))
     }
@@ -657,11 +694,14 @@ struct CodeBlock: View {
 struct DiffView: View {
     let rows: [DiffRow]
     var maxHeight: CGFloat? = nil
+    @State private var expanded = false
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+        let limit = Int((maxHeight ?? 320) / 18)
+        VStack(alignment: .leading, spacing: 4) {
+        ScrollView(.horizontal) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array((expanded ? rows : Array(rows.prefix(limit))).enumerated()), id: \.offset) { _, row in
                     Text(prefix(row) + row.text)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(foreground(row))
@@ -672,7 +712,12 @@ struct DiffView: View {
             }
             .textSelection(.enabled)
         }
-        .frame(maxHeight: maxHeight)
+        .fixedSize(horizontal: false, vertical: true)
+        if rows.count > limit {
+            Button(expanded ? "收起" : "展开全部 \(rows.count) 行") { expanded.toggle() }
+                .buttonStyle(QuietButtonStyle()).font(.caption)
+        }
+        }
     }
     private func prefix(_ row: DiffRow) -> String {
         switch row.kind { case .added: return "+ "; case .removed: return "- "; case .context: return "  "; case .hunk: return "" }

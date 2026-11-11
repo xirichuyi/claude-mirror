@@ -1,6 +1,13 @@
 import SwiftUI
 import RemoteCCCore
 
+struct SessionMenuAnchorKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 struct WorkspaceTopBar: View {
     @EnvironmentObject private var model: AppModel
     @Binding var sidebarVisible: Bool

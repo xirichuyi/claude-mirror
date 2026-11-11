@@ -85,6 +85,14 @@ final class AppModel: ObservableObject {
 
     @Published var composerFocus = UUID()
     @Published var sessionToolsSection = "skills"
+    private var transcriptViewports: [String: TranscriptViewport] = [:]
+    func transcriptViewport(for id: String) -> TranscriptViewport {
+        if let state = transcriptViewports[id] { return state }
+        let state = TranscriptViewport()
+        transcriptViewports[id] = state
+        return state
+    }
+
     @Published var showSessionDetails = false
     @Published var historyStatus = ""
     @Published private var transferStatuses: [ConnectionConfig: String] = [:]

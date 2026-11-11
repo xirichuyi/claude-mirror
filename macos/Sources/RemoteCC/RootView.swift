@@ -28,6 +28,7 @@ struct RootView: View {
                             SidebarView().sidebarPaneVisible(!model.showFiles && model.sidebarVisible)
                             FilePanel().sidebarPaneVisible(model.showFiles && model.sidebarVisible)
                         }.clipped()
+                        ServerFooter()
                     }
                     .frame(width: CGFloat(sidebarWidth))
                     .islandCard(WorkbenchTheme.sidebar)
@@ -42,23 +43,31 @@ struct RootView: View {
                     }
                     // WorkArea draws its own cards: chat, editor and files are separate islands.
                     WorkArea().frame(minWidth: 340, maxWidth: .infinity)
-                    if model.showSessionDetails && model.active != nil {
-                        SessionDetailsView().frame(width: 270)
-                            .islandCard(WorkbenchTheme.sidebar)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
+                        .overlay(alignment: .trailing) {
+                            if model.showSessionDetails && model.active != nil {
+                                SessionDetailsView().frame(width: 270)
+                                    .islandCard(WorkbenchTheme.sidebar)
+                                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(WorkbenchTheme.border))
+                                    .shadow(color: WorkbenchTheme.shadow, radius: 12, x: -4)
+                                    .padding(6)
+                            }
+                        }
+
                 }
                 .padding(.horizontal, WorkbenchTheme.Island.margin).padding(.bottom, WorkbenchTheme.Island.margin)
                 .background(WorkbenchTheme.frame)
                 WorkspaceStatusBar()
                 }
                 .background(WorkbenchTheme.frame)
-                .overlay(alignment: .topTrailing) {
-                    if model.sessionMenuVisible, let session = model.active {
-                        ZStack(alignment: .topTrailing) {
-                            Color.clear.contentShape(Rectangle()).onTapGesture { closeSessionMenu() }
-                            SessionActionMenu(session: session, close: closeSessionMenu)
-                                .padding(.top, WorkbenchMetrics.header + 6 + 40).padding(.trailing, WorkbenchTheme.Island.margin + 8)
+                .overlayPreferenceValue(SessionMenuAnchorKey.self) { anchor in
+                    GeometryReader { geometry in
+                        if model.sessionMenuVisible, let session = model.active, let anchor {
+                            let rect = geometry[anchor]
+                            ZStack(alignment: .topLeading) {
+                                Color.clear.contentShape(Rectangle()).onTapGesture { closeSessionMenu() }
+                                SessionActionMenu(session: session, close: closeSessionMenu)
+                                    .offset(x: max(8, min(rect.maxX - 180, geometry.size.width - 188)), y: rect.maxY + 4)
+                            }
                         }
                     }
                 }
@@ -79,7 +88,7 @@ struct RootView: View {
             #if DEBUG
             if Bundle.main.bundleIdentifier == "local.claudemirror.demo",
                ProcessInfo.processInfo.environment["MIRROR_SCENE"] == "menu" {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { sessionMenuVisible = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { model.sessionMenuVisible = true }
             }
             #endif
         }

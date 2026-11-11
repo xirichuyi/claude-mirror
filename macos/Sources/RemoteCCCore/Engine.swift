@@ -32,7 +32,7 @@ public final class ChatEngine {
     public var onChange: (() -> Void)?
     public var onTranscriptChange: ((Set<String>) -> Void)?
     private var transcriptChanges = Set<String>()
-    private var metadataChanged = false
+    private var transcriptNotification: Task<Void, Never>?
     private var stopRequests = Set<String>()
     public var onError: ((String) -> Void)?
 
@@ -85,19 +85,28 @@ public final class ChatEngine {
     }
 
     private func notify(transcript: String? = nil) {
-        if let transcript { transcriptChanges.insert(transcript) }
-        else { metadataChanged = true }
+        if let transcript, onTranscriptChange != nil {
+            transcriptChanges.insert(transcript)
+            guard transcriptNotification == nil else { return }
+            // Token bursts do not need a full text layout on every display frame.
+            transcriptNotification = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                guard let self else { return }
+                self.transcriptNotification = nil
+                let ids = self.transcriptChanges
+                self.transcriptChanges.removeAll(keepingCapacity: true)
+                if !ids.isEmpty { self.onTranscriptChange?(ids) }
+            }
+            return
+        }
         guard !changeQueued else { return }
         changeQueued = true
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 16_000_000)
             guard let self else { return }
             self.changeQueued = false
-            let ids = self.transcriptChanges
-            let metadata = self.metadataChanged
-            self.transcriptChanges = []; self.metadataChanged = false
-            if metadata || self.onTranscriptChange == nil { self.onChange?() }
-            if !ids.isEmpty { self.onTranscriptChange?(ids) }
+            // Status, approvals and completed turns never wait behind streamed text.
+            self.onChange?()
         }
     }
 
