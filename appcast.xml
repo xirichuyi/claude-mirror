@@ -4,34 +4,33 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>claude-mirror</title>
         <item>
-            <title>0.22.1</title>
-            <pubDate>Tue, 10 Nov 2026 21:22:12 +0000</pubDate>
-            <sparkle:version>12</sparkle:version>
-            <sparkle:shortVersionString>0.22.1</sparkle:shortVersionString>
+            <title>0.23.1</title>
+            <pubDate>Wed, 11 Nov 2026 12:47:31 +0000</pubDate>
+            <sparkle:version>14</sparkle:version>
+            <sparkle:shortVersionString>0.23.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Claude Mirror v0.22.1
+            <description sparkle:format="markdown"><![CDATA[# Claude Mirror v0.23.1
 
-本次界面与交互更新适用于 macOS；Windows 延续原生客户端界面，并随附本版远端代理。
+合并 macOS 聊天性能修复与 macOS / Windows 首次连接引导。
 
-- 按 Winc 调整侧栏、图标、按钮、文件标签与菜单，右上角只保留同步、分支和导出。
-- 底栏显示账户、五小时及本周订阅用量；网络刷新失败时保留账户信息，明确标记用量不可用。
-- 聊天记录后台读取，快速切换合并同步请求；已打开文件直接切换，并保留最近三个预览视图。
-- 集成 Winc 原始预览解析与解码代码，支持图片、SVG、Markdown、CSV/TSV、XLSX/XLSM；PDF 沿用 PDFKit。
-- 修复聊天中的文件夹链接，恢复文件下载的直接入口，调整聊天布局与滚动跟随。
+- 流式文本更新仅通知聊天区域；状态、审批和任务结束仍及时刷新界面。
+- 历史采用每页最多 30 条的重叠分页，可查看更早、较新消息并回到最新，避免持续加载造成视图堆积。
+- 长回复按完整段落分块，保留未变化正文的排版；修复按钮悬停、快速滚到底部时的重复刷新与跟随冲突。
+- 重启后恢复远端任务订阅，分别显示 SSH 连接、任务恢复和后台运行状态。
+- 首次连接增加 Node.js、Claude 安装与登录状态检查，提供安装、终端登录和免密配置入口；Windows 同步完善设置流程。
+- 保留 Winc 文件预览、下载、账户与订阅用量入口。
 
-发布流程已补齐 Pillow，并修复测试子进程的 Python 路径，确保缩略图测试在干净 CI 环境运行。
-
-验证：服务端 114 项测试通过；客户端测试发现的根目录旧断言已修正并复测。真实 SSH 上传下载、文件夹跳转、历史同步、重连、账户和两个额度周期复测通过；5 类 Winc 文件桥接测试通过。远端验证曾发生一次 SSH 断开，重试通过。
-
-已知限制：本轮最终 macOS 点击、滚动与连续切换的实机验收因锁屏未完成；Winc 预览的解析和解码已集成，尚不具备其全部显示交互（如表格合并单元格、公式和 Mermaid 渲染）。
+性能验证：Release 构建使用独立测试数据，在原生 SwiftUI/AppKit 视图中连续两分钟执行 1,313 次模拟输出更新，全局界面刷新为 0；3,000 条历史翻阅 150 页，原生文本视图最多 30 个。该测试不等同于真实模型或公网网络性能保证。
 
 macOS 安装包适用于 Apple Silicon、macOS 14+，使用 ad-hoc 签名，尚未经过 Apple 公证。Windows 为原生预览版。
+
+发布测试改为等待实际初始化回调，避免较慢 CI 机器因固定延时误报。
 ]]></description>
-            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.22.1/claude-mirror-0.22.1-macOS-arm64.dmg" length="8643786" type="application/octet-stream" sparkle:edSignature="4fjcJitM2Mym5ArYYbpUbbyO3ePJBWXbig0T6fHPJMp3mJ8SkTmDYdCicdCahHgWrZqzD6eIYzLzowgQ0NMyCQ=="></enclosure>
+            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.23.1/claude-mirror-0.23.1-macOS-arm64.dmg" length="8816462" type="application/octet-stream" sparkle:edSignature="0uPOh4OWeKsWr3ALmyklZthOz+q2jUAXThqWIYtan30i4To5BkZwIF/8Nu3ihDHU2g67ZeXVI2105LCOloL8BQ=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: vQtzdLl4BFLEqbdl/2dWMEAH576spcUhcMi0pb3sN/wuDf9EgR4nAfZ0ttGtEX6BoYlqASD6HR8u3vHtN6QKAg==
-length: 2786
+edSignature: pxKrGqet3vCdR6QSF2EGWAjtYZxupO3v/GPjc0KWhXXIWPtiL5GmmZc2jRq2AipoQ+oHrg8owL5crutOBg58DA==
+length: 2567
 -->
