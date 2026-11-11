@@ -27,7 +27,7 @@
 
 1. 从[发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载最新的 `claude-mirror-<版本号>-macOS-arm64.dmg`。
 2. 打开 DMG，将 **claude-mirror.app** 拖入 **Applications**。
-3. 从应用程序启动 claude-mirror，按首页的三步引导添加服务器。
+3. 从应用程序启动 claude-mirror，首次使用时添加服务器；已有记录时恢复上次打开的聊天及其主机。
 
 第一次使用请看 **[入门指南](docs/getting-started.md)**：从准备服务器、首次打开被 macOS 拦截，到登录 Claude，每一步都有说明。
 
@@ -58,7 +58,7 @@
 
 | 范围 | 当前实现 |
 | --- | --- |
-| 多主机 | 保存服务器、显示名称、切换机器、按机器区分历史和任务状态；右键机器可重命名 |
+| 多主机 | 保存、编辑、切换与移除连接，按机器区分历史和任务状态；移除连接保留聊天与远端文件 |
 | SSH | 系统配置与 Agent、密码、指定私钥文件；用户名与端口；首次连接确认主机指纹 |
 | 项目与历史 | 按服务器和工作目录组织会话，先读取索引，按需加载正文和更早消息 |
 | 聊天 | 流式回复、Markdown、代码块、思考与工具记录、停止、排队、审批和结构化提问 |
@@ -74,7 +74,7 @@ macOS 文件预览优先显示本地缓存，再校验远端版本；同时打�
 
 ## SSH 连接与认证
 
-打开左上角机器菜单，选择「添加机器」。
+打开左上角机器菜单，选择「添加服务器…」。已有连接可在「管理主机…」中编辑或删除。
 
 1. **主机名称**：例如“开发服务器”，仅用于显示；可留空，留空显示地址。
 2. **SSH 主机**：IP、域名、SSH config 别名，或 `user@host`。也兼容 `ssh my-server` 的别名输入方式。
@@ -391,3 +391,9 @@ macOS 的「对话选项 → 高级选项 → 上下文缓存」可选择远端�
 例如 cache-tax 通过模型 fork 请求续热，会消耗 token，要求 Claude 进程持续运行。它默认的 50 分钟续热周期与本项目 15 分钟闲置休眠不兼容，不能直接安装后就当作保活已生效。本项目未自动安装或启用它，也不会为缓存续热让所有会话无限常驻。
 
 参考：[Claude Code 提示缓存](https://code.claude.com/docs/en/prompt-caching) · [Mods 运行环境](https://code.claude.com/docs/en/plugins/mods/overview#where-mods-run) · [cache-tax](https://github.com/karanb192/cache-tax)。
+
+## macOS 开发文档
+
+- [构建与验证](macos/README.md)
+- [代码组织、公共组件与动画规范](docs/macos-code-style.md)
+- [v0.23.2 改动与发布记录](docs/releases/v0.23.2.md)

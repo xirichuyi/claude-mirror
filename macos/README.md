@@ -15,7 +15,8 @@ open macos/dist/claude-mirror.app
 ## 结构
 
 - `Sources/RemoteCCCore`：以 Foundation 为基础，macOS 使用 CryptoKit 计算附件摘要，包含 SSH、代理协议、任务恢复、文件、历史、存储和展示逻辑，可在 Linux 上编译测试。
-- `Sources/RemoteCC`：SwiftUI / AppKit 界面，只在 macOS 上编译。
+- `Sources/RemoteCC`：SwiftUI / AppKit 界面，只在 macOS 上编译。公共组件在 `DesignSystem/`，主机与设置在 `Features/`，侧栏和底栏在 `Workspace/`，偏好恢复在 `Persistence/`。
+- 目录职责、组件复用、动画和格式规则见 [macOS 界面代码规范](../docs/macos-code-style.md)。
 - `scripts/prepare-server.cjs`：把 `../src` 下的服务端程序（`remote-agent.cjs` 和基于官方 SDK 的任务进程）打包进应用资源。
 
 本地数据保存在 `~/Library/Application Support/RemoteCC Native`，与 Electron 版互不影响。
@@ -23,8 +24,11 @@ open macos/dist/claude-mirror.app
 ## 日常操作
 
 - 侧栏顶部管理多台机器。添加机器可填写显示名称、SSH 地址、用户名和端口，选择系统配置、密码或私钥文件，不需要填写开始目录；成功连接后自动发现这台机器上的全部 Claude Code 历史。
-- 机器首页显示最近对话。点击已有对话会恢复原工作目录；新对话默认在远端主目录开始。机器切换不会主动断开其他机器，历史、同步状态按机器隔离。
-- 添加机器不会覆盖已保存的连接。重启后恢复上次使用的机器；SSH 连接成功但历史扫描失败时保留连接并提示重试。
+- 启动时恢复上次打开的聊天及其主机。点击已有对话会恢复原工作目录；新对话默认在远端主目录开始。机器切换不会主动断开其他机器，历史、同步状态按机器隔离。
+- 左上角主机菜单只保留机器列表、添加服务器与管理主机；再次点击入口、按 Esc 或点击菜单外部可关闭。
+- 添加机器不会覆盖已保存的连接。「管理主机」支持编辑和删除；删除只移除保存的连接，保留聊天和远端文件，重启时不再从历史中自动补回已删除的主机。
+- SSH 连接成功但历史扫描失败时保留连接并提示重试。
+- 底栏保留地球图标；账户显示缩写头像，用量以 `5h / 7d` 展示，悬停查看完整说明。
 - 侧栏「新建对话」或 `⌘N` 新建对话；离线也可写草稿。右键会话可重命名、固定、归档或导出。
 - 快捷建议仅在草稿为空时显示，点击后填入草稿并聚焦输入框。
 - 切换项目会检查远端目录，新建对话并迁移未发送的草稿与附件；原对话继续保留。文件浏览与切换项目是独立操作。
@@ -51,7 +55,9 @@ open macos/dist/claude-mirror.app
 ## 测试
 
 ```sh
-cd macos && swift test
+npm ci --ignore-scripts
+macos/scripts/check-ui-style.sh
+swift test --package-path macos
 ```
 
 测试以真实子进程运行服务端代理（`sh -c` 代替 SSH 通道），需要 Node.js 和 `npm ci`。
