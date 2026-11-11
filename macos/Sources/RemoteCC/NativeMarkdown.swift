@@ -116,7 +116,7 @@ import RemoteCCCore
             value.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: value.length))
             prose.append(value)
         }
-        func walk(_ node: UnsafeMutablePointer<cmark_node>, depth: Int = 0, quote: Bool = false, prefix: String = "") {
+        func walk(_ node: UnsafeMutablePointer<cmark_node>, depth: Int = 0, quote: Bool = false, prefix: String = "", tight: Bool = false) {
             let kind = type(node), indent = CGFloat(depth) * 20 + (quote ? 16 : 0)
             switch kind {
             case "paragraph", "heading":
@@ -126,19 +126,23 @@ import RemoteCCCore
                 if quote { attrs[.foregroundColor] = NSTheme.textMuted }
                 let p = style(indent: indent)
                 if !prefix.isEmpty {
-                    p.firstLineHeadIndent = max(0, indent - 20)
+                    // Indent the marker a little so a list reads as a list, not as loose paragraphs.
+                    p.firstLineHeadIndent = max(0, indent - 14)
                     p.headIndent = max(indent, p.firstLineHeadIndent + (prefix as NSString).size(withAttributes: attributes()).width)
                 }
+                if tight { p.paragraphSpacing = 3 }
                 if level > 0 { p.paragraphSpacingBefore = 8; p.paragraphSpacing = 10 }
                 paragraph(inline(node, attributes: attrs), style: p, prefix: prefix)
             case "list":
                 let ordered = cmark_node_get_list_type(node) == CMARK_ORDERED_LIST
                 var number = Int(cmark_node_get_list_start(node))
-                for item in children(node) {
+                let items = children(node), compact = cmark_node_get_list_tight(node) != 0
+                for (position, item) in items.enumerated() {
                     var marker = ordered ? "\(number). " : "• "
                     if type(item) == "tasklist" { marker = cmark_gfm_extensions_get_tasklist_item_checked(item) ? "☑ " : "☐ " }
                     for (index, child) in children(item).enumerated() {
-                        walk(child, depth: depth + 1, quote: quote, prefix: index == 0 ? marker : "")
+                        // Tight lists keep items close; the last item keeps normal spacing before what follows.
+                        walk(child, depth: depth + 1, quote: quote, prefix: index == 0 ? marker : "", tight: compact && position < items.count - 1)
                     }
                     number += 1
                 }

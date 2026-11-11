@@ -4,21 +4,20 @@ import RemoteCCCore
 struct WorkspaceTopBar: View {
     @EnvironmentObject private var model: AppModel
     @Binding var sidebarVisible: Bool
-    @Binding var menuVisible: Bool
+    /// The machine is named at the top of the sidebar; the title only says which project.
+    private var title: String {
+        model.active.map { ($0.directory as NSString).lastPathComponent } ?? "claude-mirror"
+    }
     var body: some View {
         HStack(spacing: 6) {
             // Leave the standard macOS window controls in their familiar position.
             Color.clear.frame(width: 72, height: 1)
             Button { sidebarVisible.toggle() } label: { WorkbenchIcon(symbol: "sidebar.left").frame(width: 18) }
                 .help("切换侧栏").accessibilityLabel("切换侧栏")
-            Text(model.active.map { ($0.directory as NSString).lastPathComponent } ?? "Claude Mirror")
-                .font(.system(size: 13, weight: .medium)).lineLimit(1).frame(maxWidth: 280, alignment: .leading)
+            Text(title)
+                .font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle).frame(maxWidth: 360, alignment: .leading)
+                .help(model.active?.directory ?? "")
             Spacer(minLength: 12)
-            if model.active != nil {
-                Button { menuVisible.toggle() } label: { WorkbenchIcon(symbol: "ellipsis") }
-                    .buttonStyle(WorkbenchIconButtonStyle(selected: menuVisible, size: 28))
-                    .help("更多会话操作").accessibilityLabel("更多会话操作")
-            }
         }
         .buttonStyle(WorkbenchIconButtonStyle(size: 28)).font(WorkbenchMetrics.ui)
         .padding(.horizontal, 10).frame(height: WorkbenchMetrics.header + 6)

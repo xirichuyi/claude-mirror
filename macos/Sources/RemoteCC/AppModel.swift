@@ -42,6 +42,8 @@ final class AppModel: ObservableObject {
     @Published var showArchived = false
     @Published var searchText = ""
     @Published var toast: String?
+    /// The conversation's "…" menu, opened from the conversation header.
+    @Published var sessionMenuVisible = false
     @Published var panel: SidePanel = .files
     @Published var sidebarVisible = true {
         didSet {

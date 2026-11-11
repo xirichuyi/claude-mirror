@@ -26,6 +26,9 @@ struct PromptEditor: NSViewRepresentable {
         let scroll = NSTextView.scrollableTextView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
+        // An always-visible legacy scroller showed as a grey bar inside the empty input.
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
         let original = scroll.documentView as! NSTextView
         let view = PasteAwareTextView(frame: original.frame, textContainer: original.textContainer)
         view.minSize = original.minSize; view.maxSize = original.maxSize

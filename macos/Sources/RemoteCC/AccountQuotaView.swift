@@ -14,7 +14,8 @@ struct AccountQuotaView: View {
             Button { model.presentation = .account } label: {
                 HStack(spacing: 5) {
                     WorkbenchIcon(symbol: "person.crop.circle")
-                    Text(email).lineLimit(1).truncationMode(.middle).frame(maxWidth: 140)
+                    // Truncate the string, not a flexible frame: a flexible frame leaves a gap around short names.
+                    Text(email.count > 26 ? String(email.prefix(12)) + "…" + String(email.suffix(12)) : email).lineLimit(1).fixedSize()
                 }
             }
             .help(email).accessibilityLabel("账户信息")
