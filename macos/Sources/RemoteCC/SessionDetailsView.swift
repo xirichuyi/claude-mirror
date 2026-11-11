@@ -71,7 +71,7 @@ struct SessionDetailsView: View {
                     }
                 }
             }.buttonStyle(.link).padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        }.background { FrostedBackground() }
+        }.background(WorkbenchTheme.sidebar)
         .task(id: source) {
             context = nil; contextError = nil
             guard let session = model.active, session.remoteOwner != nil, model.isConnected, let engine = model.engine else { return }

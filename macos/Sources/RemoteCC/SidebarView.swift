@@ -22,13 +22,6 @@ struct SidebarView: View {
         return order.map { ($0, grouped[$0]!) }.filter { !model.projectMissing($0.1[0]) }
     }
 
-    private var unavailableSessions: [ChatSession] {
-        model.machineSessions.filter {
-            model.projectMissing($0) && ($0.archived ?? false) == model.showArchived &&
-            (model.searchText.isEmpty || ($0.name + " " + $0.directory).localizedCaseInsensitiveContains(model.searchText))
-        }
-    }
-
     private var visibleGroups: [(key: String, sessions: [ChatSession])] {
         if showAllProjects || !model.searchText.isEmpty { return groups }
         var result = Array(groups.prefix(6))
@@ -77,18 +70,13 @@ struct SidebarView: View {
                         }
                     }
                 }
-                if !unavailableSessions.isEmpty {
-                    Section {
-                        ProjectGroup(sessions: unavailableSessions, searching: !model.searchText.isEmpty, flat: true)
-                    } header: { SidebarSectionHeader(title: "目录已移除 · 历史对话") }
-                }
                 }.padding(.horizontal, 6).padding(.bottom, 8)
 
             }
             .id(model.currentConfig?.key ?? "no-machine")
             .frame(maxHeight: .infinity)
             .overlay(alignment: .topLeading) {
-                if groups.isEmpty && unavailableSessions.isEmpty {
+                if groups.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(model.searchText.isEmpty ? (model.showArchived ? "还没有归档的对话" : "暂无历史对话") : "没有找到匹配的对话")
                     }
@@ -97,7 +85,7 @@ struct SidebarView: View {
                 }
             }
         }
-        .background { FrostedBackground() }
+        .background(WorkbenchTheme.sidebar)
         .foregroundStyle(WorkbenchTheme.sidebarInk)
     }
 

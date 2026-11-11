@@ -242,7 +242,7 @@ struct MessagesList: View {
                         followsReply = true
                         Task { @MainActor in
                         await Task.yield()
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                        withAnimation(Motion.animation(Motion.scroll, reduce: reduceMotion)) { proxy.scrollTo("bottom", anchor: .bottom) }
                         }
                     } label: {
                         Image(systemName: "arrow.down").font(.system(size: 14, weight: .medium))

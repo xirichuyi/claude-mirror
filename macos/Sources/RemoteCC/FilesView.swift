@@ -40,7 +40,7 @@ struct FilePanel: View {
                     systemImage: model.isConnected ? "folder" : "network.slash")
                     .frame(maxHeight: .infinity)
             }
-        }.background { FrostedBackground() }
+        }.background(WorkbenchTheme.sidebar)
         .overlay(alignment: .topTrailing) {
             if !model.isConnected {
                 Image(systemName: "network.slash").foregroundStyle(WorkbenchTheme.inkMuted)
@@ -511,7 +511,7 @@ struct EditorPane: View {
                         EditorTabButton(tab: tab, active: tab.id == workspace.activeTabId,
                                         select: { Task { await workspace.select(tab) } },
                                         close: { model.close(tab, in: workspace) })
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                        .transition(Motion.tab(reduce: reduceMotion))
                     }
                 }
                 .padding(.horizontal, 7)
@@ -560,10 +560,17 @@ struct EditorPane: View {
                     if tab.draft != nil {
                         Button("保存到远端") { Task { await workspace.save(tab) } }
                     } else if preview.kind == "text", preview.truncated != true, preview.revision != nil {
-                        Button("编辑") { workspace.beginEditing(tab) }.disabled(tab.isValidating || tab.error != nil)
+                        Button { workspace.beginEditing(tab) } label: { WorkbenchIcon(symbol: "square.and.pencil") }
+                            .buttonStyle(WorkbenchIconButtonStyle()).help("编辑文件").accessibilityLabel("编辑文件")
+                            .disabled(tab.isValidating || tab.error != nil)
                     }
                     if preview.kind == "text", (isMarkdown(preview) || FilePreviewSupport.hasVisualPreview(preview.name)), tab.draft == nil {
-                        Button(tab.showSource ? "预览" : "源码") { tab.showSource.toggle() }
+                        HStack(spacing: 2) {
+                            Button { tab.showSource = true } label: { WorkbenchIcon(symbol: "chevron.left.forwardslash.chevron.right") }
+                                .buttonStyle(WorkbenchIconButtonStyle(selected: tab.showSource)).help("源码").accessibilityLabel("源码")
+                            Button { tab.showSource = false } label: { WorkbenchIcon(symbol: "eye") }
+                                .buttonStyle(WorkbenchIconButtonStyle(selected: !tab.showSource)).help("预览").accessibilityLabel("预览")
+                        }
                     }
                     if preview.kind == "text", preview.truncated == true, (preview.nextOffset ?? 1048576) < 1048576 {
                         Button("加载更多") { Task { await workspace.loadMoreText(tab) } }.disabled(tab.isValidating)

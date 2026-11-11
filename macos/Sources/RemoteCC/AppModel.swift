@@ -36,7 +36,11 @@ final class AppModel: ObservableObject {
     @Published var checkingForUpdates = false
     @Published var activeId: String? {
         didSet {
-            if activeId != oldValue { showSessionDetails = false; transcript.update(active) }
+            if activeId != oldValue {
+                showSessionDetails = false
+                transcript.update(active)
+                if remembersConversation { RecentConversation().remember(activeId) }
+            }
         }
     }
     @Published var showArchived = false
@@ -125,6 +129,7 @@ final class AppModel: ObservableObject {
     private var capabilityRetry: [String: Date] = [:]
     private var capabilityRequests = Set<String>()
     private let lastConnectionKey = "last-connection"
+    private var remembersConversation = false
 
     /// Isolated UI previews and rendering tests never connect to saved machines.
     init(previewSession: ChatSession) {
@@ -202,11 +207,10 @@ final class AppModel: ObservableObject {
                     else { self.transferStatuses[progress.config] = "\(progress.name) · \(progress.total > 0 ? min(99, progress.bytes * 100 / progress.total) : 0)%" }
                 }
             }
-            savedMachines = UserDefaults.standard.data(forKey: "saved-machines").flatMap { try? JSONDecoder().decode([ConnectionConfig].self, from: $0) } ?? []
-            for config in sessions.map(\.config) + [lastConnection].compactMap({ $0 }) {
-                if !savedMachines.contains(where: { $0.key == config.key }) { savedMachines.append(config) }
-            }
+            savedMachines = machineStore.load(discovered: sessions.map(\.config) + [lastConnection].compactMap { $0 })
             selectedMachine = lastConnection ?? savedMachines.first
+            remembersConversation = true
+            if let id = RecentConversation().resolve(in: sessions.filter { !machineStore.removedKeys.contains($0.config.key) }) { select(id) }
             autoConnect()
             historyPoll = Task { [weak self] in
                 while !Task.isCancelled {
@@ -290,6 +294,28 @@ final class AppModel: ObservableObject {
         await engine.restore(config)
     }
 
+    private let machineStore = SavedMachineStore()
+
+    func removeMachine(_ config: ConnectionConfig) async throws {
+        guard !syncingMachines.contains(config.key) else { throw RemoteError("正在同步主机，请稍后再试") }
+        guard !sessions.contains(where: { $0.config.key == config.key && workspaces[$0.id]?.hasUnsavedEdits == true }) else {
+            throw RemoteError("请先保存这台主机上正在编辑的文件")
+        }
+        syncingMachines.insert(config.key)
+        defer { syncingMachines.remove(config.key) }
+        engine?.detach(config)
+        engine?.agents.close(config)
+        await connections?.disconnect(config)
+        reverseStates[config.key] = nil
+        updateSleepAssertion()
+        savedMachines.removeAll { $0.key == config.key }
+        machineStore.save(savedMachines)
+        machineStore.markRemoved(config.key)
+        if active?.config.key == config.key { activeId = nil }
+        if selectedMachine?.key == config.key { selectedMachine = savedMachines.first }
+        if lastConnection?.key == config.key { lastConnection = selectedMachine }
+    }
+
     func renameMachine(_ config: ConnectionConfig, name: String) {
         var renamed = config
         renamed.name = name
@@ -359,9 +385,10 @@ final class AppModel: ObservableObject {
     }
 
     private func rememberMachine(_ config: ConnectionConfig) {
+        machineStore.allow(config.key)
         if let index = savedMachines.firstIndex(where: { $0.key == config.key }) { savedMachines[index] = config }
         else { savedMachines.append(config) }
-        UserDefaults.standard.set(try? JSONEncoder().encode(savedMachines), forKey: "saved-machines")
+        machineStore.save(savedMachines)
     }
     var connectionState: ConnectionState { currentConfig.flatMap { engine?.connectionState($0) } ?? ConnectionState() }
     var isConnected: Bool { connectionState.status == .connected }
@@ -433,10 +460,10 @@ final class AppModel: ObservableObject {
 
     private func autoConnect() {
         guard let config = currentConfig, lastConnection != nil else { return }
-        perform { try await self.connect(config) }
+        perform { try await self.connect(config, preservingConversation: true) }
     }
 
-    func connect(_ input: ConnectionConfig, password: String? = nil) async throws {
+    func connect(_ input: ConnectionConfig, password: String? = nil, preservingConversation: Bool = false) async throws {
         guard engine != nil, let connections else { return }
         var config = try input.validated()
         // Connecting a machine never depends on a remembered project's existence.
@@ -445,13 +472,16 @@ final class AppModel: ObservableObject {
         syncingMachines.insert(config.key)
         defer { syncingMachines.remove(config.key) }
         selectedMachine = config
-        activeId = nil
+        if !preservingConversation { activeId = nil }
         searchText = ""; showArchived = false
         do { try await connections.connect(config, password: password) }
         catch { throw RemoteError(ConnectionAdvice.explain(error.localizedDescription)) }
         rememberMachine(config)
         if selectedMachine?.key == config.key { lastConnection = config }
         await prepareMachine(config)
+        if preservingConversation, let active, active.config.key == config.key {
+            await refreshVisibleHistory(active.id, report: false)
+        }
     }
 
     /// Everything after SSH itself: start the agent, check the server's setup, then load history.

@@ -21,9 +21,10 @@ struct RootView: View {
                 WorkspaceTopBar(sidebarVisible: $model.sidebarVisible)
                 HStack(spacing: WorkbenchTheme.Island.gap) {
                     VStack(spacing: 0) {
-                        // Where am I, then what am I looking at: machine first, then the view switcher.
-                        MachineSwitcher().frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 2)
-                        WorkspaceSidebarTabs()
+                        HStack(spacing: 4) {
+                            MachineSwitcher().frame(maxWidth: .infinity, alignment: .leading)
+                            WorkspaceSidebarTabs().fixedSize()
+                        }.padding(.horizontal, 8).frame(height: 44)
                         RetainedPaneLayout(selection: model.showFiles ? 1 : 0, parkInactive: false) {
                             SidebarView().sidebarPaneVisible(!model.showFiles && model.sidebarVisible)
                             FilePanel().sidebarPaneVisible(model.showFiles && model.sidebarVisible)
@@ -108,7 +109,7 @@ struct RootView: View {
                     .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.popupBorder))
                     .shadow(color: WorkbenchTheme.shadow, radius: 16, y: 6)
                     .padding(.bottom, 24).frame(maxWidth: 650).textSelection(.enabled)
-                    .transition(reduceMotion ? .opacity : Motion.card)
+                    .transition(Motion.card(reduce: reduceMotion))
             }
         }
         .animation(Motion.animation(Motion.dialogIn, reduce: reduceMotion), value: model.toast)

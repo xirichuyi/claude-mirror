@@ -189,7 +189,7 @@ struct WorkbenchPresentationLayer: View {
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .scrollBounceBehavior(.basedOnSize)
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.95)))
+                    .transition(Motion.card(reduce: reduceMotion))
                 }
                 .accessibilityAddTraits(.isModal)
             }

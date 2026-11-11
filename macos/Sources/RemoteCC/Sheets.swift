@@ -26,7 +26,7 @@ struct PreferencesSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeading(title: "对话选项") { dismiss() }.disabled(saving).padding(24)
+            SheetHeading(title: "对话选项") { dismiss() }.disabled(saving).padding(.horizontal, WorkbenchMetrics.dialogPadding).frame(height: WorkbenchMetrics.dialogHeader)
             if let capabilities { form(capabilities).disabled(saving) }
             else if !loadError.isEmpty { Text(loadError).foregroundStyle(WorkbenchTheme.error).padding().textSelection(.enabled) }
             else { ProgressView("读取远端能力…").padding().frame(maxWidth: .infinity) }
@@ -45,7 +45,7 @@ struct PreferencesSheet: View {
 
     private func form(_ capabilities: Capabilities) -> some View {
         let session = model.active
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 8) {
             WorkbenchSelect(title: "模型", selection: $selectedModel, options:
                 [WorkbenchOption("", "远端默认")] + capabilities.models.filter { $0.value != "default" }.map { WorkbenchOption($0.value, $0.displayName ?? $0.value) } + [WorkbenchOption(customTag, "自定义模型 ID")])
             if selectedModel == customTag { TextField("模型 ID", text: $customModel) }
@@ -72,7 +72,7 @@ struct PreferencesSheet: View {
             }
 
         }
-        .padding(.horizontal, 24).padding(.bottom, 20)
+        .padding(.horizontal, WorkbenchMetrics.dialogPadding).padding(.bottom, WorkbenchMetrics.formRowGap)
         .scrollContentBackground(.hidden)
     }
 

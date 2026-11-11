@@ -7,10 +7,11 @@ struct ThinkingCard: View {
     let text: String
     let active: Bool
     @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } } label: {
+            Button { withAnimation(Motion.animation(Motion.tree, reduce: reduceMotion)) { expanded.toggle() } } label: {
                 HStack(spacing: 9) {
                     if active { ProgressView().controlSize(.mini) }
                     else { Image(systemName: "checkmark.circle").foregroundStyle(WorkbenchTheme.inkMuted) }

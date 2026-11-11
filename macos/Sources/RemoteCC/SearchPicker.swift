@@ -80,7 +80,7 @@ struct SearchPicker: View {
             }.padding(12)
         }
         .frame(width: 360)
-        .presentationBackground { FrostedBackground(material: .popover) }
+        .presentationBackground(WorkbenchTheme.sidebar)
         .tint(WorkbenchTheme.accent)
         .onAppear { focused = true; selection = selected ?? results.first?.id }
         .onChange(of: query) { selection = results.first?.id }
