@@ -10,9 +10,12 @@ struct SidebarView: View {
     @State private var recentExpanded = false
     @FocusState private var searchFocused: Bool
 
-    private var groups: [(key: String, sessions: [ChatSession])] {
+    private typealias Group = (key: String, sessions: [ChatSession])
+
+    // `body` runs for every streamed chunk, so the session list is sorted once per pass.
+    private func grouped(_ sessions: [ChatSession]) -> [Group] {
         let filter = model.searchText.lowercased()
-        let visible = model.machineSessions.filter { ($0.archived ?? false) == model.showArchived }.filter {
+        let visible = sessions.filter { ($0.archived ?? false) == model.showArchived }.filter {
             filter.isEmpty || "\($0.name) \($0.host) \($0.directory) \($0.historySummary ?? "")".lowercased().contains(filter)
         }
         var order: [String] = [], grouped: [String: [ChatSession]] = [:]
@@ -23,14 +26,14 @@ struct SidebarView: View {
         return order.map { ($0, grouped[$0]!) }.filter { !model.projectMissing($0.1[0]) }
     }
 
-    private var unavailableSessions: [ChatSession] {
-        model.machineSessions.filter {
+    private func unavailable(_ sessions: [ChatSession]) -> [ChatSession] {
+        sessions.filter {
             model.projectMissing($0) && ($0.archived ?? false) == model.showArchived &&
             (model.searchText.isEmpty || ($0.name + " " + $0.directory).localizedCaseInsensitiveContains(model.searchText))
         }
     }
 
-    private var visibleGroups: [(key: String, sessions: [ChatSession])] {
+    private func visible(_ groups: [Group]) -> [Group] {
         if showAllProjects || !model.searchText.isEmpty { return groups }
         var result = Array(groups.prefix(6))
         if let active = groups.first(where: { $0.sessions.contains(where: { $0.id == model.activeId }) }), !result.contains(where: { $0.key == active.key }) { result.append(active) }
@@ -38,7 +41,11 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let sessions = model.machineSessions
+        let groups = grouped(sessions)
+        let visibleGroups = visible(groups)
+        let unavailableSessions = unavailable(sessions)
+        return VStack(spacing: 0) {
             VStack(spacing: 10) {
                 HStack(spacing: 4) {
                     MachineSwitcher()
@@ -98,7 +105,7 @@ struct SidebarView: View {
                     if model.searchText.isEmpty && !model.showArchived {
                         Section {
                         DisclosureGroup("最近对话", isExpanded: $recentExpanded) {
-                            ProjectGroup(sessions: Array(model.machineSessions.filter { $0.archived != true && !model.projectMissing($0) }.sorted { $0.updatedAt > $1.updatedAt }.prefix(8)), searching: false, flat: true)
+                            ProjectGroup(sessions: Array(sessions.filter { $0.archived != true && !model.projectMissing($0) }.sorted { $0.updatedAt > $1.updatedAt }.prefix(8)), searching: false, flat: true)
                         }.listRowSeparator(.hidden)
                         }
                     }

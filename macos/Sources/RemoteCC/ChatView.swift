@@ -86,7 +86,7 @@ struct MessagesList: View {
     let session: ChatSession
     @StateObject private var selection = TranscriptSelection()
     @State private var followsReply = true
-    @State private var bottomDistance: CGFloat = 0
+    @State private var farFromBottom = false
     @State private var contentHeight: CGFloat = 0
     @State private var visibleMessageLimit = 50
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -155,8 +155,11 @@ struct MessagesList: View {
             .onPreferenceChange(ReplyBottomPreference.self) { geometry in
                 // Offset changes only update the jump button. Never scroll from an offset
                 // callback: scrolling changes the offset again and creates a layout loop.
-                bottomDistance = max(0, geometry.bottom - viewport.size.height)
-                contentHeight = geometry.height
+                // This fires on every scroll frame. Writing unchanged state would re-evaluate
+                // the whole transcript each frame, so only the derived flag is stored.
+                let far = ReplyScrollPolicy.showsJump(distance: Double(max(0, geometry.bottom - viewport.size.height)), following: false)
+                if far != farFromBottom { farFromBottom = far }
+                if geometry.height != contentHeight { contentHeight = geometry.height }
             }
             .task(id: contentHeight) {
                 // Coalesce streamed text and wait for native text measurement to settle.
@@ -166,18 +169,23 @@ struct MessagesList: View {
             }
             .background(ScrollReadingDetector { followsReply = false })
             .overlay(alignment: .bottomTrailing) {
-                if ReplyScrollPolicy.showsJump(distance: Double(bottomDistance), following: followsReply) {
-                    Button {
-                        followsReply = true
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
-                    } label: {
-                        Image(systemName: "arrow.down").font(.system(size: 14, weight: .medium))
-                            .frame(width: 34, height: 34)
-                            .background(WorkbenchTheme.surface, in: Circle())
-                            .overlay(Circle().strokeBorder(WorkbenchTheme.border))
-                    }.buttonStyle(.plain).help("回到最新").accessibilityLabel("回到最新")
-                        .shadow(color: .black.opacity(0.06), radius: 5, y: 2).padding(16)
+                // The animation is scoped to this stack so streamed transcript layout never animates.
+                ZStack {
+                    if farFromBottom && !followsReply {
+                        Button {
+                            followsReply = true
+                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                        } label: {
+                            Image(systemName: "arrow.down").font(.system(size: 14, weight: .medium))
+                                .frame(width: 34, height: 34)
+                                .background(WorkbenchTheme.surface, in: Circle())
+                                .overlay(Circle().strokeBorder(WorkbenchTheme.border))
+                        }.buttonStyle(.plain).help("回到最新").accessibilityLabel("回到最新")
+                            .shadow(color: .black.opacity(0.06), radius: 5, y: 2).padding(16)
+                            .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                    }
                 }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: farFromBottom && !followsReply)
             }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             .onChange(of: followsReply) { if followsReply { proxy.scrollTo("bottom", anchor: .bottom) } }
