@@ -392,6 +392,11 @@ public final class ChatEngine {
         if currentOwnerId(id) == watcher.taskId { detached(id, reason: reason) }
     }
 
+    #if DEBUG
+    /// Demo build only: feeds a snapshot through the same path as a remote watcher.
+    public func applyDemoSnapshot(_ id: String, state: JSON) throws { try apply(id, state: state) }
+    #endif
+
     /// Exposed for tests; applies one complete remote snapshot.
     func apply(_ id: String, state: JSON, watcher: AnyObject? = nil) throws {
         let position = try index(id)

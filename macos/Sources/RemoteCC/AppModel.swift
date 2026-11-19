@@ -86,7 +86,9 @@ final class AppModel: ObservableObject {
             do {
                 let folder = FileManager.default.temporaryDirectory.appendingPathComponent("mirror-demo-" + UUID().uuidString)
                 let store = try ChatStore(directory: folder)
-                let examples = DemoData.sessions()
+                var examples = DemoData.sessions()
+                let streaming = ProcessInfo.processInfo.environment["MIRROR_SCENE"] == "stream"
+                if streaming { examples.insert(DemoStream.session(), at: 0) }
                 store.save(examples); store.flush()
                 let resources = try ServerResources(directory: Bundle.main.resourceURL!.appendingPathComponent("server"))
                 let agents = AgentClient(launcher: DemoLauncher(), resources: resources)
@@ -99,7 +101,11 @@ final class AppModel: ObservableObject {
                 try engine.hydrate(examples[0].id)
                 engine.updateConnection(DemoData.config, ConnectionState(status: .connected))
                 historyStatus = "已同步 3 条对话"
-                engine.onChange = { [weak self] in self?.objectWillChange.send() }
+                // Same change path as a real connection, so the demo shows what a streamed reply costs.
+                engine.onChange = { [weak self] in self?.engineChanged() }
+                if streaming {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { DemoStream.start(engine, session: examples[0].id) }
+                }
             } catch { fatalError = error.localizedDescription }
             return
         }
