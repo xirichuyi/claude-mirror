@@ -262,6 +262,7 @@ struct MessageRow: View, Equatable {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array((message.blocks ?? []).enumerated()).filter { !isDuplicateError($0.element) }, id: \.offset) { index, block in
                 BlockView(block: block, actions: actions, thinkingActive: busy && sessionStatus == "working" && index == (message.blocks?.count ?? 0) - 1)
+                    .environment(\.replyStreaming, busy && index == (message.blocks?.count ?? 0) - 1)
             }
             if let issue = message.serviceIssue {
                 VStack(alignment: .leading, spacing: 6) {
@@ -520,11 +521,10 @@ struct CodeBlock: View {
     var color: Color = .primary
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
+        OverflowScroll(axes: [.horizontal, .vertical]) {
             Text(text).font(.system(size: 11, design: .monospaced)).foregroundStyle(color).textSelection(.enabled)
                 .padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .defaultScrollAnchor(.topLeading)
         .frame(maxHeight: 320)
         .fixedSize(horizontal: false, vertical: true)
         .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))

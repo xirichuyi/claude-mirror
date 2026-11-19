@@ -7,18 +7,21 @@ struct MarkdownView: View {
     let text: String
     let actions: FileActions
     @Environment(\.transcriptSelection) private var selection
+    @Environment(\.replyStreaming) private var streaming
 
     var body: some View {
+        let blocks = NativeMarkdown.blocks(text)
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(NativeMarkdown.blocks(text)) { block in
+            ForEach(blocks) { block in
                 if block.kind == .rule {
                     Rectangle().fill(WorkbenchTheme.border).frame(height: 1).padding(.vertical, 4)
                 } else if block.kind == .prose {
                     selectable(block)
                 } else if block.kind == .code {
-                    MarkdownCodeBlock(block: block, selection: selection)
+                    // The block still being written keeps its newest lines in view.
+                    MarkdownCodeBlock(block: block, selection: selection, growing: streaming && block.id == blocks.count - 1)
                 } else {
-                    ScrollView(.horizontal) {
+                    OverflowScroll {
                         selectable(block).frame(width: block.width, alignment: .leading)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -38,6 +41,9 @@ struct MarkdownView: View {
 private struct MarkdownCodeBlock: View {
     let block: NativeMarkdown.Block
     let selection: TranscriptSelection?
+    var growing = false
+    /// Same cap as the code view in file previews; longer blocks scroll inside.
+    private let maxHeight: CGFloat = 380
     @State private var hovered = false
     @State private var copied = false
     @FocusState private var copyFocused: Bool
@@ -57,13 +63,17 @@ private struct MarkdownCodeBlock: View {
                 Text(block.language).font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary).lineLimit(1).padding(.trailing, 30)
             }
-            ScrollView(.horizontal) {
+            // Vertical scrolling only when the block is over the cap, so short blocks pass wheel events on.
+            OverflowScroll(axes: block.height > maxHeight - 40 ? [.horizontal, .vertical] : .horizontal, anchor: growing ? .bottomLeading : .topLeading) {
                 SelectableTranscriptText(text: displayed.string, attributed: displayed, scope: selection)
                     .frame(width: block.width, alignment: .leading)
+                    // The horizontal scroller sits in this space instead of over the last line.
+                    .padding(.bottom, 12)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.vertical, 12).padding(.leading, 14).padding(.trailing, 42)
+        .padding(.top, 12).padding(.leading, 14).padding(.trailing, 42)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .topTrailing) {
             Button {

@@ -143,10 +143,18 @@ struct SelectableTranscriptText: NSViewRepresentable {
 private struct TranscriptSelectionKey: EnvironmentKey {
     static let defaultValue: TranscriptSelection? = nil
 }
+private struct ReplyStreamingKey: EnvironmentKey {
+    static let defaultValue = false
+}
 extension EnvironmentValues {
     var transcriptSelection: TranscriptSelection? {
         get { self[TranscriptSelectionKey.self] }
         set { self[TranscriptSelectionKey.self] = newValue }
+    }
+    /// True inside the reply that is still being written.
+    var replyStreaming: Bool {
+        get { self[ReplyStreamingKey.self] }
+        set { self[ReplyStreamingKey.self] = newValue }
     }
 }
 #endif

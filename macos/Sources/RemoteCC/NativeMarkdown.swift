@@ -13,6 +13,8 @@ import RemoteCCCore
         let content: NSAttributedString
         var language = ""
         var width: CGFloat = 0
+        /// Laid-out height of a code block, from its line count.
+        var height: CGFloat = 0
     }
     private final class Cached: NSObject { let blocks: [Block]; init(_ blocks: [Block]) { self.blocks = blocks } }
     private static let cache: NSCache<NSString, Cached> = {
@@ -208,10 +210,12 @@ import RemoteCCCore
             case "block_quote": for child in children(node) { walk(child, depth: depth, quote: true) }
             case "code_block":
                 let codeStyle = style(); codeStyle.paragraphSpacing = 0; codeStyle.lineSpacing = 3
-                let value = NSAttributedString(string: literal(node), attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular), .foregroundColor: NSColor(WorkbenchTheme.ink), .paragraphStyle: codeStyle])
+                let value = NSMutableAttributedString(string: literal(node), attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular), .foregroundColor: NSColor(WorkbenchTheme.ink), .paragraphStyle: codeStyle])
                 let width = min(16000, max(120, value.string.components(separatedBy: "\n").map(codeLineWidth).max() ?? 120) + 8)
                 let language = cmark_node_get_fence_info(node).map { String(cString: $0).split(separator: " ").first.map(String.init) ?? "" } ?? ""
-                items.append(.block(Block(id: 0, kind: .code, content: value, language: language, width: width)))
+                CodeHighlight.apply(to: value, language: language)
+                let lines = value.string.components(separatedBy: "\n").count - (value.string.hasSuffix("\n") ? 1 : 0)
+                items.append(.block(Block(id: 0, kind: .code, content: value, language: language, width: width, height: CGFloat(lines) * 19)))
             case "table": table(node)
             case "thematic_break":
                 items.append(.block(Block(id: 0, kind: .rule, content: NSAttributedString(string: ""))))
@@ -223,6 +227,8 @@ import RemoteCCCore
             let rows = children(node), columns = max(1, Int(cmark_gfm_extensions_get_table_columns(node)))
             let table = NSTextTable(); table.numberOfColumns = columns; table.layoutAlgorithm = .fixedLayoutAlgorithm; table.collapsesBorders = true
             let width = CGFloat(columns) * 180
+            // The table is narrower than its text view; filling it exactly clips the right border.
+            table.setContentWidth(width, type: .absoluteValueType)
             let result = NSMutableAttributedString(string: "")
             let alignments = cmark_gfm_extensions_get_table_alignments(node)
             for (rowIndex, row) in rows.enumerated() {
@@ -243,7 +249,7 @@ import RemoteCCCore
                     result.append(value)
                 }
             }
-            items.append(.block(Block(id: 0, kind: .table, content: result, width: width)))
+            items.append(.block(Block(id: 0, kind: .table, content: result, width: width + 2)))
         }
     }
 }
