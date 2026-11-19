@@ -214,7 +214,8 @@ import RemoteCCCore
                 // One text block for the whole quote draws a continuous bar down its left side.
                 let bar = NSTextBlock()
                 bar.setWidth(3, type: .absoluteValueType, for: .border, edge: .minX)
-                bar.setBorderColor(.tertiaryLabelColor, for: .minX)
+                bar.setBorderColor(.tertiaryLabelColor)
+                bar.setValue(100, type: .percentageValueType, for: .width)
                 bar.setWidth(12, type: .absoluteValueType, for: .padding, edge: .minX)
                 for child in children(node) { walk(child, depth: depth, quote: quote ?? bar) }
             case "code_block":
