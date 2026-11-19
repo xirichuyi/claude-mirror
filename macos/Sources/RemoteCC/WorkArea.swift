@@ -5,6 +5,7 @@ import RemoteCCCore
 
 struct WorkArea: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var showingChat = false
 
@@ -14,9 +15,9 @@ struct WorkArea: View {
             let hasEditor = workspace?.activeTab != nil
             let hasFiles = model.showFiles && model.active != nil
             let hasWorkspace = hasEditor || hasFiles
-            if !hasWorkspace {
-                ChatView()
-            } else if geometry.size.width < 720 {
+            // One branch with and without a side pane: the conversation keeps its identity, and so
+            // its scroll position, when the file panel opens or closes.
+            if hasWorkspace && geometry.size.width < 720 {
                 VStack(spacing: 0) {
                     CapsulePicker(label: "显示区域", options: [true, false], selection: $showingChat) {
                         $0 ? "对话" : "工作区"
@@ -26,16 +27,26 @@ struct WorkArea: View {
                 }
             } else {
                 HStack(spacing: 0) {
+                    // Only the file panel slides; text is laid out once at its new width.
                     ChatView().frame(minWidth: 340, maxWidth: .infinity)
+                        .transaction { $0.animation = nil }
                     if hasWorkspace {
                         if geometry.size.width >= 1080 {
-                            if let workspace, hasEditor { EditorPane(workspace: workspace).frame(minWidth: 360, maxWidth: .infinity) }
-                            if hasFiles { FilePanel().frame(minWidth: 230, idealWidth: 260, maxWidth: 340) }
+                            if let workspace, hasEditor {
+                                EditorPane(workspace: workspace).frame(minWidth: 360, maxWidth: .infinity)
+                                    .transaction { $0.animation = nil }
+                            }
+                            if hasFiles {
+                                FilePanel().frame(minWidth: 230, idealWidth: 260, maxWidth: 340)
+                                    .transition(.move(edge: .trailing).combined(with: .opacity)).zIndex(1)
+                            }
                         } else {
                             workspacePane(workspace, hasFiles: hasFiles).frame(minWidth: 320, maxWidth: .infinity)
+                                .transition(.move(edge: .trailing).combined(with: .opacity)).zIndex(1)
                         }
                     }
                 }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hasWorkspace)
             }
         }
         .onChange(of: model.activeWorkspace?.activeTabId) { showingChat = false }

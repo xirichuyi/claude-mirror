@@ -5,6 +5,7 @@ import RemoteCCCore
 
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,12 +25,15 @@ struct ChatView: View {
                             .background(WorkbenchTheme.surface.opacity(0.5))
                     }
                     MessagesList(session: session, feed: model.replyFeed).id(session.id)
+                        // The previous conversation leaves at once; fading both would lay out two transcripts.
+                        .transition(.asymmetric(insertion: .opacity, removal: .identity))
                 } else {
                     WelcomeView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: model.activeId)
 
             // Reserve real layout space for the composer. A safe-area inset on the
             // outer stack lets the nested native transcript draw behind the input.

@@ -6,6 +6,7 @@ import RemoteCCCore
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @State private var sidebarVisible = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("workspace.sidebarWidth") private var sidebarWidth: Double = 240
 
     var body: some View {
@@ -19,14 +20,21 @@ struct RootView: View {
                             .overlay(alignment: .trailing) {
                                 SidebarResizeHandle(width: $sidebarWidth)
                             }
+                            .transition(.move(edge: .leading).combined(with: .opacity)).zIndex(1)
                         Divider().opacity(0.5)
                     }
+                    // Side panes slide; the conversation takes its new width at once, because
+                    // re-wrapping every text view on each animation frame is slow and looks wrong.
                     WorkArea().frame(minWidth: 340, maxWidth: .infinity)
+                        .transaction { $0.animation = nil }
                     if model.showSessionDetails && model.active != nil {
                         Divider()
                         SessionDetailsView().frame(width: 270)
+                            .transition(.move(edge: .trailing).combined(with: .opacity)).zIndex(1)
                     }
                 }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: sidebarVisible)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.showSessionDetails && model.active != nil)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(WorkbenchTheme.border.opacity(0.45)))
                 .shadow(color: .black.opacity(0.035), radius: 12, y: 3)
