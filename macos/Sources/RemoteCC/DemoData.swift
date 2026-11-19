@@ -43,7 +43,7 @@ enum DemoStream {
 
     static let reply: String = {
         let code = (1...40).map { "export async function handler\($0)(request: Request, response: Response) {\n  const parsed = schema.safeParse(request.body);\n  if (!parsed.success) return response.status(400).json({ error: 'Missing credentials' });\n  return response.json({ ok: true, index: \($0) });\n}" }.joined(separator: "\n")
-        let section = { (index: Int) in "## \(index). 改动说明\n\n这一部分覆盖了 **接口校验**、*错误码统一* 和令牌刷新流程，`src/auth/session.ts` 的改动最大。下面的段落用于拉长回复，方便观察流式输出时的跟随滚动是否连续。校验层统一使用同一份 schema，错误信息带上请求编号，方便在日志里对应到具体的一次调用；刷新令牌改为十四天滑动过期，重复使用同一个令牌会吊销整条链，避免泄露之后被长期利用。这一段故意写得比较长，窗口变窄或者打开右侧面板时它会重新换行，可以用来检查阅读位置是否保持不动。\n\n- 缺少凭据时返回 `400`\n- 验证失败时返回 `401`\n- 服务异常时返回 `500`，不暴露内部错误\n\n| 接口 | 方法 | 新行为 |\n| --- | --- | --- |\n| `/api/login` | POST | 返回结构化 JSON 错误 |\n| `/api/refresh` | POST | 14 天滑动过期 |\n\n" }
+        let section = { (index: Int) in "## \(index). 改动说明\n\n这一部分覆盖了 **接口校验**、*错误码统一* 和令牌刷新流程，`src/auth/session.ts` 的改动最大。下面的段落用于拉长回复，方便观察流式输出时的跟随滚动是否连续。校验层统一使用同一份 schema，错误信息带上请求编号，方便在日志里对应到具体的一次调用；刷新令牌改为十四天滑动过期，重复使用同一个令牌会吊销整条链，避免泄露之后被长期利用。这一段故意写得比较长，窗口变窄或者打开右侧面板时它会重新换行，可以用来检查阅读位置是否保持不动。\n\n- 第 \(index) 节：缺少凭据时返回 `400`\n- 验证失败时返回 `401`\n- 服务异常时返回 `500`，不暴露内部错误\n\n| 接口 | 方法 | 新行为 |\n| --- | --- | --- |\n| `/api/login` | POST | 返回结构化 JSON 错误 |\n| `/api/refresh` | POST | 14 天滑动过期 |\n\n" }
         return "# 登录模块重构总结\n\n" + (1...4).map(section).joined() + "```typescript\n" + code + "\n```\n\n" + (5...8).map(section).joined() + "> 上线前请先在预发环境验证迁移脚本。\n"
     }()
 

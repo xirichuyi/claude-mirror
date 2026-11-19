@@ -113,7 +113,8 @@ struct ReplyScrollObserver: NSViewRepresentable {
         private var observers: [NSObjectProtocol] = []
         private var updateQueued = false, followQueued = false
         private var far = false, near = true
-        private var width: CGFloat = 0
+        /// Set when the viewport or the transcript changed size, as opposed to being scrolled.
+        private var reflowed = false
         /// The line at the top of the viewport while the user reads earlier messages.
         private var reading: (view: TranscriptTextView, character: Int, inset: CGFloat)?
 
@@ -128,10 +129,9 @@ struct ReplyScrollObserver: NSViewRepresentable {
             let center = NotificationCenter.default
             observers = [
                 center.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.queueUpdate() } },
-                center.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.queueUpdate() } },
-                center.addObserver(forName: NSView.frameDidChangeNotification, object: document, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.queueUpdate(); self?.queueFollow() } }
+                center.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.reflowed = true; self?.queueUpdate() } },
+                center.addObserver(forName: NSView.frameDidChangeNotification, object: document, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.reflowed = true; self?.queueUpdate(); self?.queueFollow() } }
             ]
-            width = clip.bounds.width
         }
         func stopObserving() { observers.forEach(NotificationCenter.default.removeObserver); observers = [] }
 
@@ -145,15 +145,15 @@ struct ReplyScrollObserver: NSViewRepresentable {
         private func update() {
             guard let scroll = enclosingScrollView, let document = scroll.documentView else { return }
             let clip = scroll.contentView
+            // A reflow keeps the line being read where it was; only scrolling picks a new one.
+            let reflowed = self.reflowed
+            self.reflowed = false
+            if reflowed, !follows { restoreReadingLine(clip, in: scroll) }
             let distance = Double(document.frame.maxY - clip.bounds.maxY)
             let far = ReplyScrollPolicy.showsJump(distance: distance, following: false), near = ReplyScrollPolicy.isNearBottom(distance)
             if far != self.far || near != self.near { self.far = far; self.near = near; onChange?(far, near) }
-            if clip.bounds.width != width {
-                // The transcript was reflowed. Following keeps the end in view; reading keeps its line.
-                width = clip.bounds.width
-                if !follows { restoreReadingLine(clip, in: scroll) }
-            } else if follows || near { reading = nil }
-            else { reading = readingLine(clip) }
+            if follows || near { reading = nil }
+            else if !reflowed { reading = readingLine(clip) }
         }
 
         /// Keeps the end of a growing reply in view. Runs after layout, once per pass, and glides
@@ -208,7 +208,8 @@ struct ReplyScrollObserver: NSViewRepresentable {
                   let lineTop = lineTop(reading.view, character: reading.character) else { return }
             let top = clip.convert(clip.bounds, to: nil).maxY
             let limit = max(0, document.frame.maxY - clip.bounds.height)
-            let y = min(limit, max(0, clip.bounds.minY - ((top - lineTop) - reading.inset)))
+            // The document is flipped: a line that sits lower than before needs a larger origin.
+            let y = min(limit, max(0, clip.bounds.minY + ((top - lineTop) - reading.inset)))
             guard abs(y - clip.bounds.minY) > 0.5 else { return }
             clip.scroll(to: NSPoint(x: clip.bounds.minX, y: y))
             scroll.reflectScrolledClipView(clip)
