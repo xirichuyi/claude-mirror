@@ -64,13 +64,19 @@ struct RootView: View {
         .tint(WorkbenchTheme.accent)
         .accentColor(WorkbenchTheme.accent)
         .foregroundStyle(WorkbenchTheme.ink)
-        .overlay(alignment: .bottom) {
-            if let toast = model.toast {
-                Text(toast)
-                    .font(.callout).padding(.horizontal, 14).padding(.vertical, 9)
-                    .foregroundStyle(.white).background(.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 8))
-                    .padding(.bottom, 24).frame(maxWidth: 650).textSelection(.enabled)
+        // At the top, clear of the composer and its toolbar.
+        .overlay(alignment: .top) {
+            ZStack {
+                if let toast = model.toast {
+                    Text(toast)
+                        .font(.callout).padding(.horizontal, 14).padding(.vertical, 9)
+                        .foregroundStyle(.white).background(.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.14)))
+                        .padding(.top, 12).frame(maxWidth: 650).textSelection(.enabled)
+                        .transition(.opacity)
+                }
             }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: model.toast)
         }
         .sheet(item: $model.presentation) { AppSheet(destination: $0) }
     }

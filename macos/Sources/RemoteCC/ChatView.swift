@@ -549,6 +549,8 @@ struct DiffView: View {
             }
             .textSelection(.enabled)
         }
+        // A diff shorter than the pane starts at the top instead of floating in the middle.
+        .defaultScrollAnchor(.topLeading)
         .frame(maxHeight: maxHeight)
     }
     private func prefix(_ row: DiffRow) -> String {

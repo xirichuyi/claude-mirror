@@ -8,8 +8,10 @@ enum WorkbenchTheme {
     static let sidebar = Color(nsColor: .windowBackgroundColor)
     static let surface = Color(nsColor: .controlBackgroundColor)
     static let ink = Color.primary
-    static let onInk = Color.white
-    static let primaryButton = Color.black
+    // Ink inverts with the appearance: a black button disappears into a dark card.
+    static let onInk = adaptive(light: .white, dark: .black)
+    static let primaryButton = adaptive(light: .black, dark: NSColor(white: 0.92, alpha: 1))
+    static let selectedSegment = adaptive(light: NSColor(white: 0.17, alpha: 1), dark: NSColor(white: 0.86, alpha: 1))
     static let accent = Color(nsColor: .labelColor)
     static let userBubble = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
     static let border = Color(nsColor: .separatorColor)
@@ -21,6 +23,10 @@ enum WorkbenchTheme {
     static let conversationWidth: CGFloat = 800
 
     enum Radius { static let small: CGFloat = 6, medium: CGFloat = 10, large: CGFloat = 16 }
+
+    private static func adaptive(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light })
+    }
 
 
 }
@@ -39,7 +45,8 @@ struct FrostedBackground: View {
         } else {
             ClassicVisualEffect(material: material, blendingMode: blendingMode)
                 .saturation(0)
-                .overlay(colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.68))
+                // Side panes sit one small step from the canvas in both appearances.
+                .overlay(colorScheme == .dark ? Color.black.opacity(0.45) : Color.white.opacity(0.68))
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
@@ -97,10 +104,10 @@ struct CapsulePicker<Value: Hashable>: View {
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 10).padding(.vertical, 8)
-                        .foregroundStyle(selection == option ? Color.white : Color.secondary)
+                        .foregroundStyle(selection == option ? WorkbenchTheme.onInk : Color.secondary)
                         .background {
                             if selection == option {
-                                Capsule().fill(Color(white: 0.17))
+                                Capsule().fill(WorkbenchTheme.selectedSegment)
                                     .shadow(color: .black.opacity(0.16), radius: 2, y: 1)
                             }
                         }
