@@ -227,7 +227,8 @@ struct ChangesView: View {
                             HStack {
                                 Text(file.relative).foregroundStyle(gitColor(file.code)).lineLimit(1).truncationMode(.head)
                                 Spacer()
-                                Text(file.status.trimmingCharacters(in: .whitespaces)).foregroundStyle(.secondary)
+                                // Same letter as the file tree: git's "??" is an untracked file.
+                                Text(file.status.trimmingCharacters(in: .whitespaces) == "??" ? "U" : file.status.trimmingCharacters(in: .whitespaces)).foregroundStyle(.secondary)
                             }
                             .font(.callout).padding(.horizontal, 10).padding(.vertical, 4).contentShape(Rectangle())
                         }
