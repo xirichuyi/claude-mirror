@@ -44,6 +44,13 @@ import RemoteCCCore
 
 @MainActor final class TranscriptTextView: NSTextView {
     weak var selectionScope: TranscriptSelection?
+    /// SwiftUI can reuse a size it measured earlier for the same width without measuring again, which
+    /// leaves the text wrapped for whatever width was measured last. The frame it sets is the truth.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        guard let container = textContainer, newSize.width > 0, abs(container.containerSize.width - newSize.width) > 0.5 else { return }
+        container.containerSize = NSSize(width: newSize.width, height: .greatestFiniteMagnitude)
+    }
     override func copy(_ sender: Any?) {
         guard let text = selectionScope?.selectedText, !text.isEmpty else { super.copy(sender); return }
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
