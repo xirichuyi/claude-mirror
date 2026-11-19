@@ -11,6 +11,8 @@ import RemoteCCCore
         views.allObjects.filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
             .sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
     }
+    /// Top to bottom, as laid out in the window.
+    var visibleViews: [TranscriptTextView] { ordered }
     func clear() { for view in ordered { view.setSelectedRange(NSRange(location: 0, length: 0)) } }
     func select(from origin: TranscriptTextView, anchor: Int, to point: NSPoint) {
         let items = ordered

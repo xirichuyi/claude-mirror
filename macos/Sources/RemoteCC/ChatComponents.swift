@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import AppKit
+import RemoteCCCore
 
 struct ThinkingCard: View {
     let text: String
@@ -86,6 +87,132 @@ struct ScrollReadingDetector: NSViewRepresentable {
         }
         func removeMonitor() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
         deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+    }
+}
+
+/// Sits inside the transcript's scroll content and reads the enclosing `NSScrollView`.
+/// A SwiftUI geometry preference is not updated while the scroll view scrolls or grows on current macOS,
+/// and storing the offset in view state would re-evaluate the whole transcript on every scroll frame.
+struct ReplyScrollObserver: NSViewRepresentable {
+    /// Whether new reply text should keep the end of the transcript in view.
+    let follows: Bool
+    let selection: TranscriptSelection
+    /// Called only when a `ReplyScrollPolicy` threshold is crossed.
+    let onChange: (_ farFromEnd: Bool, _ nearEnd: Bool) -> Void
+
+    func makeNSView(context: Context) -> ObserverView { ObserverView() }
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.follows = follows; view.selection = selection; view.onChange = onChange
+    }
+    static func dismantleNSView(_ view: ObserverView, coordinator: ()) { view.stopObserving() }
+
+    final class ObserverView: NSView {
+        var follows = true
+        weak var selection: TranscriptSelection?
+        var onChange: ((Bool, Bool) -> Void)?
+        private var observers: [NSObjectProtocol] = []
+        private var updateQueued = false, followQueued = false
+        private var far = false, near = true
+        private var width: CGFloat = 0
+        /// The line at the top of the viewport while the user reads earlier messages.
+        private var reading: (view: TranscriptTextView, character: Int, inset: CGFloat)?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stopObserving()
+            guard window != nil, let scroll = enclosingScrollView, let document = scroll.documentView else { return }
+            let clip = scroll.contentView
+            clip.postsBoundsChangedNotifications = true; clip.postsFrameChangedNotifications = true
+            document.postsFrameChangedNotifications = true
+            let center = NotificationCenter.default
+            observers = [
+                center.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.queueUpdate() } },
+                center.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.queueUpdate() } },
+                center.addObserver(forName: NSView.frameDidChangeNotification, object: document, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.queueUpdate(); self?.queueFollow() } }
+            ]
+            width = clip.bounds.width
+        }
+        func stopObserving() { observers.forEach(NotificationCenter.default.removeObserver); observers = [] }
+
+        /// Notifications arrive in the middle of layout; SwiftUI state may only change afterwards.
+        private func queueUpdate() {
+            guard !updateQueued else { return }
+            updateQueued = true
+            DispatchQueue.main.async { [weak self] in self?.updateQueued = false; self?.update() }
+        }
+
+        private func update() {
+            guard let scroll = enclosingScrollView, let document = scroll.documentView else { return }
+            let clip = scroll.contentView
+            let distance = Double(document.frame.maxY - clip.bounds.maxY)
+            let far = ReplyScrollPolicy.showsJump(distance: distance, following: false), near = ReplyScrollPolicy.isNearBottom(distance)
+            if far != self.far || near != self.near { self.far = far; self.near = near; onChange?(far, near) }
+            if clip.bounds.width != width {
+                // The transcript was reflowed. Following keeps the end in view; reading keeps its line.
+                width = clip.bounds.width
+                if !follows { restoreReadingLine(clip, in: scroll) }
+            } else if follows || near { reading = nil }
+            else { reading = readingLine(clip) }
+        }
+
+        /// Keeps the end of a growing reply in view. Runs after layout, once per pass, and glides
+        /// to the new end so streamed lines do not arrive as jumps.
+        private func queueFollow() {
+            guard follows, !followQueued else { return }
+            followQueued = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.followQueued = false
+                guard self.follows, let scroll = self.enclosingScrollView, let document = scroll.documentView else { return }
+                let clip = scroll.contentView
+                let end = NSPoint(x: clip.bounds.minX, y: document.frame.maxY - clip.bounds.height)
+                let distance = end.y - clip.bounds.minY
+                guard distance > 0.5 else { return }
+                // A long way off is a new message or a resize, not the next line of the reply.
+                if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || distance > clip.bounds.height / 2 {
+                    clip.scroll(to: end)
+                } else {
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = 0.12
+                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        clip.animator().setBoundsOrigin(end)
+                    }
+                }
+                scroll.reflectScrolledClipView(clip)
+            }
+        }
+
+        private func lineTop(_ view: TranscriptTextView, character: Int) -> CGFloat? {
+            guard let layout = view.layoutManager, let container = view.textContainer, layout.numberOfGlyphs > 0 else { return nil }
+            layout.ensureLayout(for: container)
+            let glyph = min(layout.glyphIndexForCharacter(at: character), layout.numberOfGlyphs - 1)
+            let line = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            return view.convert(NSPoint(x: 0, y: line.minY + view.textContainerOrigin.y), to: nil).y
+        }
+
+        private func readingLine(_ clip: NSClipView) -> (view: TranscriptTextView, character: Int, inset: CGFloat)? {
+            let top = clip.convert(clip.bounds, to: nil).maxY
+            for view in selection?.visibleViews ?? [] {
+                let frame = view.convert(view.bounds, to: nil)
+                guard frame.minY < top else { continue }
+                let character = view.characterIndexForInsertion(at: view.convert(NSPoint(x: frame.minX + 1, y: min(top, frame.maxY) - 1), from: nil))
+                guard let lineTop = lineTop(view, character: character) else { continue }
+                return (view, character, top - lineTop)
+            }
+            return nil
+        }
+
+        private func restoreReadingLine(_ clip: NSClipView, in scroll: NSScrollView) {
+            guard let reading, reading.view.window != nil, let document = scroll.documentView,
+                  let lineTop = lineTop(reading.view, character: reading.character) else { return }
+            let top = clip.convert(clip.bounds, to: nil).maxY
+            let limit = max(0, document.frame.maxY - clip.bounds.height)
+            let y = min(limit, max(0, clip.bounds.minY - ((top - lineTop) - reading.inset)))
+            guard abs(y - clip.bounds.minY) > 0.5 else { return }
+            clip.scroll(to: NSPoint(x: clip.bounds.minX, y: y))
+            scroll.reflectScrolledClipView(clip)
+        }
     }
 }
 #endif

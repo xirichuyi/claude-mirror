@@ -89,13 +89,11 @@ struct MessagesList: View {
     @StateObject private var selection = TranscriptSelection()
     @State private var followsReply = true
     @State private var farFromBottom = false
-    @State private var contentHeight: CGFloat = 0
     @State private var visibleMessageLimit = 50
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let session = model.engine?.session(self.session.id) ?? self.session
-        GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -147,29 +145,14 @@ struct MessagesList: View {
                 .padding(.horizontal, 28).padding(.vertical, 24)
                 .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
-                .background(GeometryReader { content in
-                    Color.clear.preference(key: ReplyBottomPreference.self,
-                        value: ReplyGeometry(height: content.size.height, bottom: content.frame(in: .named("replyViewport")).maxY))
+                .background(ReplyScrollObserver(follows: followsReply, selection: selection) { far, near in
+                    // Only threshold crossings arrive here, so scrolling does not re-evaluate the transcript.
+                    farFromBottom = far
+                    if near { followsReply = true }
                 })
             }
             .clipped()
             .defaultScrollAnchor(.bottom)
-            .coordinateSpace(name: "replyViewport")
-            .onPreferenceChange(ReplyBottomPreference.self) { geometry in
-                // Offset changes only update the jump button. Never scroll from an offset
-                // callback: scrolling changes the offset again and creates a layout loop.
-                // This fires on every scroll frame. Writing unchanged state would re-evaluate
-                // the whole transcript each frame, so only the derived flag is stored.
-                let far = ReplyScrollPolicy.showsJump(distance: Double(max(0, geometry.bottom - viewport.size.height)), following: false)
-                if far != farFromBottom { farFromBottom = far }
-                if geometry.height != contentHeight { contentHeight = geometry.height }
-            }
-            .task(id: contentHeight) {
-                // Coalesce streamed text and wait for native text measurement to settle.
-                do { try await Task.sleep(for: .milliseconds(40)) } catch { return }
-                guard followsReply else { return }
-                proxy.scrollTo("bottom", anchor: .bottom)
-            }
             .background(ScrollReadingDetector { followsReply = false })
             .overlay(alignment: .bottomTrailing) {
                 // The animation is scoped to this stack so streamed transcript layout never animates.
@@ -197,17 +180,7 @@ struct MessagesList: View {
                 visibleMessageLimit += max(0, newCount - oldCount)
             }
         }
-        }
     }
-}
-
-private struct ReplyGeometry: Equatable {
-    var height: CGFloat = 0
-    var bottom: CGFloat = 0
-}
-private struct ReplyBottomPreference: PreferenceKey {
-    static var defaultValue = ReplyGeometry()
-    static func reduce(value: inout ReplyGeometry, nextValue: () -> ReplyGeometry) { value = nextValue() }
 }
 
 struct HistoryNotice: View {
