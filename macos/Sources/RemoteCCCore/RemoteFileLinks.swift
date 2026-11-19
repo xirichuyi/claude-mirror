@@ -2,8 +2,9 @@ import Foundation
 
 /// Adds file actions to inline code without changing fenced examples or existing links.
 public enum RemoteFileLinks {
+    private static let tokens = try! NSRegularExpression(pattern: #"!?\[[^\]\n]*\]\([^\n]*?\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|(`+)([^`\n]+)\1"#)
+
     public static func markdown(_ source: String) -> String {
-        let tokens = try! NSRegularExpression(pattern: #"!?\[[^\]\n]*\]\([^\n]*?\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|(`+)([^`\n]+)\1"#)
         var fence: (character: Character, count: Int)?
         return source.components(separatedBy: "\n").map { line in
             let trimmed = line.drop(while: { $0 == " " })

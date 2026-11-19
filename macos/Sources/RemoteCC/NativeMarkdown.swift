@@ -8,7 +8,7 @@ import RemoteCCCore
 @MainActor enum NativeMarkdown {
     struct Block: Identifiable {
         enum Kind { case prose, code, table, rule }
-        let id: Int
+        var id: Int
         let kind: Kind
         let content: NSAttributedString
         var language = ""
@@ -18,6 +18,37 @@ import RemoteCCCore
     private static let cache: NSCache<NSString, Cached> = {
         let cache = NSCache<NSString, Cached>(); cache.countLimit = 64; cache.totalCostLimit = 4 * 1024 * 1024; return cache
     }()
+    /// What one top-level node produced, keyed by its type and source lines. A streamed reply is parsed
+    /// again for every chunk, but only its last node changes; the others are reused instead of rebuilt.
+    private final class Pieces: NSObject { let items: [Piece]; init(_ items: [Piece]) { self.items = items } }
+    private static let pieces: NSCache<NSString, Pieces> = {
+        let cache = NSCache<NSString, Pieces>(); cache.countLimit = 512; cache.totalCostLimit = 8 * 1024 * 1024; return cache
+    }()
+    private enum Piece { case prose(NSAttributedString), block(Block) }
+
+    /// Top-level nodes paired with their source lines, or nil when their output cannot be reused:
+    /// a link reference definition changes how other nodes render, and line ranges that do not tile
+    /// the document would give two different nodes the same key.
+    private static func sources(_ nodes: [UnsafeMutablePointer<cmark_node>], in input: String) -> [String]? {
+        // Bytes, not characters: this runs over the whole reply for every streamed chunk.
+        let bytes = input.utf8
+        var previous: UInt8 = 0
+        for byte in bytes {
+            if byte == 13 || (byte == 58 && previous == 93) { return nil }
+            previous = byte
+        }
+        let lines = bytes.split(separator: 10, omittingEmptySubsequences: false)
+        let blank = { (line: Substring.UTF8View) in line.allSatisfy { $0 == 32 || $0 == 9 } }
+        var result: [String] = [], next = 0
+        for node in nodes {
+            let first = Int(cmark_node_get_start_line(node)) - 1, last = Int(cmark_node_get_end_line(node))
+            guard first >= next, last > first, last <= lines.count, lines[next..<first].allSatisfy(blank) else { return nil }
+            result.append(type(node) + "\n" + input[lines[first].startIndex..<lines[last - 1].endIndex])
+            next = last
+        }
+        return lines[next...].allSatisfy(blank) ? result : nil
+    }
+
     static func blocks(_ source: String) -> [Block] {
         if let cached = cache.object(forKey: source as NSString) { return cached.blocks }
         cmark_gfm_core_extensions_ensure_registered()
@@ -31,10 +62,22 @@ import RemoteCCCore
         guard let root = cmark_parser_finish(parser) else { return [] }
         defer { cmark_node_free(root) }
         let builder = Builder()
-        builder.walk(root)
-        builder.flush()
-        cache.setObject(Cached(builder.blocks), forKey: source as NSString, cost: input.utf8.count + builder.blocks.reduce(0) { $0 + $1.content.length * 12 })
-        return builder.blocks
+        let nodes = children(root)
+        if let sources = sources(nodes, in: input) {
+            for (index, node) in nodes.enumerated() {
+                // The last node is still growing while a reply streams, so it is never stored.
+                guard index < nodes.count - 1 else { builder.walk(node); break }
+                if let stored = pieces.object(forKey: sources[index] as NSString) { builder.items += stored.items; continue }
+                let start = builder.items.count
+                builder.walk(node)
+                pieces.setObject(Pieces(Array(builder.items[start...])), forKey: sources[index] as NSString, cost: sources[index].utf8.count * 16)
+            }
+        } else {
+            builder.walk(root)
+        }
+        let blocks = builder.blocks
+        cache.setObject(Cached(blocks), forKey: source as NSString, cost: input.utf8.count + blocks.reduce(0) { $0 + $1.content.length * 12 })
+        return blocks
     }
     static func document(_ source: String) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
@@ -90,6 +133,15 @@ import RemoteCCCore
         }
         return result
     }
+    /// A code block that is still streaming is measured again for every chunk; only its new lines cost anything.
+    private static var codeLineWidths: [String: CGFloat] = [:]
+    private static func codeLineWidth(_ line: String) -> CGFloat {
+        if let width = codeLineWidths[line] { return width }
+        if codeLineWidths.count >= 4096 { codeLineWidths.removeAll(keepingCapacity: true) }
+        let width = (line as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)]).width
+        codeLineWidths[line] = width
+        return width
+    }
     private static func link(_ raw: String) -> URL? {
         let url = URL(string: raw)
         if let scheme = url?.scheme {
@@ -98,19 +150,34 @@ import RemoteCCCore
         return URL(string: "rcc-file:" + (raw.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? raw))
     }
     @MainActor private final class Builder {
-        var blocks: [Block] = []
-        var prose = NSMutableAttributedString(string: "")
-        func flush() {
-            guard prose.length > 0 else { return }
-            if prose.string.hasSuffix("\n") { prose.deleteCharacters(in: NSRange(location: prose.length - 1, length: 1)) }
-            blocks.append(Block(id: blocks.count, kind: .prose, content: NSAttributedString(attributedString: prose)))
-            prose = NSMutableAttributedString(string: "")
+        var items: [Piece] = []
+        /// Consecutive prose joins into one selectable text block; code, tables and rules stand alone.
+        var blocks: [Block] {
+            var blocks: [Block] = []
+            var prose = NSMutableAttributedString(string: "")
+            func flush() {
+                guard prose.length > 0 else { return }
+                if prose.string.hasSuffix("\n") { prose.deleteCharacters(in: NSRange(location: prose.length - 1, length: 1)) }
+                blocks.append(Block(id: blocks.count, kind: .prose, content: NSAttributedString(attributedString: prose)))
+                prose = NSMutableAttributedString(string: "")
+            }
+            for item in items {
+                switch item {
+                case .prose(let value): prose.append(value)
+                case .block(var block):
+                    flush()
+                    block.id = blocks.count
+                    blocks.append(block)
+                }
+            }
+            flush()
+            return blocks
         }
         func paragraph(_ content: NSAttributedString, style: NSParagraphStyle, prefix: String = "") {
             let value = NSMutableAttributedString(string: prefix, attributes: attributes())
             value.append(content); value.append(NSAttributedString(string: "\n", attributes: attributes()))
             value.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: value.length))
-            prose.append(value)
+            items.append(.prose(value))
         }
         func walk(_ node: UnsafeMutablePointer<cmark_node>, depth: Int = 0, quote: Bool = false, prefix: String = "") {
             let kind = type(node), indent = CGFloat(depth) * 20 + (quote ? 16 : 0)
@@ -140,21 +207,19 @@ import RemoteCCCore
                 }
             case "block_quote": for child in children(node) { walk(child, depth: depth, quote: true) }
             case "code_block":
-                flush()
                 let codeStyle = style(); codeStyle.paragraphSpacing = 0; codeStyle.lineSpacing = 3
                 let value = NSAttributedString(string: literal(node), attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular), .foregroundColor: NSColor(WorkbenchTheme.ink), .paragraphStyle: codeStyle])
-                let width = min(16000, max(120, value.string.components(separatedBy: "\n").map { ($0 as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)]).width }.max() ?? 120) + 8)
+                let width = min(16000, max(120, value.string.components(separatedBy: "\n").map(codeLineWidth).max() ?? 120) + 8)
                 let language = cmark_node_get_fence_info(node).map { String(cString: $0).split(separator: " ").first.map(String.init) ?? "" } ?? ""
-                blocks.append(Block(id: blocks.count, kind: .code, content: value, language: language, width: width))
+                items.append(.block(Block(id: 0, kind: .code, content: value, language: language, width: width)))
             case "table": table(node)
             case "thematic_break":
-                flush(); blocks.append(Block(id: blocks.count, kind: .rule, content: NSAttributedString(string: "")))
+                items.append(.block(Block(id: 0, kind: .rule, content: NSAttributedString(string: ""))))
             case "html_block": paragraph(NSAttributedString(string: literal(node), attributes: attributes()), style: style(indent: indent))
             default: for child in children(node) { walk(child, depth: depth, quote: quote, prefix: prefix) }
             }
         }
         func table(_ node: UnsafeMutablePointer<cmark_node>) {
-            flush()
             let rows = children(node), columns = max(1, Int(cmark_gfm_extensions_get_table_columns(node)))
             let table = NSTextTable(); table.numberOfColumns = columns; table.layoutAlgorithm = .fixedLayoutAlgorithm; table.collapsesBorders = true
             let width = CGFloat(columns) * 180
@@ -178,7 +243,7 @@ import RemoteCCCore
                     result.append(value)
                 }
             }
-            blocks.append(Block(id: blocks.count, kind: .table, content: result, width: width))
+            items.append(.block(Block(id: 0, kind: .table, content: result, width: width)))
         }
     }
 }
