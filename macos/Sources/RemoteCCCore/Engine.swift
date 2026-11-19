@@ -30,6 +30,9 @@ public final class ChatEngine {
     public let files: RemoteFiles
     /// Fires at most once per frame; the UI reads current state afterwards.
     public var onChange: (() -> Void)?
+    /// Fires instead of `onChange` when everything since the last notification only added reply text,
+    /// so observers outside the transcript can skip the update. Falls back to `onChange` when unset.
+    public var onReplyText: (() -> Void)?
     public var onError: ((String) -> Void)?
 
     private let store: ChatStore
@@ -41,6 +44,7 @@ public final class ChatEngine {
     private var capabilityRequests: [String: Task<Capabilities, Error>] = [:]
     private var historyLoads: [String: Task<Void, Error>] = [:]
     private var changeQueued = false
+    private var onlyReplyTextQueued = true
     private var dirty = Set<String>()
     private var saveQueued = false
 
@@ -69,20 +73,37 @@ public final class ChatEngine {
     public func session(_ id: String) -> ChatSession? { sessions.first { $0.id == id } }
     public func isRunning(_ id: String) -> Bool { running.contains(id) }
 
-    private func notify() {
+    private func notify(replyText: Bool = false) {
+        if !replyText { onlyReplyTextQueued = false }
         guard !changeQueued else { return }
         changeQueued = true
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 16_000_000)
-            self?.changeQueued = false
-            self?.onChange?()
+            guard let self else { return }
+            let onlyReplyText = self.onlyReplyTextQueued
+            self.changeQueued = false; self.onlyReplyTextQueued = true
+            if onlyReplyText, let onReplyText = self.onReplyText { onReplyText() } else { self.onChange?() }
         }
     }
 
+    /// True when a snapshot changed nothing but the text and thinking blocks of the reply being streamed.
+    /// Tool blocks stay in the comparison: the file panel and the composer read them.
+    static func onlyReplyTextChanged(from old: ChatSession, to new: ChatSession, message target: Int) -> Bool {
+        func comparable(_ session: ChatSession) -> ChatSession {
+            var session = session, reply = session.messages[target]
+            reply.blocks = reply.blocks?.filter { $0.type != "text" && $0.type != "thinking" }
+            // A snapshot only ever replaces this one message, so the others need no comparison.
+            session.messages = [reply]
+            session.remoteTask?.version = 0; session.remoteOwner?.version = 0
+            return session
+        }
+        return comparable(old) == comparable(new)
+    }
+
     /// `immediate` is for approvals, turn ends and anything that must survive a crash.
-    private func changed(_ id: String?, immediate: Bool = true) {
+    private func changed(_ id: String?, immediate: Bool = true, replyText: Bool = false) {
         if let id { dirty.insert(id) }
-        notify()
+        notify(replyText: replyText)
         if immediate { flushSaves() }
         else if !saveQueued {
             saveQueued = true
@@ -432,6 +453,7 @@ public final class ChatEngine {
             return
         }
         guard let target = sessions[position].messages.firstIndex(where: { $0.id == messageId }), let message = state["message"] else { throw RemoteError("远端任务与本地消息不匹配") }
+        let previous = sessions[position]
         sessions[position].messages[target] = try message.decode(ChatMessage.self)
         sessions[position].status = status
         sessions[position].permissions = (try? state["permissions"]?.decode([PermissionRequest].self)) ?? []
@@ -467,7 +489,8 @@ public final class ChatEngine {
             Task { _ = try? await agents.call(config, "task", ["operation": "acknowledge", "taskId": .string(ownerId)]) }
         }
         sessions[position].transportError = nil
-        changed(id, immediate: turnEnded || !sessions[position].permissions.isEmpty)
+        let immediate = turnEnded || !sessions[position].permissions.isEmpty
+        changed(id, immediate: immediate, replyText: !immediate && Self.onlyReplyTextChanged(from: previous, to: sessions[position], message: target))
         if turnEnded, task != nil, sessions[position].queuePaused != true { drainQueue(id) }
     }
 

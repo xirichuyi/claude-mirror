@@ -51,11 +51,13 @@ enum DemoStream {
     static func start(_ engine: ChatEngine, session id: String, step: Int = 24, interval: TimeInterval = 0.04, finished: @escaping () -> Void = {}) {
         let characters = Array(reply)
         var sent = 0, version = 0
+        // One message updated in place, like a real turn: only its text changes between snapshots.
+        var message = engine.session(id)?.messages.last ?? ChatMessage(id: messageId, role: "assistant")
         Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { timer in
             MainActor.assumeIsolated {
                 sent = min(characters.count, sent + step); version += 1
                 let done = sent == characters.count
-                let message = ChatMessage(id: messageId, role: "assistant", blocks: [Block(type: "text", text: String(characters[..<sent]))])
+                message.blocks = [Block(type: "text", text: String(characters[..<sent]))]
                 guard let encoded = try? JSONEncoder().encode(message), let json = try? JSONDecoder().decode(JSON.self, from: encoded) else { return }
                 try? engine.applyDemoSnapshot(id, state: ["version": .number(Double(version)), "status": .string(done ? "idle" : "working"), "message": json])
                 if done { timer.invalidate(); finished() }

@@ -11,10 +11,14 @@ enum SidePanel: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+final class ReplyFeed: ObservableObject {}
+
 /// Bridges the core engine to SwiftUI. Core objects hold the state; this republishes their changes.
 @MainActor
 final class AppModel: ObservableObject {
     let accountStore = AccountStore()
+    /// Streamed reply text is published here instead of app-wide, so a chunk re-renders only the transcript.
+    let replyFeed = ReplyFeed()
     private(set) var engine: ChatEngine?
     private(set) var connections: SSHConnections?
     private var workspaces: [String: Workspace] = [:]
@@ -103,6 +107,7 @@ final class AppModel: ObservableObject {
                 historyStatus = "已同步 3 条对话"
                 // Same change path as a real connection, so the demo shows what a streamed reply costs.
                 engine.onChange = { [weak self] in self?.engineChanged() }
+                engine.onReplyText = { [weak self] in self?.replyFeed.objectWillChange.send() }
                 if streaming {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { DemoStream.start(engine, session: examples[0].id) }
                 }
@@ -121,6 +126,7 @@ final class AppModel: ObservableObject {
             let engine = try ChatEngine(store: try ChatStore(directory: support), agents: agents, files: files)
             self.connections = connections; self.engine = engine
             engine.onChange = { [weak self] in self?.engineChanged() }
+            engine.onReplyText = { [weak self] in self?.replyFeed.objectWillChange.send() }
             engine.onError = { [weak self] in self?.show($0) }
             connections.onState = { [weak self] config, state in
                 Task { @MainActor in self?.connectionChanged(config, state) }

@@ -23,7 +23,7 @@ struct ChatView: View {
                         HistoryNotice(session: session).padding(.horizontal, 24).padding(.vertical, 10)
                             .background(WorkbenchTheme.surface.opacity(0.5))
                     }
-                    MessagesList(session: session).id(session.id)
+                    MessagesList(session: session, feed: model.replyFeed).id(session.id)
                 } else {
                     WelcomeView()
                 }
@@ -83,7 +83,9 @@ struct WelcomeView: View {
 
 struct MessagesList: View {
     @EnvironmentObject private var model: AppModel
+    /// As of the last app-wide update. Streamed reply text arrives through `feed` without one, so `body` reads the engine.
     let session: ChatSession
+    @ObservedObject var feed: ReplyFeed
     @StateObject private var selection = TranscriptSelection()
     @State private var followsReply = true
     @State private var farFromBottom = false
@@ -92,6 +94,7 @@ struct MessagesList: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        let session = model.engine?.session(self.session.id) ?? self.session
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
