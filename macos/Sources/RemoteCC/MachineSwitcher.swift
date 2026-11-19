@@ -16,7 +16,7 @@ struct MachineSwitcher: View {
             }
             .padding(.horizontal, 6).padding(.vertical, 4).contentShape(Rectangle())
         }.buttonStyle(.plain).help("当前机器：" + (model.currentConfig?.displayName ?? "未连接") + " · 切换或添加机器")
-        .popover(isPresented: $choosing, arrowEdge: .trailing) {
+        .popover(isPresented: $choosing, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 6) {
                 Button { choosing = false; model.activeId = nil } label: { Label("返回首页", systemImage: "house") }.buttonStyle(QuietButtonStyle())
                 Divider()

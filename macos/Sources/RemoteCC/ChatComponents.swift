@@ -8,24 +8,29 @@ struct ThinkingCard: View {
     let active: Bool
     @State private var expanded = false
 
+    /// Same row as a tool call: disclosure arrow first, then status icon and title.
+    private var title: some View {
+        HStack(spacing: 7) {
+            if active { ProgressView().controlSize(.mini) }
+            else { Image(systemName: "checkmark.circle") }
+            Text(active ? "正在思考…" : "思考过程").fontWeight(.medium)
+        }.font(.caption)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } } label: {
-                HStack(spacing: 9) {
-                    if active { ProgressView().controlSize(.mini) }
-                    else { Image(systemName: "checkmark.circle").foregroundStyle(.secondary) }
-                    Text(active ? "正在思考…" : "思考过程").font(.callout)
-                    if !text.isEmpty { Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(.secondary) }
-                }.contentShape(Rectangle())
-            }.buttonStyle(.plain).disabled(text.isEmpty).accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton).accessibilityLabel((active ? "正在思考" : "思考过程") + (expanded ? "，收起" : "，展开"))
-            if expanded && !text.isEmpty {
-                ScrollView {
-                    Text(text)
-                        .font(.body).lineSpacing(5).foregroundStyle(.secondary)
-                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(maxHeight: 260).fixedSize(horizontal: false, vertical: true)
+        Group {
+            if text.isEmpty { title.padding(.leading, 16) }
+            else {
+                DisclosureGroup(isExpanded: $expanded) {
+                    ScrollView {
+                        Text(text)
+                            .font(.body).lineSpacing(5).foregroundStyle(.secondary)
+                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: 260).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+                } label: { title }
+                    .accessibilityLabel((active ? "正在思考" : "思考过程") + (expanded ? "，收起" : "，展开"))
             }
-        }.foregroundStyle(.secondary).padding(.vertical, 7).padding(.horizontal, 2)
+        }.foregroundStyle(.secondary).padding(.vertical, 2).padding(.horizontal, 2)
     }
 }
 

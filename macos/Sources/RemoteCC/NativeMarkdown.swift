@@ -102,6 +102,8 @@ import RemoteCCCore
         style.firstLineHeadIndent = indent; style.headIndent = indent
         return style
     }
+    /// Faint fill behind inline code and table headers; the window background colour does not show on the canvas.
+    private static let tint = NSColor(name: nil) { $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.1) : NSColor(white: 0, alpha: 0.055) }
     private static func attributes(size: CGFloat = 13, bold: Bool = false) -> [NSAttributedString.Key: Any] {
         [.font: NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular), .foregroundColor: NSColor(WorkbenchTheme.ink)]
     }
@@ -116,7 +118,7 @@ import RemoteCCCore
         case "code":
             attrs[.font] = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
             let text = literal(node)
-            if text.count < 80 { attrs[.backgroundColor] = NSColor(WorkbenchTheme.sidebar) }
+            if text.count < 80 { attrs[.backgroundColor] = tint }
             return NSAttributedString(string: text, attributes: attrs)
         case "strong", "emph":
             let font = attrs[.font] as? NSFont ?? NSFont.systemFont(ofSize: 13)
@@ -181,15 +183,16 @@ import RemoteCCCore
             value.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: value.length))
             items.append(.prose(value))
         }
-        func walk(_ node: UnsafeMutablePointer<cmark_node>, depth: Int = 0, quote: Bool = false, prefix: String = "") {
-            let kind = type(node), indent = CGFloat(depth) * 20 + (quote ? 16 : 0)
+        func walk(_ node: UnsafeMutablePointer<cmark_node>, depth: Int = 0, quote: NSTextBlock? = nil, prefix: String = "") {
+            let kind = type(node), indent = CGFloat(depth) * 20
             switch kind {
             case "paragraph", "heading":
                 let level = kind == "heading" ? Int(cmark_node_get_heading_level(node)) : 0
                 let size: CGFloat = level == 1 ? 23 : level == 2 ? 19 : level > 0 ? 16 : 13
                 var attrs = attributes(size: size, bold: level > 0)
-                if quote { attrs[.foregroundColor] = NSColor.secondaryLabelColor }
+                if quote != nil { attrs[.foregroundColor] = NSColor.secondaryLabelColor }
                 let p = style(indent: indent)
+                if let quote { p.textBlocks = [quote] }
                 if !prefix.isEmpty {
                     p.firstLineHeadIndent = max(0, indent - 20)
                     p.headIndent = max(indent, p.firstLineHeadIndent + (prefix as NSString).size(withAttributes: attributes()).width)
@@ -207,7 +210,13 @@ import RemoteCCCore
                     }
                     number += 1
                 }
-            case "block_quote": for child in children(node) { walk(child, depth: depth, quote: true) }
+            case "block_quote":
+                // One text block for the whole quote draws a continuous bar down its left side.
+                let bar = NSTextBlock()
+                bar.setWidth(3, type: .absoluteValueType, for: .border, edge: .minX)
+                bar.setBorderColor(.tertiaryLabelColor, for: .minX)
+                bar.setWidth(12, type: .absoluteValueType, for: .padding, edge: .minX)
+                for child in children(node) { walk(child, depth: depth, quote: quote ?? bar) }
             case "code_block":
                 let codeStyle = style(); codeStyle.paragraphSpacing = 0; codeStyle.lineSpacing = 3
                 let value = NSMutableAttributedString(string: literal(node), attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular), .foregroundColor: NSColor(WorkbenchTheme.ink), .paragraphStyle: codeStyle])
@@ -238,7 +247,7 @@ import RemoteCCCore
                     cellBlock.setWidth(8, type: .absoluteValueType, for: .padding)
                     cellBlock.setWidth(0.5, type: .absoluteValueType, for: .border)
                     cellBlock.setBorderColor(NSColor(WorkbenchTheme.border))
-                    if rowIndex == 0 { cellBlock.backgroundColor = NSColor(WorkbenchTheme.sidebar) }
+                    if rowIndex == 0 { cellBlock.backgroundColor = tint }
                     let p = style(); p.textBlocks = [cellBlock]; p.paragraphSpacing = 0
                     if column < columns, let alignment = alignments?[column] {
                         if alignment == 99 { p.alignment = .center }
