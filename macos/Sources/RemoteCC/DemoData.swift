@@ -103,7 +103,9 @@ enum DemoStream {
 
     static func session() -> ChatSession {
         var session = ChatSession(config: DemoData.config, name: "流式回复示例")
-        session.messages = [ChatMessage(role: "user", text: "请总结登录模块的重构，包含对照表和关键代码。"), ChatMessage(id: messageId, role: "assistant", blocks: [])]
+        // Earlier turns give the transcript something to scroll and show what unchanged rows cost.
+        let earlier = (0..<10).flatMap { _ in DemoData.sessions()[0].messages.map { message in var copy = message; copy.id = UUID().uuidString.lowercased(); return copy } }
+        session.messages = earlier + [ChatMessage(role: "user", text: "请总结登录模块的重构，包含对照表和关键代码。"), ChatMessage(id: messageId, role: "assistant", blocks: [])]
         session.status = "working"
         session.remoteOwner = try? JSONDecoder().decode(RemoteOwner.self, from: Data(#"{"id":"demo-stream","version":0,"messageId":"\#(messageId)"}"#.utf8))
         return session
