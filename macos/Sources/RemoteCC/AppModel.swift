@@ -148,8 +148,10 @@ final class AppModel: ObservableObject {
                 let folder = FileManager.default.temporaryDirectory.appendingPathComponent("mirror-demo-" + UUID().uuidString)
                 let store = try ChatStore(directory: folder)
                 var examples = DemoData.sessions()
-                let streaming = ProcessInfo.processInfo.environment["MIRROR_SCENE"] == "stream"
+                let scene = ProcessInfo.processInfo.environment["MIRROR_SCENE"] ?? ""
+                let streaming = scene == "stream"
                 if streaming { examples.insert(DemoStream.session(), at: 0) }
+                if scene.hasPrefix("markdown") { examples.insert(DemoData.markdownSession(), at: 0) }
                 store.save(examples); store.flush()
                 let resources = try ServerResources(directory: Bundle.main.resourceURL!.appendingPathComponent("server"))
                 let agents = AgentClient(launcher: DemoLauncher(), resources: resources)

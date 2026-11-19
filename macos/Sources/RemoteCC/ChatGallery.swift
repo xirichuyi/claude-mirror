@@ -6,7 +6,7 @@ import RemoteCCCore
 struct ChatGallery: View {
     @EnvironmentObject private var model: AppModel
     private func dismiss() { model.presentation = nil }
-    @State private var phase = "思考中"
+    @State private var phase = ProcessInfo.processInfo.environment["MIRROR_GALLERY"] ?? "思考中"
     @State private var answered = false
     private let phases = ["思考中", "工具执行", "回复完成", "已停止", "失败", "权限确认"]
     private var sample: ChatMessage {

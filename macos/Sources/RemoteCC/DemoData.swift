@@ -95,6 +95,54 @@ enum DemoData {
     }
 }
 
+/// Demo-only transcript for layout checks: `MIRROR_SCENE=markdown` (or `markdown-files` with the file
+/// panel open) shows a failed tool call, lists, a wide table, one-line code, a quote and a long code block.
+extension DemoData {
+    static func markdownSession() -> ChatSession {
+        var session = ChatSession(config: config, name: "长回复排版示例")
+        let failed = Block(type: "tool", name: "Bash", input: ["command": "npm run test -- --runInBand --coverage --testPathPattern='src/auth/.*' --reporters=default", "description": "运行认证模块的全部测试"], status: "error",
+                           output: (1...12).map { "FAIL src/auth/session.test.ts > refresh token rotation > case \($0): expected status 401 but received 500 (requestId=3f6c1f0e-2b7a-4b55-9a54-0c1d9e2f7a\($0 + 10))" }.joined(separator: "\n"))
+        let code = (["import { Router, Request, Response } from 'express';", "import { z } from 'zod';", "", "// 入参统一用同一份 schema 校验", "const schema = z.object({ email: z.string().email(), password: z.string().min(8), remember: z.boolean().optional(), device: z.string().max(64).optional() });", ""]
+            + (1...45).flatMap { ["export async function handler\($0)(request: Request, response: Response) {", "  const parsed = schema.safeParse(request.body); // step \($0)", "  if (!parsed.success) return response.status(400).json({ error: 'Missing credentials', details: parsed.error.flatten().fieldErrors });", "  return response.json({ ok: true, index: \($0) });", "}"] }).joined(separator: "\n")
+        let summary = """
+        # 登录模块重构总结
+
+        这一轮改动覆盖了 **接口校验**、*错误码统一* 和 ~~旧的会话存储~~ 新的令牌刷新流程，详见 [设计文档](https://example.com/docs/auth-design)。其中 `src/auth/session.ts` 的改动最大，入口是 `rotate(family, previous)`。
+
+        1. 校验层：使用 `zod` 统一入参
+           - 邮箱格式、密码长度
+           - 设备指纹长度上限 `64`
+        2. 错误码：`400` / `401` / `429` / `500`
+
+        - [x] 入参校验
+        - [x] 刷新令牌
+        - [ ] 速率限制的集成测试
+
+        | 接口 | 方法 | 旧行为 | 新行为 | 状态码 | 备注 |
+        | --- | --- | --- | --- | --- | --- |
+        | `/api/login` | POST | 缺少凭据时返回 HTML 错误页 | 返回结构化 JSON 错误 | 400 | 已覆盖测试 |
+        | `/api/refresh` | POST | 刷新令牌永不过期 | 14 天滑动过期 | 401 | 需要数据库迁移 |
+        | `/api/logout` | DELETE | 只清理 Cookie | 同时吊销服务端会话 | 204 | — |
+
+        运行方式：
+
+        ```bash
+        npm run test -- --runInBand --coverage --testPathPattern='src/auth/.*\\.test\\.ts$' --reporters=default --reporters=jest-junit && npm run lint -- --max-warnings=0
+        ```
+
+        > 注意：刷新令牌的吊销是 **不可逆** 的。
+        > 上线前请先在预发环境验证迁移脚本。
+        """
+        session.messages = [
+            ChatMessage(role: "user", text: "请重构登录模块，跑一遍测试，然后给我一份总结。"),
+            ChatMessage(role: "assistant", blocks: [Block(type: "thinking", text: "先跑测试确认现状，再整理改动。"), failed, Block(type: "text", text: summary)]),
+            ChatMessage(role: "user", text: "把路由文件的完整代码贴出来。"),
+            ChatMessage(role: "assistant", blocks: [Block(type: "text", text: "完整的路由文件如下，共 \(code.components(separatedBy: "\n").count) 行：\n\n```typescript\n\(code)\n```\n\n以上代码已通过 `npm test`。")])
+        ]
+        return session
+    }
+}
+
 /// Demo-only streamed reply: `MIRROR_SCENE=stream` feeds a long Markdown answer through
 /// `ChatEngine` at a realistic chunk rate, so streaming can be seen and measured without a server.
 @MainActor
