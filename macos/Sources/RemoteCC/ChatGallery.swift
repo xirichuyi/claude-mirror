@@ -5,7 +5,7 @@ import RemoteCCCore
 /// Local fixtures for visual QA; never submits messages or requests to a server.
 struct ChatGallery: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var phase = "思考中"
+    @State private var phase = ProcessInfo.processInfo.environment["MIRROR_GALLERY"] ?? "思考中"
     @State private var answered = false
     private let phases = ["思考中", "工具执行", "回复完成", "已停止", "失败", "权限确认"]
     private var sample: ChatMessage {

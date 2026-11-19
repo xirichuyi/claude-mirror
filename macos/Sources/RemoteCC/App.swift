@@ -72,6 +72,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     #if DEBUG
+    private static func scrollViews(in view: NSView) -> [NSScrollView] {
+        view.subviews.flatMap { ($0 as? NSScrollView).map { [$0] } ?? [] + scrollViews(in: $0) }
+    }
+
     /// Documentation screenshots: the demo build renders its own windows to PNG and quits.
     /// Rendering in-process needs no Screen Recording permission, so it also works over SSH.
     private func captureSnapshotIfRequested() {
@@ -85,8 +89,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             switch environment["MIRROR_SCENE"] {
             case "connect": self?.model?.showConnect = true
             case "home": self?.model?.activeId = nil
-            case "files": self?.model?.showFiles = true
+            case "files", "markdown-files": self?.model?.showFiles = true
+            case "details": self?.model?.showSessionDetails = true
+            case "gallery": self?.model?.showChatGallery = true
+            case "toast": self?.model?.show("文档示例不连接服务器")
             default: break
+            }
+        }
+        // MIRROR_SCROLL=<points from the top> shows a part of a long transcript other than its end.
+        if let offset = environment["MIRROR_SCROLL"].flatMap(Double.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                guard let content = NSApp.windows.first(where: { $0.isVisible && $0.sheetParent == nil })?.contentView,
+                      let scroll = Self.scrollViews(in: content).max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }),
+                      let document = scroll.documentView else { return }
+                let limit = max(0, document.frame.height - scroll.contentView.bounds.height)
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: min(limit, offset)))
+                scroll.reflectScrolledClipView(scroll.contentView)
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) {
