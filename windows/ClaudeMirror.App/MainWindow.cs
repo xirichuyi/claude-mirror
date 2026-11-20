@@ -154,6 +154,8 @@ public sealed partial class MainWindow : Window
             string.IsNullOrWhiteSpace(jump.Text) ? null : jump.Text.Trim(), string.IsNullOrWhiteSpace(jump.Text) || string.IsNullOrWhiteSpace(jumpKey.Text) ? null : jumpKey.Text.Trim());
         if (profile.ProxyJump is not null && string.IsNullOrWhiteSpace(SshConfig.Jump(profile.ProxyJump, login, profile.JumpKeyFile ?? profile.KeyFile).KeyFile))
             throw new IOException("跳板机需要用私钥文件登录，请在高级选项里选择跳板机私钥");
+        // Queued prompts cannot follow the user to another server.
+        if (host is not null && LocalState.HostKey(host) != LocalState.HostKey(profile)) await ConfirmLeavingQueueAsync();
         agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
         reconnecting?.Cancel();
         next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));

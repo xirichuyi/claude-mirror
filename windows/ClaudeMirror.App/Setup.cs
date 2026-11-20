@@ -43,12 +43,23 @@ public sealed partial class MainWindow
         if (health.Count == 0) status.Text = (host?.Name ?? "服务器") + " 已准备就绪";
     }
 
+    private string? sessionHost;
+
     private async Task AfterAgentStartedAsync(RemoteAgent connected)
     {
-        availableModels.Clear(); availableCommands.Clear(); selectedModel = null; busy = false; queue.Clear();
-        directory.Text = connected.Home;
+        availableModels.Clear(); availableCommands.Clear(); selectedModel = null; busy = false;
         health = MachineHealth.Issues(null, connected.Hello, null);
-        await NewConversationAsync(); await RefreshHistoryAsync(); status.Text = "已连接";
+        var key = host is null ? null : LocalState.HostKey(host);
+        // Connecting to the same server again keeps the open conversation and its queued prompts, as an automatic reconnect does.
+        bool resumed = key is not null && key == sessionHost && (conversation is not null || taskId is not null || queue.Items.Count > 0);
+        sessionHost = key;
+        if (resumed)
+        {
+            if (taskId is not null) await WatchCurrentAsync();
+            await RefreshCapabilitiesAsync(); RenderQueue(); RefreshWorkbench();
+        }
+        else { queue.Clear(); directory.Text = connected.Home; await NewConversationAsync(); }
+        await RefreshHistoryAsync(); status.Text = "已连接";
         RenderHealth();
     }
 
