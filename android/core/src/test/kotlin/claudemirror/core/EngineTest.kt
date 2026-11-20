@@ -1,6 +1,8 @@
 package claudemirror.core
 
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
@@ -58,6 +60,8 @@ class EngineTest {
         until("working") { current(session.id).status == "working" }
         engine.submit(session.id, "look at the tests too", steer = true)
         until("the worker takes it") { agent.commands("steer").isNotEmpty() }
+        // The worker's own answer is awaited, also before its first state has arrived.
+        assertEquals(JsonPrimitive(true), agent.commands("steer").single()["wait"])
         val steer = agent.commands("steer").single()["command"]!!.jsonObject
         assertEquals("look at the tests too", steer["prompt"].string())
         until("it left the queue") { current(session.id).queue.isEmpty() }
@@ -179,5 +183,75 @@ class EngineTest {
         }
         val text = MirrorJson.encodeToString(ChatSession.serializer(), store.saved[id]!!)
         assertEquals(store.saved[id], MirrorJson.decodeFromString(ChatSession.serializer(), text))
+    }
+
+    @Test fun `a prompt stopped while the server is being prepared is never started`() = engineTest {
+        agent.installedDelay = 400
+        agent.onCommand = { json("""{"ok":false,"error":"任务不存在"}""") }
+        val session = engine.create(testHost)
+        engine.send(session.id, "first")
+        until("the server is being prepared") { agent.calls.any { it.operation == "installed" } }
+        engine.stop(session.id)
+        assertEquals("stopped", current(session.id).status)
+        assertNull(current(session.id).remoteTask)
+        assertTrue(current(session.id).messages.last().interrupted == true)
+        delay(800)
+        assertTrue(agent.starts().isEmpty())
+    }
+
+    @Test fun `the task is on disk before the server hears of the prompt`() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val store = object : MemoryStore() {
+            override fun save(session: ChatSession) { gate.await(); super.save(session) }
+        }
+        engineTest(store = store) {
+            val session = engine.create(testHost)
+            engine.send(session.id, "first")
+            delay(300)
+            assertEquals(0, agent.launches)
+            gate.countDown()
+            until("the prompt is sent") { agent.starts().isNotEmpty() }
+            assertEquals(agent.starts().single()["taskId"].string(), store.saved[session.id]?.remoteTask?.id)
+        }
+    }
+
+    @Test fun `a conversation that cannot be written is reported and stays usable`() {
+        val store = object : MemoryStore() {
+            override fun save(session: ChatSession) = throw java.io.IOException("No space left on device")
+        }
+        engineTest(store = store) {
+            var reported = ""
+            engine.onError = { reported = it }
+            val (session, task) = started()
+            until("the failure is reported") { "No space left on device" in reported }
+            agent.emit(task.id, state(task, 1, "idle", "still here", ""","done":true"""))
+            until("the reply arrives") { current(session.id).messages.last().blocks?.firstOrNull()?.text == "still here" }
+        }
+    }
+
+    @Test fun `a server entry pointed elsewhere leaves its unfinished replies behind`() = engineTest {
+        val (session, task) = started("private prompt")
+        agent.emit(task.id, state(task, 1, "working", "half", ""","remoteSessionId":"claude-1""""))
+        until("working") { current(session.id).status == "working" }
+        engine.submit(session.id, "queued")
+        engine.detach(testHost)
+        engine.endpointChanged(testHost.id)
+        val left = current(session.id)
+        assertEquals("stopped", left.status)
+        assertNull(left.remoteTask)
+        assertNull(left.remoteOwner)
+        assertNull(left.remoteSessionId)
+        assertTrue(left.messages.last().interrupted == true)
+        assertTrue(left.queuePaused)
+
+        // Nothing of the old conversation reaches the new machine by itself, and it is set up again.
+        engine.restore(testHost)
+        delay(200)
+        assertEquals(1, agent.starts().size)
+        engine.send(session.id, "new machine")
+        until("a new task starts") { agent.starts().size == 2 }
+        assertEquals(2, agent.calls.count { it.operation == "installed" })
+        assertEquals("new machine", agent.starts().last()["request"]!!.jsonObject["prompt"].string())
+        assertNull(agent.starts().last()["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"])
     }
 }

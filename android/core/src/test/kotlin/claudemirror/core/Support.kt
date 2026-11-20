@@ -44,6 +44,7 @@ class FakeAgent : Launcher {
     @Volatile var onCommand: (JsonObject) -> JsonObject = { json("""{"ok":true}""") }
     @Volatile var status: JsonObject = json("""{"done":false}""")
     @Volatile var launches = 0
+    @Volatile var installedDelay = 0L
     private val subscriptions = HashMap<String, String>()
     private var output: OutputStream? = null
     private var input: PipedOutputStream? = null
@@ -90,7 +91,15 @@ class FakeAgent : Launcher {
                 val operation = params["operation"].string()!!
                 calls += Call(operation, params)
                 when (operation) {
-                    "installed" -> json("""{"installed":true}""")
+                    "installed" -> {
+                        // Answered late without holding up later requests, like a slow first-time setup.
+                        val delay = installedDelay
+                        if (delay > 0) {
+                            thread(isDaemon = true) { Thread.sleep(delay); send(buildJsonObject { put("id", id); put("result", json("""{"installed":true}""")) }) }
+                            return
+                        }
+                        json("""{"installed":true}""")
+                    }
                     "status" -> status
                     "command" -> onCommand(params)
                     else -> json("{}")
@@ -112,11 +121,11 @@ class FakeAgent : Launcher {
     fun disconnect() = synchronized(this) { runCatching { output?.close() }; output = null }
 }
 
-class MemoryStore(private val initial: List<ChatSession> = emptyList()) : SessionStore {
-    val saved = HashMap<String, ChatSession>()
+open class MemoryStore(private val initial: List<ChatSession> = emptyList()) : SessionStore {
+    val saved = java.util.concurrent.ConcurrentHashMap<String, ChatSession>()
     override fun load() = initial
-    @Synchronized override fun save(session: ChatSession) { saved[session.id] = session }
-    @Synchronized override fun delete(id: String) { saved.remove(id) }
+    override fun save(session: ChatSession) { saved[session.id] = session }
+    override fun delete(id: String) { saved.remove(id) }
 }
 
 val testHost = HostConfig(id = "h1", user = "dev", host = "example.test", directory = "/srv/app")
