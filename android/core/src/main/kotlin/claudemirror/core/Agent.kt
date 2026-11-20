@@ -11,6 +11,7 @@ import kotlin.concurrent.thread
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -125,8 +126,9 @@ class AgentChannel internal constructor(
                     line == "__RCC_NO_NODE__" -> throw NodeMissingException()
                     line.startsWith("__RCC_OLD_NODE__ ") -> throw NodeOutdatedException(line.removePrefix("__RCC_OLD_NODE__ "))
                     line.startsWith("{\"rcc\":\"ready\"") -> {
+                        // Closed while the command was starting: nobody is waiting for this agent any more.
+                        synchronized(lock) { if (closed) throw IOException() else process = child }
                         ready = true
-                        synchronized(lock) { process = child }
                         thread(isDaemon = true, name = "agent-read") {
                             val reason = try {
                                 reader.forEachLine(::receive)
@@ -233,7 +235,8 @@ class AgentChannel internal constructor(
             child = process; process = null
         }
         writer.shutdown()
-        child?.kill()
+        // Closing an SSH channel talks to the server, and the caller may be the UI thread.
+        if (child != null) thread(isDaemon = true, name = "agent-close") { child.kill() }
         requests.forEach { it.completeExceptionally(RemoteException(reason, confirmed = false)) }
         ended.forEach { it.end(reason) }
         onClosed?.invoke(reason)
@@ -264,28 +267,33 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
 
     suspend fun channel(host: HostConfig): AgentChannel {
         val starting = synchronized(channels) {
-            channels[host.id] ?: scope.async {
+            channels[host.id] ?: run {
                 val channel = AgentChannel(launcher, host, resources)
-                channel.onClosed = { forget(host, null) }
-                channel.start()
-                channel
-            }.also { attempt ->
+                val attempt = scope.async(start = CoroutineStart.LAZY) {
+                    // An attempt given up half way must not leave its agent running.
+                    try { channel.start() } catch (error: Throwable) { channel.onClosed = null; channel.close(); throw error }
+                    channel
+                }
+                channel.onClosed = { forget(host, null, attempt) }
                 channels[host.id] = attempt
                 state(host, ConnectionState.Connecting)
                 attempt.invokeOnCompletion { error ->
                     if (error == null) {
                         // The channel may have closed before this ran; forget() then already reported it.
-                        if (synchronized(channels) { channels[host.id] === attempt }) state(host, ConnectionState.Connected(attempt.getCompleted().info!!))
+                        if (synchronized(channels) { channels[host.id] === attempt }) state(host, ConnectionState.Connected(channel.info!!))
                     } else forget(host, error, attempt)
                 }
+                attempt.start()
+                attempt
             }
         }
         return starting.await()
     }
 
-    private fun forget(host: HostConfig, error: Throwable?, attempt: Deferred<AgentChannel>? = null) {
+    /** Only the attempt that is still the server's current one may change what is shown for it. */
+    private fun forget(host: HostConfig, error: Throwable?, attempt: Deferred<AgentChannel>) {
         synchronized(channels) {
-            if (attempt != null && channels[host.id] !== attempt) return
+            if (channels[host.id] !== attempt) return
             channels.remove(host.id)
         }
         state(host, if (error == null || error is CancellationException) ConnectionState.Disconnected else ConnectionState.Failed(error))

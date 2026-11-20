@@ -32,17 +32,49 @@ fun fingerprint(key: PublicKey): String {
 
 /** Runs commands over one SSH connection per server. */
 class SshLauncher(private val secret: (HostConfig) -> SshSecret) : Launcher {
+    // Guarded by `clients`. Only map lookups happen under that lock, never network work.
     private val clients = HashMap<String, SSHClient>()
+    private val gates = HashMap<String, Any>()
+    /** Counts disconnects per server, so a connection attempt overtaken by one is thrown away. */
+    private val epochs = HashMap<String, Int>()
+
+    private fun cancelled() = RemoteException("连接已取消", confirmed = false)
+
+    private fun client(host: HostConfig): SSHClient {
+        val epoch: Int
+        val gate = synchronized(clients) {
+            epoch = epochs[host.id] ?: 0
+            gates.getOrPut(host.id) { Any() }
+        }
+        // One connection attempt per server at a time; other servers and disconnects are not held up.
+        synchronized(gate) {
+            synchronized(clients) {
+                if ((epochs[host.id] ?: 0) != epoch) throw cancelled()
+                clients[host.id]?.takeIf { it.isConnected && it.isAuthenticated }?.let { return it }
+            }
+            val fresh = connect(host)
+            synchronized(clients) {
+                if ((epochs[host.id] ?: 0) == epoch) {
+                    clients[host.id] = fresh
+                    return fresh
+                }
+            }
+            runCatching { fresh.close() }
+            throw cancelled()
+        }
+    }
 
     override fun start(host: HostConfig, command: String): RemoteProcess {
-        val client = synchronized(clients) {
-            clients[host.id]?.takeIf { it.isConnected && it.isAuthenticated } ?: connect(host).also { clients[host.id] = it }
-        }
+        val client = client(host)
         val session = try { client.startSession() } catch (error: IOException) {
-            disconnect(host)
+            val stale = synchronized(clients) { if (clients[host.id] === client) clients.remove(host.id) else null }
+            runCatching { stale?.close() }
             throw RemoteException(error.message ?: "SSH 通道已断开", confirmed = false)
         }
-        val running = session.exec(command)
+        val running = try { session.exec(command) } catch (error: IOException) {
+            runCatching { session.close() }
+            throw RemoteException(error.message ?: "SSH 通道已断开", confirmed = false)
+        }
         val errors = StringBuffer()
         thread(isDaemon = true, name = "ssh-stderr") {
             runCatching { running.errorStream.bufferedReader().forEachLine { if (errors.length < 8192) errors.appendLine(it) } }
@@ -94,8 +126,12 @@ class SshLauncher(private val secret: (HostConfig) -> SshSecret) : Launcher {
         }
     }
 
+    /** Returns at once: closing the connection happens in the background. */
     override fun disconnect(host: HostConfig) {
-        val client = synchronized(clients) { clients.remove(host.id) }
-        if (client != null) thread(isDaemon = true) { runCatching { client.close() } }
+        val client = synchronized(clients) {
+            epochs[host.id] = (epochs[host.id] ?: 0) + 1
+            clients.remove(host.id)
+        }
+        if (client != null) thread(isDaemon = true, name = "ssh-close") { runCatching { client.close() } }
     }
 }
