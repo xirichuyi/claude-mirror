@@ -198,11 +198,16 @@ private fun Queue(session: ChatSession, model: AppModel, onEdit: (String) -> Uni
     HorizontalDivider()
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            val waiting = (session.queuePaused || session.queueHeld) && session.remoteTask == null
             Text(
-                if (session.queuePaused && session.remoteTask == null) "排队 ${session.queue.size} 条 · 已暂停" else "排队 ${session.queue.size} 条 · 回复结束后依次发送",
+                when {
+                    session.queueHeld -> "排队 ${session.queue.size} 条 · 服务器地址已更改，确认后才会发送"
+                    waiting -> "排队 ${session.queue.size} 条 · 已暂停"
+                    else -> "排队 ${session.queue.size} 条 · 回复结束后依次发送"
+                },
                 Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (session.queuePaused && session.remoteTask == null) TextButton(onClick = { model.resumeQueue(session.id) }) { Text("继续发送") }
+            if (waiting) TextButton(onClick = { model.resumeQueue(session.id) }) { Text("继续发送") }
             TextButton(onClick = { model.clearQueue(session.id) }) { Text("清空") }
         }
         for (item in session.queue) {

@@ -173,6 +173,8 @@ data class ChatSession(
     val context: ContextUsage? = null,
     val queue: List<QueuedMessage> = emptyList(),
     val queuePaused: Boolean = false,
+    /** The queue was written for another machine; only the user's explicit go-ahead sends it. */
+    val queueHeld: Boolean = false,
 ) {
     val isBusy: Boolean get() = status in BUSY
 

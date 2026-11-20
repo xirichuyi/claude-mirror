@@ -271,7 +271,8 @@ class EngineTest {
         assertNull(left.remoteOwner)
         assertNull(left.remoteSessionId)
         assertTrue(left.messages.last().interrupted == true)
-        assertTrue(left.queue.isEmpty())
+        assertEquals(listOf("queued"), left.queue.map { it.text })
+        assertTrue(left.queueHeld)
 
         // Nothing of the old conversation reaches the new machine by itself, and it is set up again.
         engine.restore(testHost)
@@ -284,8 +285,15 @@ class EngineTest {
         agent.emit(next.id, state(next, 1, "idle", "hello", ""","done":true"""))
         until("the new reply ends") { current(session.id).remoteTask == null }
         delay(200)
-        assertEquals("the old queued message must not follow", 2, agent.starts().size)
+        assertEquals("the old queued message must not follow by itself", 2, agent.starts().size)
         assertTrue(agent.commands("send").isEmpty())
+        assertEquals(listOf("queued"), current(session.id).queue.map { it.text })
+
+        // The user's go-ahead sends it.
+        engine.resumeQueue(session.id)
+        until("the held message is sent") { agent.starts().size == 3 }
+        assertEquals("queued", agent.starts().last()["request"]!!.jsonObject["prompt"].string())
+        assertFalse(current(session.id).queueHeld)
         assertEquals(2, agent.calls.count { it.operation == "installed" })
         assertEquals("new machine", agent.starts().last()["request"]!!.jsonObject["prompt"].string())
         assertNull(agent.starts().last()["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"])

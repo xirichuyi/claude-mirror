@@ -140,14 +140,14 @@ class Engine(
     fun clearQueue(id: String) = update(id) { it.copy(queue = emptyList()) }
 
     fun resumeQueue(id: String) {
-        update(id) { it.copy(queuePaused = false) }
+        update(id) { it.copy(queuePaused = false, queueHeld = false) }
         drainQueue(id)
     }
 
     private fun drainQueue(id: String) {
         val session = session(id) ?: return
         val item = session.queue.firstOrNull() ?: return
-        if (session.remoteTask != null || session.queuePaused) return
+        if (session.remoteTask != null || session.queuePaused || session.queueHeld) return
         update(id) { it.copy(queue = it.queue.drop(1)) }
         try { send(id, item.text) } catch (error: RemoteException) {
             update(id) { it.copy(queue = listOf(item) + it.queue, queuePaused = true) }
@@ -430,8 +430,8 @@ class Engine(
     /**
      * The server entry now points at another machine or account. What ran on the old one
      * stays there: nothing unfinished is sent to the new one, and it is set up from scratch.
-     * Messages still waiting in the queue were written for the old machine and are dropped,
-     * so a later reply cannot send them to the new one.
+     * Messages still waiting in the queue were written for the old machine: they are kept,
+     * but held until the user sends them on, whatever else is sent in the meantime.
      */
     fun endpointChanged(host: String) {
         installs.remove(host)
@@ -443,7 +443,7 @@ class Engine(
                     messages = it.messages.map { message -> if (message.id == reply) message.copy(interrupted = true) else message },
                     status = if (it.isBusy) "stopped" else it.status, permissions = emptyList(), transportError = null,
                     remoteTask = null, remoteOwner = null, remoteSessionId = null,
-                    queue = emptyList(), queuePaused = false,
+                    queueHeld = it.queue.isNotEmpty(),
                 )
             }
         }
