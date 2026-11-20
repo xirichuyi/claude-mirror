@@ -52,9 +52,14 @@ fun PermissionCard(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit
 private fun Approval(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit) {
     Text(permission.title ?: "Claude 想使用 ${permission.name ?: "工具"}", style = MaterialTheme.typography.titleSmall)
     permission.description?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-    val detail = toolSummary(permission.input).ifEmpty { prettyJson(permission.input) }
-    // Shown in full: allowing covers the whole command, so none of it may be cut off.
-    if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+    // Every field in full: allowing covers the whole request, so none of it may be left out or cut off.
+    val fields = permission.input as? JsonObject
+    if (fields == null) {
+        if (permission.input != null) Text(prettyJson(permission.input), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+    } else for ((name, value) in fields) {
+        if (fields.size > 1) Text(name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(fields.text(name) ?: prettyJson(value), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+    }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
         OutlinedButton(onClick = { onAnswer(buildJsonObject { put("allow", false); put("reason", "") }) }) { Text("拒绝") }
         Button(onClick = { onAnswer(buildJsonObject { put("allow", true); put("useSuggestedPermissions", false) }) }) { Text("允许") }
