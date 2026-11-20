@@ -19,7 +19,7 @@ public sealed partial class MainWindow
 
     /// The demo never reads or writes the user's saved hosts.
     private static string StateFolder() => DemoScene is not null
-        ? Path.Combine(Path.GetTempPath(), "claude-mirror-demo-" + Environment.ProcessId)
+        ? Path.Combine(Path.GetTempPath(), "claude-mirror-demo-" + Guid.NewGuid().ToString("N"))
         : Environment.GetEnvironmentVariable("CLAUDE_MIRROR_STATE_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "claude-mirror");
 
     private void PrepareDemo()
