@@ -280,7 +280,7 @@ public struct ChatSession: Codable, Hashable, Sendable, Identifiable {
         return host + ":" + (port.map(String.init) ?? "") + ":" + folder
     }
     private enum CodingKeys: String, CodingKey {
-        case id, name, host, port, directory, createdAt, updatedAt, messages, status, permissions, preferences, capabilities, remoteSessionId, remoteTask, remoteOwner, transportError, model, usage, tasks, tools, plugins, forkPending, queue, queuePaused, pinned, archived, localName, remoteHistoryRef, historyLoaded, historyBefore, historySummary, localMessagesLoaded
+        case id, name, host, port, directory, createdAt, updatedAt, messages, status, permissions, preferences, capabilities, remoteSessionId, remoteTask, remoteOwner, transportError, model, usage, tasks, tools, plugins, forkPending, context, queue, queuePaused, pinned, archived, localName, remoteHistoryRef, historyLoaded, historyBefore, historySummary, localMessagesLoaded
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -302,6 +302,7 @@ public struct ChatSession: Codable, Hashable, Sendable, Identifiable {
         usage = try c.decodeIfPresent(JSON.self, forKey: .usage); tasks = try c.decodeIfPresent(JSON.self, forKey: .tasks)
         tools = try c.decodeIfPresent(JSON.self, forKey: .tools); plugins = try c.decodeIfPresent(JSON.self, forKey: .plugins)
         forkPending = try c.decodeIfPresent(Bool.self, forKey: .forkPending)
+        context = try? c.decodeIfPresent(ContextUsage.self, forKey: .context)
         queue = try c.decodeIfPresent([QueuedMessage].self, forKey: .queue); queuePaused = try c.decodeIfPresent(Bool.self, forKey: .queuePaused)
         pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned); archived = try c.decodeIfPresent(Bool.self, forKey: .archived)
         localName = try c.decodeIfPresent(Bool.self, forKey: .localName)

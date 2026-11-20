@@ -94,6 +94,13 @@ final class SteeringTests: XCTestCase {
         engine.shutdown()
     }
 
+    func testContextUsageSurvivesSaveAndLoad() async throws {
+        var session = ChatSession(config: ConnectionConfig(host: "dev", directory: "/work"), name: "saved")
+        session.context = ContextUsage(usedTokens: 128_400, maxTokens: 1_000_000)
+        let loaded = try JSONDecoder().decode(ChatSession.self, from: JSONEncoder().encode(session))
+        XCTAssertEqual(loaded.context, session.context)
+    }
+
     func testContextUsageLabel() async {
         XCTAssertEqual(ContextUsage(usedTokens: 128_400, maxTokens: 1_000_000).label, "128k / 1M")
         XCTAssertEqual(ContextUsage(usedTokens: 870, maxTokens: 200_000).label, "870 / 200k")
