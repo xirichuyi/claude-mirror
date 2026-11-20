@@ -146,7 +146,7 @@ setup_runner() {
   # Files in the runner's home are written by the runner itself, never by root.
   as_runner() { runuser -u "$runner" -- env -i HOME="$home" PATH="$home/.local/bin:/usr/local/bin:/usr/bin:/bin" "$@"; }
 
-  if as_runner test -x "$home/.local/bin/claude"; then
+  if as_runner "$home/.local/bin/claude" --version >/dev/null 2>&1; then
     echo "Claude Code already installed for $runner."
   else
     source=$(readlink -f -- "$(command -v claude)")
