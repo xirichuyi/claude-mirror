@@ -353,9 +353,13 @@ final class AgentTests: XCTestCase {
 
     func testThumbnailIsSeparateFromOriginalDownload() async throws {
         let env = try AgentEnvironment(); defer { env.cleanup() }
-        guard let python = AgentEnvironment.which("python3"), (try? RemoteCCCoreTests.run(python, ["-c", "import PIL"])) != nil else {
-            throw XCTSkip("Pillow is optional")
-        }
+        // `run` asserts on the exit status, so probe for Pillow without it: a missing module skips the test.
+        guard let python = AgentEnvironment.which("python3") else { throw XCTSkip("Pillow is optional") }
+        let probe = Process()
+        probe.executableURL = URL(fileURLWithPath: python); probe.arguments = ["-c", "import PIL"]
+        probe.standardOutput = FileHandle.nullDevice; probe.standardError = FileHandle.nullDevice
+        try probe.run(); probe.waitUntilExit()
+        guard probe.terminationStatus == 0 else { throw XCTSkip("Pillow is optional") }
         let file = env.home.appendingPathComponent("large.png")
         _ = try RemoteCCCoreTests.run(python, ["-c", "from PIL import Image; import sys; Image.effect_noise((1600,1600),80).convert('RGB').save(sys.argv[1])", file.path])
         let original = try Data(contentsOf: file)
