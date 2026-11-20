@@ -42,10 +42,13 @@ class Engine(
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     private class Watcher(val taskId: String) {
+        /** Packets and the final reason, in the order the agent reported them. */
+        val events = Channel<Any>(Channel.UNLIMITED)
         var cancel: (() -> Unit)? = null
         var previous: JsonObject? = null
         var killed = false
-        fun kill() { killed = true; cancel?.invoke() }
+        // Closing the channel ends its reader: the agent sends nothing more once unsubscribed.
+        fun kill() { killed = true; cancel?.invoke(); events.close() }
     }
 
     private val state = MutableStateFlow(store.load().sortedByDescending { it.updatedAt })
@@ -274,13 +277,12 @@ class Engine(
         val watcher = Watcher(taskId)
         watchers[id] = watcher
         // The agent calls back on its reader thread; the channel keeps the packets in order.
-        val events = Channel<Any>(Channel.UNLIMITED)
         scope.launch {
-            for (event in events) {
+            for (event in watcher.events) {
                 if (event is JsonObject) received(event, id, watcher) else { watchEnded(id, watcher, event as String); break }
             }
         }
-        watcher.cancel = agents.channel(host).watchTask(taskId, packet = { events.trySend(it) }, end = { events.trySend(it) })
+        watcher.cancel = agents.channel(host).watchTask(taskId, packet = { watcher.events.trySend(it) }, end = { watcher.events.trySend(it) })
         if (watcher.killed) watcher.cancel?.invoke()
     }
 
