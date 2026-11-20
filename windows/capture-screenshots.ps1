@@ -14,6 +14,7 @@ try {
     foreach ($shot in $shots) {
         foreach ($theme in 'light', 'dark') {
             $png = Join-Path $folder "$($shot.Name)-$theme.png"
+            Remove-Item $png, "$png.error.txt" -ErrorAction SilentlyContinue
             $env:CLAUDE_MIRROR_DEMO = $shot.Scene
             $env:CLAUDE_MIRROR_THEME = $theme
             $env:CLAUDE_MIRROR_SIZE = if ($shot.Size) { $shot.Size } else { '1280x860' }
