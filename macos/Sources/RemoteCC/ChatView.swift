@@ -675,7 +675,7 @@ struct CodeBlock: View {
     var body: some View {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         VStack(alignment: .leading, spacing: 0) {
-            ScrollView(.horizontal) {
+            OverflowScroll {
                 Text(expanded ? text : lines.prefix(18).joined(separator: "\n"))
                     .font(.system(size: 12, design: .monospaced)).lineSpacing(3)
                     .foregroundStyle(color).textSelection(.enabled)
