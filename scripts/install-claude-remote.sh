@@ -13,6 +13,13 @@ case "$(uname -s)" in
   *) echo 'This installer supports Linux, macOS and Linux under WSL.' >&2; exit 1 ;;
 esac
 runner=''; project=''; copy_login=no
+# Directories that are never opened to the runner.
+protected() {
+  case "$1" in
+    /|/root|/root/*|/home|/etc|/etc/*|/usr|/usr/*|/var|/opt|/bin|/sbin|/lib|/lib64|/boot|/boot/*|/dev|/dev/*|/proc|/proc/*|/sys|/sys/*|/run|/run/*|/tmp) return 0 ;;
+  esac
+  return 1
+}
 usage() { echo "$1" >&2; echo 'Options: [--runner NAME [--project /absolute/dir] [--copy-login]]' >&2; exit 2; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -32,10 +39,7 @@ if [ -n "$runner" ]; then
   fi
   if [ -n "$project" ]; then
     [[ "$project" = /* ]] || usage '--project must be an absolute path.'
-    case "$(readlink -m -- "$project")" in
-      /|/root|/root/*|/home|/etc|/etc/*|/usr|/usr/*|/var|/opt|/bin|/sbin|/lib|/lib64|/boot|/boot/*|/dev|/dev/*|/proc|/proc/*|/sys|/sys/*|/run|/run/*|/tmp)
-        usage "Refusing to open $project to the runner. Use a dedicated directory such as /opt/projects/my-app." ;;
-    esac
+    protected "$(readlink -m -- "$project")" && usage "Refusing to open $project to the runner. Use a dedicated directory such as /opt/projects/my-app."
   fi
   [ "$copy_login" = no ] || [ -s "$HOME/.claude/.credentials.json" ] || usage '--copy-login: root has no Claude login file (~/.claude/.credentials.json). Log in as root first, or drop the option.'
 elif [ -n "$project" ] || [ "$copy_login" = yes ]; then
@@ -167,7 +171,11 @@ setup_runner() {
       command -v setfacl >/dev/null 2>&1 || { echo 'Install the acl package (setfacl) and run this again.' >&2; return 1; }
     fi
     mkdir -p -- "$project"
-    real=$(readlink -f -- "$project")
+    # Enter the directory and work on "." from here on: a path could be swapped for a
+    # link to somewhere else after it was checked, the directory we are in cannot.
+    cd -- "$project"
+    real=$(pwd -P)
+    if protected "$real"; then echo "Refusing to open $real to the runner." >&2; return 1; fi
     # Parents get traversal only; the project itself gets read/write, also for files created later.
     parent=$(dirname "$real")
     while [ "$parent" != / ]; do
@@ -175,8 +183,8 @@ setup_runner() {
       as_runner test -x "$parent" || setfacl -m "u:$runner:--x" -- "$parent"
       parent=$(dirname "$parent")
     done
-    setfacl -R -P -m "u:$runner:rwX" -- "$real"
-    find "$real" -type d -exec setfacl -m "d:u:$runner:rwx" -- {} +
+    setfacl -R -P -m "u:$runner:rwX" -- .
+    find . -type d -exec setfacl -m "d:u:$runner:rwx" -- {} +
     as_runner sh -c 'cd -- "$1" && test -r . && test -w .' sh "$real" || { echo "$runner still cannot write to $real; the filesystem may not support ACLs." >&2; return 1; }
     echo "$runner can read and write $real."
   fi
