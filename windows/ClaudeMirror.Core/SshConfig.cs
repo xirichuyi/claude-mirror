@@ -15,8 +15,8 @@ public static class SshConfig
         blocks.Add(current);
         foreach (var raw in text.Split('\n'))
         {
-            var line = raw.Trim();
-            if (line.Length == 0 || line[0] == '#') continue;
+            var line = WithoutComment(raw).Trim();
+            if (line.Length == 0) continue;
             var split = line.IndexOfAny([' ', '\t', '=']);
             if (split < 0) continue;
             var key = line[..split]; var value = line[split..].TrimStart(' ', '\t', '=').Trim().Trim('"');
@@ -65,6 +65,18 @@ public static class SshConfig
 
     /// <summary>A jump host in the form <see cref="Jump"/> reads back.</summary>
     public static string JumpSpec(HostProfile jump) => $"{jump.User}@{(jump.Host.Contains(':') ? "[" + jump.Host + "]" : jump.Host)}:{jump.Port}";
+
+    /// <summary>A line up to a `#` that starts it or follows whitespace outside quotes, as OpenSSH reads it.</summary>
+    private static string WithoutComment(string line)
+    {
+        bool quoted = false;
+        for (int i = 0; i < line.Length; i++)
+        {
+            if (line[i] == '"') quoted = !quoted;
+            else if (line[i] == '#' && !quoted && (i == 0 || char.IsWhiteSpace(line[i - 1]))) return line[..i];
+        }
+        return line;
+    }
 
     private static bool Matches(string[] patterns, string alias)
     {
