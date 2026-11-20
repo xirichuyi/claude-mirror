@@ -18,7 +18,7 @@ struct MarkdownView: View {
                 } else if block.kind == .code {
                     MarkdownCodeBlock(block: block, selection: selection)
                 } else {
-                    ScrollView(.horizontal) {
+                    OverflowScroll {
                         selectable(block).frame(width: block.width, alignment: .leading)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

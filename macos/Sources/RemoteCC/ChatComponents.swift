@@ -124,6 +124,69 @@ struct ScrollReadingDetector: NSViewRepresentable {
         }
     }
 }
+/// A scroll view for content wider than its column. While more remains to the right the trailing
+/// edge fades out, so clipped code, tool output and tables read as scrollable instead of cut off.
+struct OverflowScroll<Content: View>: View {
+    var axes: Axis.Set = .horizontal
+    var anchor: UnitPoint = .topLeading
+    @ViewBuilder let content: Content
+    @State private var more = false
+
+    var body: some View {
+        ScrollView(axes) { content.background(TrailingOverflowObserver { more = $0 }) }
+            .defaultScrollAnchor(anchor)
+            .mask {
+                HStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: more ? 32 : 0)
+                }
+            }
+    }
+}
+
+/// Reports whether the enclosing scroll view has content beyond its trailing edge. Only changes are reported.
+private struct TrailingOverflowObserver: NSViewRepresentable {
+    let onChange: (Bool) -> Void
+    func makeNSView(context: Context) -> ObserverView { ObserverView() }
+    func updateNSView(_ view: ObserverView, context: Context) { view.onChange = onChange }
+    static func dismantleNSView(_ view: ObserverView, coordinator: ()) { view.stopObserving() }
+
+    final class ObserverView: NSView {
+        var onChange: ((Bool) -> Void)?
+        private var observers: [NSObjectProtocol] = []
+        private var queued = false, more = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stopObserving()
+            guard window != nil, let scroll = enclosingScrollView, let document = scroll.documentView else { return }
+            let clip = scroll.contentView
+            clip.postsBoundsChangedNotifications = true; clip.postsFrameChangedNotifications = true
+            document.postsFrameChangedNotifications = true
+            let center = NotificationCenter.default
+            observers = [(NSView.boundsDidChangeNotification, clip), (NSView.frameDidChangeNotification, clip), (NSView.frameDidChangeNotification, document)].map { name, object in
+                center.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.queueUpdate() } }
+            }
+            queueUpdate()
+        }
+        func stopObserving() { observers.forEach(NotificationCenter.default.removeObserver); observers = [] }
+
+        /// Notifications arrive in the middle of layout; SwiftUI state may only change afterwards.
+        private func queueUpdate() {
+            guard !queued else { return }
+            queued = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.queued = false
+                guard let scroll = self.enclosingScrollView, let document = scroll.documentView else { return }
+                let more = document.frame.maxX - scroll.contentView.bounds.maxX > 1
+                if more != self.more { self.more = more; self.onChange?(more) }
+            }
+        }
+    }
+}
+
 #endif
 
 /// Publish scroll-state boundaries, never per-pixel geometry. macOS owns wheel momentum.
