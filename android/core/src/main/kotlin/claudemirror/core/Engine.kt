@@ -60,6 +60,7 @@ class Engine(
     private val stopRequests = HashSet<String>()
     private val unsaved = HashSet<String>()
     private var saving: Job? = null
+    private var written: Job? = null
     private val disk = Dispatchers.IO.limitedParallelism(1)
 
     fun session(id: String): ChatSession? = state.value.firstOrNull { it.id == id }
@@ -79,7 +80,11 @@ class Engine(
         saving = null
         val changed = unsaved.mapNotNull(::session)
         unsaved.clear()
-        if (changed.isNotEmpty()) scope.launch(disk) { changed.forEach(store::save) }
+        if (changed.isEmpty()) return
+        written = scope.launch(disk) {
+            // A full disk must not take the app down; the conversation stays usable in memory.
+            runCatching { changed.forEach(store::save) }.onFailure { onError?.invoke("对话没有保存到手机：" + (it.message ?: it.javaClass.simpleName)) }
+        }
     }
 
     // Conversations
@@ -97,7 +102,7 @@ class Engine(
         if (session.remoteTask != null || session.remoteOwner != null) scope.launch { runCatching { command(session, "close") } }
         state.value = state.value.filter { it.id != id }
         unsaved -= id
-        scope.launch(disk) { store.delete(id) }
+        scope.launch(disk) { runCatching { store.delete(id) } }
     }
 
     /** Applies to the next reply. A worker kept alive for this conversation is closed so it restarts with the new settings. */
