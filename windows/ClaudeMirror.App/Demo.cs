@@ -77,6 +77,7 @@ public sealed partial class MainWindow
         var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
         encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)bitmap.PixelWidth, (uint)bitmap.PixelHeight, 96, 96, pixels);
         await encoder.FlushAsync();
+        stream.Seek(0);
         await using var file = File.Create(path);
         await stream.AsStreamForRead().CopyToAsync(file);
     }
