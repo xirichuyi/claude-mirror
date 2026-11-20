@@ -66,6 +66,11 @@ public sealed class LocalState
     public Dictionary<string, string> Tasks { get; set; } = [];
     /// <summary>Hosts whose user chose "不再询问" for password-free login.</summary>
     public HashSet<string> DeclinedKeyLogin { get; set; } = [];
+    /// <summary>What the user did to conversations in the sidebar, keyed by <see cref="Sessions.Key"/>. The transcripts on the server are not touched.</summary>
+    public Dictionary<string, string> Names { get; set; } = [];
+    public HashSet<string> Pinned { get; set; } = [];
+    public HashSet<string> Archived { get; set; } = [];
+    public HashSet<string> Hidden { get; set; } = [];
     public LocalState(string folder)
     {
         Directory.CreateDirectory(folder); file = Path.Combine(folder, "state.json");
@@ -75,10 +80,14 @@ public sealed class LocalState
         Fingerprints = saved?["fingerprints"]?.Deserialize<Dictionary<string, string>>() ?? [];
         Tasks = saved?["tasks"]?.Deserialize<Dictionary<string, string>>() ?? [];
         DeclinedKeyLogin = saved?["declinedKeyLogin"]?.Deserialize<HashSet<string>>() ?? [];
+        Names = saved?["names"]?.Deserialize<Dictionary<string, string>>() ?? [];
+        Pinned = saved?["pinned"]?.Deserialize<HashSet<string>>() ?? [];
+        Archived = saved?["archived"]?.Deserialize<HashSet<string>>() ?? [];
+        Hidden = saved?["hidden"]?.Deserialize<HashSet<string>>() ?? [];
     }
     public void Save()
     {
-        File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(new { hosts = Hosts, fingerprints = Fingerprints, tasks = Tasks, declinedKeyLogin = DeclinedKeyLogin }));
+        File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(new { hosts = Hosts, fingerprints = Fingerprints, tasks = Tasks, declinedKeyLogin = DeclinedKeyLogin, names = Names, pinned = Pinned, archived = Archived, hidden = Hidden }));
         File.Move(file + ".tmp", file, true);
     }
     public static string HostKey(HostProfile h) => $"{h.User}@{h.Host}:{h.Port}";
