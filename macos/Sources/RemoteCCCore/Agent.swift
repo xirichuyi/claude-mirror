@@ -1,6 +1,6 @@
 import Foundation
 
-/// Files built from `src/` by scripts/prepare-server.cjs and shipped inside the app.
+/// Files built from `src/` by scripts/prepare-server.cts and shipped inside the app.
 public struct ServerResources: Sendable {
     public let agentSource: Data
     public let agentDigest: String

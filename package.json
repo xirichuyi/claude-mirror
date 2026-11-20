@@ -2,14 +2,23 @@
   "name": "remotecc",
   "version": "0.14.0",
   "description": "SSH workspace and chat client for remote Claude Code",
-  "main": "src/main.cjs",
+  "main": "build/src/main.cjs",
   "author": "RemoteCC",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "test": "node --test",
+    "test": "node --test build/test/*.test.cjs",
     "postinstall": "electron-builder install-app-deps",
-    "pack": "electron-builder --mac dir"
+    "pack": "electron-builder --mac dir",
+    "build": "tsc -p tsconfig.bootstrap.json && node build/scripts/build.cjs",
+    "typecheck": "tsc -p tsconfig.type-tests.json",
+    "prestart": "npm run build",
+    "pretest": "npm run typecheck && npm run build",
+    "prepack": "npm run build",
+    "prepare-server": "node build/macos/scripts/prepare-server.cjs",
+    "preprepare-server": "npm run build",
+    "setup-claude-user": "node build/scripts/setup-claude-user.cjs",
+    "presetup-claude-user": "npm run build"
   },
   "build": {
     "appId": "local.remotecc.desktop",
@@ -18,7 +27,7 @@
       "output": "dist"
     },
     "files": [
-      "src/**/*",
+      "build/src/**/*",
       "package.json",
       "!node_modules/@anthropic-ai/claude-agent-sdk-darwin-*/**/*"
     ],
@@ -34,8 +43,10 @@
     "marked": "^18.1.2"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "electron": "^45.1.0",
     "electron-builder": "^26.18.0",
-    "playwright": "^1.64.1"
+    "playwright": "^1.64.1",
+    "typescript": "^7.0.2"
   }
 }

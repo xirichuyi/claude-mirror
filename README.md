@@ -216,7 +216,7 @@ sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
 
 ## 跨机器同步记忆和会话
 
-`scripts/agent-sync.cjs` 让 VPS 和本地的 Agent 共用记忆，并能接手对方的会话。账号只在 VPS 上登录，同步范围不包含凭据。机器之间只需要能用 SSH 互连：本地直连 VPS 公网，或使用 WireGuard、Tailscale 等内网地址都可以。同步不经过第三方服务，也不转发模型流量。
+`scripts/agent-sync.cts` 让 VPS 和本地的 Agent 共用记忆，并能接手对方的会话。账号只在 VPS 上登录，同步范围不包含凭据。机器之间只需要能用 SSH 互连：本地直连 VPS 公网，或使用 WireGuard、Tailscale 等内网地址都可以。同步不经过第三方服务，也不转发模型流量。
 
 | 内容 | 同步方式 |
 | --- | --- |
@@ -228,11 +228,15 @@ sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
 Claude Code 的 `SessionStart`、`Stop`、`SessionEnd` hook 和 Codex 的 `notify` 触发同步，每 5 分钟的定时任务兜底。其他 Agent 可以在任务结束时调用 `agent-sync sync --quiet` 接入。需要 macOS、Linux 或 WSL，以及 Node.js、git、rsync。
 
 ```sh
+# 首次运行或更新源码后，在仓库根目录编译
+npm ci --ignore-scripts
+npm run build
+
 # VPS
-node scripts/agent-sync.cjs install --role hub --host vps
+node build/scripts/agent-sync.cjs install --role hub --host vps
 
 # 本地：确认能免密 ssh 到 VPS 后运行
-node scripts/agent-sync.cjs install --role spoke --host laptop --hub root@<VPS 地址> --hub-host vps
+node build/scripts/agent-sync.cjs install --role spoke --host laptop --hub root@<VPS 地址> --hub-host vps
 
 # VPS：可选，任务完成后立刻通知本地。需要 VPS 能 SSH 到本地，
 # 例如开启下文的“服务器反向连接本机”，再在 VPS 的 ~/.ssh/config 中为本机配置别名
@@ -298,10 +302,14 @@ macos/Sources/RemoteCC/       原生界面及应用状态桥接
 macos/Sources/RemoteCCCore/   SSH、协议、会话、历史、文件核心
 macos/Helpers/               OpenSSH 认证窗口辅助程序
 macos/Tests/                 核心、恢复和远端测试
-src/remote-agent.cjs         远端代理
-src/task-worker.cjs          Claude SDK 任务进程
-src/                        同时保留早期 Electron 客户端
-scripts/                    构建与端到端验证脚本
+src/remote-agent.cts         远端代理
+src/task-worker.cts          Claude SDK 任务进程
+src/                        TypeScript 源码，同时保留早期 Electron 客户端
+build/src/                  编译后的运行文件与界面资源，不提交到 Git
+scripts/                    TypeScript 构建、命令行工具与端到端验证脚本
+test/                       TypeScript 测试
+build/scripts/              编译后的工具入口
+build/test/                 编译后的测试
 docs/assets/                项目标识
 ```
 
@@ -316,6 +324,21 @@ docs/assets/                项目标识
 聊天附件上传到远端专用临时目录，按 SHA-256 摘要隔离；重复附件验证远端副本后复用路径，副本丢失或内容变化时重新上传。文件面板的上传仍写入当前浏览目录。临时目录可能被系统清理，不用作长期文件存储；发起聊天会将请求及所附内容交给远端 Claude。权限请求仍需按配置确认，断线不会自动批准。编辑远端文件可能改变服务器项目，检查点回退只覆盖 SDK 跟踪的文件，不等于整个项目快照。
 
 请勿向仓库提交认证文件、私钥、聊天数据库或生产环境配置。
+
+## TypeScript 开发
+
+全部自有 JavaScript（应用、测试、构建、命令行工具及原生资源准备脚本）已迁移到 TypeScript。Node/Electron 源码和工具使用 `.cts`（TypeScript 的 CommonJS 扩展名），浏览器经典脚本使用 `.ts`。`npm run build` 将两者分别编译为 `build/src/*.cjs` 和 `build/src/*.js`，并将工具和测试编译到 `build/scripts`、`build/test`，原生资源准备程序编译到 `build/macos/scripts`。请编辑对应源码目录中的 `.ts`/`.cts`，不要编辑 `build` 中的产物。远端机器接收普通 JavaScript，不需要安装 TypeScript。
+
+```sh
+npm ci --ignore-scripts
+npm run typecheck  # 检查源码与编译期接口测试，不生成文件
+npm run build      # 编译代码并准备运行资源
+npm test           # 自动进行类型检查、编译，再运行 Node 测试
+```
+
+`npm start` 和 `npm run pack` 会自动编译。`npm run prepare-server -- <输出目录>` 会先编译，再由 `macos/scripts/prepare-server.cts` 的产物计算 Agent/Worker 摘要并打包，macOS/Windows 共用此入口。直接运行 `node build/scripts/*smoke.cjs` 或 `node --test build/test/*.test.cjs` 前，请先执行 `npm run build`。构建脚本本身由 `tsconfig.bootstrap.json` 先编译，然后执行，因此干净检出也能构建，不依赖预先生成的 JavaScript 或 Node 的 TypeScript 直接执行功能。
+
+会话、偏好、文件传输和 RPC 的共享类型在 `src/contracts.d.ts`，preload 导出的接口类型供浏览器复用。所有源码、测试和工具都纳入类型检查；类型检查错误会阻止构建。测试会检查仓库中是否重新出现自有 JavaScript 源文件。当前迁移保留了动态 SDK/JSON 数据的部分 `any`，并暂时关闭隐式 any、空值和 catch 未知类型的严格检查；这是可继续收紧的迁移基线，不代表所有数据已经完整建模。外部输入仍由现有运行时校验负责。
 
 ## 测试与兼容范围
 
@@ -397,3 +420,20 @@ macOS 的「对话选项 → 高级选项 → 上下文缓存」可选择远端�
 - [构建与验证](macos/README.md)
 - [代码组织、公共组件与动画规范](docs/macos-code-style.md)
 - [v0.23.2 改动与发布记录](docs/releases/v0.23.2.md)
+
+### macOS Full Access 与 root SSH
+
+对话选项中的 **Full Access** 对应 Claude 的 `bypassPermissions`。普通用户启动时，后端同时传入 SDK 的 `allowDangerouslySkipPermissions`，允许该会话随后切换模式。Full Access 跳过 Claude 操作确认，但不会提升操作系统权限。
+
+Claude 拒绝以 root 运行该模式。Linux 上可保留 root SSH 连接，在**新对话**的“Claude 执行账号”填写普通账号；后端通过 `runuser` 真正降低子进程身份，使用该账号的 home、Claude 安装与登录，不继承 root 的凭据环境。已有对话不能切换执行账号。其他系统请直接通过普通用户 SSH 连接。
+
+可在远端以 root 创建专用账号（需安装 `acl` / `setfacl`）：
+
+```sh
+npm run setup-claude-user -- --user claude-runner --project '/opt/my-project'
+runuser -u claude-runner -- /home/claude-runner/.local/bin/claude auth login
+```
+
+工具安装当前 Claude 可执行文件，并仅给指定项目添加账号 ACL（父目录仅授予路径穿越权限），不更改项目所有者。它仅创建新账号，不修改已有账号。不支持位于 `/root` 的项目，请使用独立项目目录。
+
+若明确需要复用当前 root 的 Claude 登录，可在安装命令末尾添加 `--copy-login-from /root`；只复制 `.claude/.credentials.json`，以 `0600` 保存，不复制其他配置或密钥。后续登录刷新和历史由新账号独立维护。未加该选项时需单独登录。安装完成后，在 macOS 新对话选择 Full Access 并填写 `claude-runner`；应用前会检查执行身份、项目权限和 Claude 路径。

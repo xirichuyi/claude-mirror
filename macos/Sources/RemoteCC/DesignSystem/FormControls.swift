@@ -93,3 +93,26 @@ struct WorkbenchFieldSurface: ViewModifier {
             .opacity(enabled ? 1 : 0.45)
     }
 }
+
+/// Question choices reuse the same controls as permission rules and MCP forms.
+struct WorkbenchChoiceList: View {
+    let options: [(String, String)]
+    let selected: Set<String>
+    let toggle: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                Toggle(isOn: Binding(get: { selected.contains(option.0) }, set: { _ in toggle(option.0) })) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(option.0).fixedSize(horizontal: false, vertical: true)
+                        if !option.1.isEmpty {
+                            Text(option.1).font(WorkbenchMetrics.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }.toggleStyle(WorkbenchToggleStyle())
+            }
+        }
+    }
+}

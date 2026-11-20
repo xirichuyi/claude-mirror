@@ -57,8 +57,17 @@ struct ComposerArea: View {
             }
             if let session = model.active {
                 todoStrip(session)
-                ForEach(session.permissions) { permission in
-                    PermissionCard(permission: permission).id(permission.id)
+                if let permission = session.permissions.first {
+                    HStack(spacing: 8) {
+                        WorkbenchIcon(symbol: "hand.raised")
+                        Text("等待确认 · \(permission.title ?? permission.name ?? "远端请求")")
+                            .lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Button("查看 \(session.permissions.count) 项请求") { model.showPendingPermission() }
+                            .buttonStyle(WorkbenchButtonStyle())
+                    }
+                    .font(WorkbenchMetrics.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                    .padding(10).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
                 }
                 queue(session)
             }
@@ -237,7 +246,7 @@ struct ComposerArea: View {
         let preferences = session?.preferences
         let modelName = preferences?.selectedModel.flatMap { $0.isEmpty ? nil : $0 }
         let displayed = session?.capabilities?.models.first { $0.value == (modelName ?? "default") }?.displayName ?? modelName ?? session?.model ?? "模型"
-        let modes = ["default": "默认权限", "plan": "计划", "acceptEdits": "自动编辑", "dontAsk": "拒绝未授权", "auto": "自动权限"]
+        let modes = ["default": "默认权限", "plan": "计划", "acceptEdits": "自动编辑", "bypassPermissions": "Full Access", "dontAsk": "拒绝未授权", "auto": "自动权限"]
         let busy = session?.isBusy ?? false
         return HStack(spacing: 4) {
             if session != nil {

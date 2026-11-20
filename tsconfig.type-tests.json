@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": [
+    "src/**/*.cts",
+    "src/**/*.ts",
+    "scripts/**/*.cts",
+    "test/**/*.cts",
+    "macos/scripts/**/*.cts",
+    "type-tests/**/*.cts"
+  ]
+}

@@ -19,6 +19,14 @@ extension View {
 }
 
 extension View {
+    /// Raised popup card for in-app dialogs such as permission requests.
+    func workbenchDialogSurface() -> some View {
+        self.background(WorkbenchTheme.popup)
+            .clipShape(RoundedRectangle(cornerRadius: WorkbenchMetrics.dialogRadius))
+            .overlay(RoundedRectangle(cornerRadius: WorkbenchMetrics.dialogRadius).strokeBorder(WorkbenchTheme.popupBorder))
+            .shadow(color: WorkbenchTheme.shadow, radius: 24, y: 10)
+    }
+
     func workbenchPanel() -> some View {
         self
             .foregroundStyle(WorkbenchTheme.ink)

@@ -17,7 +17,7 @@ open macos/dist/claude-mirror.app
 - `Sources/RemoteCCCore`：以 Foundation 为基础，macOS 使用 CryptoKit 计算附件摘要，包含 SSH、代理协议、任务恢复、文件、历史、存储和展示逻辑，可在 Linux 上编译测试。
 - `Sources/RemoteCC`：SwiftUI / AppKit 界面，只在 macOS 上编译。公共组件在 `DesignSystem/`，主机与设置在 `Features/`，侧栏和底栏在 `Workspace/`，偏好恢复在 `Persistence/`。
 - 目录职责、组件复用、动画和格式规则见 [macOS 界面代码规范](../docs/macos-code-style.md)。
-- `scripts/prepare-server.cjs`：把 `../src` 下的服务端程序（`remote-agent.cjs` 和基于官方 SDK 的任务进程）打包进应用资源。
+- `scripts/prepare-server.cts`：通过 `npm run prepare-server` 编译 TypeScript，再把 `../build/src` 下的服务端产物（`remote-agent.cjs` 和基于官方 SDK 的任务进程）打包进应用资源。
 
 本地数据保存在 `~/Library/Application Support/RemoteCC Native`，与 Electron 版互不影响。
 
@@ -36,7 +36,7 @@ open macos/dist/claude-mirror.app
 - 模型按钮直接选择远端模型；自定义模型和其他参数在「更多设置」中配置。
 - 向上滚动或点击消息阅读、选择文本时暂停自动跟随；点击浮动的「回到最新」恢复跟随。
 - 思考内容使用可展开卡片，生成中显示末尾预览，长内容限高；只显示远端实际提供的内容。工具调用分别显示执行中、完成、失败、停止和历史状态，展开查看命令、差异与输出。
-- 权限请求有独立确认卡，离线或提交中禁止重复提交，不用默认回车批准。失败回复可将上一条请求及附件放回空输入框编辑，已有草稿不会被覆盖，也不自动重试远端操作。
+- 远端权限、提问、计划和 MCP 表单统一走 Workbench 浮层，与应用确认窗口共用标题、控件、底色、边框和动效。输入区只显示待确认入口；关闭或“稍后处理”不发送批准或拒绝，远端撤回后弹窗自动消失，多个请求逐项处理。离线或提交中禁止重复提交，不用默认回车批准。失败回复可将上一条请求及附件放回空输入框编辑，已有草稿不会被覆盖，也不自动重试远端操作。
 - 代码块提供语言标记、限高滚动和复制反馈；支持常见语言的基础语法着色，超长代码退回纯文本以保持响应。历史图片仍受服务端历史接口限制，仅显示占位说明。
 - Debug 构建的「工作区 → 聊天交互预览」提供本地示例状态验收，不会发送消息或执行命令；Release 构建不包含这个入口。
 - 输入 `/` 选择远端命令，输入 `@` 附加文件；Enter 发送，Shift + Enter 换行。
@@ -65,12 +65,12 @@ swift test --package-path macos
 
 ### 真实远端验证（2026-11-01，axi）
 
-- `node scripts/files-smoke.cjs`：通过。覆盖 SSH 重连、中文/特殊文件名、上传防覆盖、图片预览、下载逐字节比对、Git worktree、历史列表与消息读取。
+- `node build/scripts/files-smoke.cjs`：通过。覆盖 SSH 重连、中文/特殊文件名、上传防覆盖、图片预览、下载逐字节比对、Git worktree、历史列表与消息读取。
 - `REMOTECC_LIVE_HOST=axi swift test --package-path macos --filter LiveRemoteTests`：通过。直接验证原生 Swift 传输和 ChatEngine 的上传下载、历史加载/刷新去重、重连。默认测试不访问真实服务器。
-- `node scripts/native-flows-smoke.cjs`：额度恢复后通过。真实 Read/Edit → 检查点预览/回退 → 文件内容比对、Git worktree、后台任务启动/停止、后续对话全部完成。发现并修复自定义 Claude 启动器遗漏 SDK 环境变量、导致检查点实际未启用的问题。测试目录为唯一的 `/tmp/remotecc-native-flows-*`，保留供检查。
-- `node scripts/resident-session-smoke.cjs`：通过。真实确认请求在断线/客户端重建后恢复，回答后继续同一会话；重复发送去重；停止后可继续；确认期间模型/effort 控制不破坏请求。
+- `node build/scripts/native-flows-smoke.cjs`：额度恢复后通过。真实 Read/Edit → 检查点预览/回退 → 文件内容比对、Git worktree、后台任务启动/停止、后续对话全部完成。发现并修复自定义 Claude 启动器遗漏 SDK 环境变量、导致检查点实际未启用的问题。测试目录为唯一的 `/tmp/remotecc-native-flows-*`，保留供检查。
+- `node build/scripts/resident-session-smoke.cjs`：通过。真实确认请求在断线/客户端重建后恢复，回答后继续同一会话；重复发送去重；停止后可继续；确认期间模型/effort 控制不破坏请求。
 - `REMOTECC_LIVE_HOST=axi REMOTECC_LIVE_MODEL=1 swift test --package-path macos --filter LiveRemoteTests`：通过。原生 Swift 附件 → 真实模型编辑 → 回退预览/执行 → 原始内容比对，聊天记录保留。
-- `node --test test/*.test.cjs`：63 项通过。Swift 默认全量 23 项中 21 项通过、2 项真实远端测试默认跳过；真实远端测试另行显式运行。新增检查点过期、替换预览失败、文件被另一个进程创建/替换、旧 SDK 无回退方法、远端历史分支改写、重复 Git 分支等边界。
+- `node --test build/test/*.test.cjs`：63 项通过。Swift 默认全量 23 项中 21 项通过、2 项真实远端测试默认跳过；真实远端测试另行显式运行。新增检查点过期、替换预览失败、文件被另一个进程创建/替换、旧 SDK 无回退方法、远端历史分支改写、重复 Git 分支等边界。
 
 ### 尚未验收的场景
 

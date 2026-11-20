@@ -4,6 +4,7 @@ import SwiftUI
 struct SheetHeading: View {
     let title: String
     var subtitle: String = ""
+    var closeTitle = "关闭"
     let close: () -> Void
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -16,7 +17,7 @@ struct SheetHeading: View {
             }
             Spacer(minLength: 8)
             Button(action: close) { WorkbenchIcon(symbol: "xmark") }
-                .buttonStyle(WorkbenchIconButtonStyle()).help("关闭").accessibilityLabel("关闭")
+                .buttonStyle(WorkbenchIconButtonStyle()).help(closeTitle).accessibilityLabel(closeTitle)
                 .keyboardShortcut(.cancelAction)
                 .focusEffectDisabled()
         }

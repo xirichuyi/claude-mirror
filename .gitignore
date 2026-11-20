@@ -27,3 +27,6 @@ windows/**/bin/
 windows/**/obj/
 windows/Resources/server/
 windows/dist/
+
+# TypeScript build output
+/build/

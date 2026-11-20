@@ -34,6 +34,8 @@ public sealed partial class MainWindow : Window
     private MessageView? reply;
     private readonly SemaphoreSlim permissionLock = new(1);
     private readonly HashSet<string> approvalDialogs = [];
+    private ContentDialog? openApproval;
+    private string? openApprovalId;
     private sealed record ModelChoice(string Value, string Label);
     private static SolidColorBrush Brush(byte r, byte g, byte b) => new(Windows.UI.Color.FromArgb(255, r, g, b));
 
@@ -236,6 +238,14 @@ public sealed partial class MainWindow : Window
             local.Save(); taskId = null; busy = false;
         }
         RefreshWorkbench();
+        if (state["permissions"] is JsonArray current)
+        {
+            // Requests the remote no longer has (answered elsewhere, stopped, timed out) close their dialog
+            // and are forgotten, so a stale dialog cannot answer a finished request.
+            var live = current.Select(item => item?["id"]?.GetValue<string>()).OfType<string>().ToHashSet();
+            if (openApprovalId is not null && !live.Contains(openApprovalId)) openApproval?.Hide();
+            approvalDialogs.IntersectWith(live);
+        }
         foreach (var permission in state["permissions"]?.AsArray() ?? [])
         {
             var id = permission!["id"]!.GetValue<string>(); if (!approvalDialogs.Add(id)) continue;
@@ -245,42 +255,142 @@ public sealed partial class MainWindow : Window
     private async Task RequestPermissionAsync(string watched, JsonNode permission, string id)
     {
         await permissionLock.WaitAsync();
+        var answered = false;
         try
         {
-            if (taskId != watched) return;
-            var fields = new Dictionary<string, TextBox>();
-            var panel = new StackPanel { Spacing = 12 };
-            var elicitation = permission["kind"]?.GetValue<string>() == "elicitation";
-            if (permission["name"]?.GetValue<string>() == "AskUserQuestion")
+            // Withdrawn while waiting behind another dialog, or the user switched conversations.
+            if (taskId != watched || !approvalDialogs.Contains(id)) return;
+            string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+            var name = Text(permission["name"]);
+            var elicitation = Text(permission["kind"]) == "elicitation";
+            var question = name == "AskUserQuestion";
+            var plan = name == "ExitPlanMode";
+            var panel = new StackPanel { Spacing = 12, MinWidth = 440 };
+
+            var description = elicitation ? Text(permission["request"]?["message"]) : Text(permission["description"]);
+            if (!string.IsNullOrWhiteSpace(description)) panel.Children.Add(Muted(description));
+
+            var answers = new List<(string Question, List<string> Picked, TextBox Typed)>();
+            if (question)
             {
-                foreach (var question in permission["input"]?["questions"]?.AsArray() ?? [])
+                var index = 0;
+                foreach (var item in permission["input"]?["questions"]?.AsArray() ?? [])
                 {
-                    var label = question!["question"]!.GetValue<string>();
-                    var field = new TextBox { Header = label, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
-                    var options = question["options"]?.AsArray().Select(option => option?["label"]?.GetValue<string>()).ToArray();
-                    if (options?.Length > 0) panel.Children.Add(new TextBlock { Text = string.Join(" / ", options), TextWrapping = TextWrapping.Wrap });
-                    fields[label] = field; panel.Children.Add(field);
+                    var label = Text(item?["question"]); if (label is null) continue;
+                    var multiple = item!["multiSelect"] is JsonValue flag && flag.TryGetValue<bool>(out var on) && on;
+                    var block = new StackPanel { Spacing = 6 };
+                    block.Children.Add(new TextBlock { Text = label + (multiple ? "（可多选）" : ""), TextWrapping = TextWrapping.Wrap, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+                    var picked = new List<string>();
+                    var group = id + "-" + index++;
+                    foreach (var option in item["options"]?.AsArray() ?? [])
+                    {
+                        var text = Text(option?["label"]); if (text is null) continue;
+                        // The label is kept whole, so options containing commas stay one answer.
+                        Microsoft.UI.Xaml.Controls.Primitives.ToggleButton choice = multiple ? new CheckBox { Content = text } : new RadioButton { Content = text, GroupName = group };
+                        choice.Checked += (_, _) => { if (!multiple) picked.Clear(); if (!picked.Contains(text)) picked.Add(text); };
+                        choice.Unchecked += (_, _) => picked.Remove(text);
+                        if (Text(option?["description"]) is { Length: > 0 } hint) ToolTipService.SetToolTip(choice, hint);
+                        block.Children.Add(choice);
+                    }
+                    var typed = new TextBox { PlaceholderText = "或者直接写下你的回答", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
+                    block.Children.Add(typed);
+                    answers.Add((label, picked, typed));
+                    panel.Children.Add(block);
                 }
             }
-            else panel.Children.Add(new TextBlock { Text = permission.ToJsonString(new() { WriteIndented = true }), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+            else if (elicitation)
+                panel.Children.Add(Muted("Windows 版暂不支持此类表单，只能取消；可在 macOS 版中填写。"));
+            else
+            {
+                var (label, body) = PermissionText.Summary(permission);
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    if (label is not null) panel.Children.Add(Muted(label));
+                    panel.Children.Add(new Border
+                    {
+                        Background = ThemeBrush("CardBackgroundFillColorSecondaryBrush"), BorderBrush = ThemeBrush("CardStrokeColorDefaultBrush"),
+                        BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(12, 10, 12, 10),
+                        Child = new TextBlock { Text = body, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
+                    });
+                }
+            }
+
+            CheckBox? remember = null;
+            var rules = PermissionText.RuleLines(permission["suggestions"]);
+            if (!question && !elicitation && rules.Count > 0)
+            {
+                remember = new CheckBox { Content = "以后同类操作不再询问" };
+                var box = new StackPanel { Spacing = 4 };
+                box.Children.Add(remember);
+                foreach (var line in rules)
+                {
+                    var text = Muted((line.Widens ? "⚠ " : "") + line.Action + " · " + line.Scope);
+                    text.Margin = new Thickness(28, 0, 0, 0);
+                    box.Children.Add(text);
+                }
+                panel.Children.Add(new Border
+                {
+                    BorderBrush = ThemeBrush("CardStrokeColorDefaultBrush"), BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6), Padding = new Thickness(12, 8, 12, 10), Child = box,
+                });
+            }
+
+            TextBox? reason = null;
+            if (!question && !elicitation)
+            {
+                reason = new TextBox { PlaceholderText = plan ? "对计划的修改意见（选「拒绝」时发给 Claude）" : "补充说明（可选，拒绝时发给 Claude）", TextWrapping = TextWrapping.Wrap };
+                panel.Children.Add(reason);
+            }
+            var error = new TextBlock { Foreground = Brush(0xC4, 0x2B, 0x1C), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+            panel.Children.Add(error);
+
+            var allowText = question ? "提交回答" : plan ? "开始执行" : "允许这一次";
             var dialog = new ContentDialog
             {
-                XamlRoot = root.XamlRoot, Title = elicitation ? "此交互暂未支持" : fields.Count > 0 ? "Claude 的问题" : "Claude 请求授权",
-                Content = new ScrollViewer { Content = panel, MaxHeight = 400 },
-                PrimaryButtonText = elicitation ? "" : fields.Count > 0 ? "提交" : "允许本次", CloseButtonText = "取消"
+                XamlRoot = root.XamlRoot, Title = PermissionText.Title(permission),
+                Content = new ScrollViewer { Content = panel, MaxHeight = 460 },
+                PrimaryButtonText = elicitation ? "" : allowText, CloseButtonText = elicitation ? "取消" : "拒绝",
+                // Approving is always a deliberate click; Enter never approves.
+                DefaultButton = ContentDialogButton.None,
             };
+            if (remember is not null)
+            {
+                remember.Checked += (_, _) => dialog.PrimaryButtonText = "允许并记住";
+                remember.Unchecked += (_, _) => dialog.PrimaryButtonText = allowText;
+            }
             dialog.PrimaryButtonClick += (_, e) =>
             {
-                if (fields.Values.Any(field => string.IsNullOrWhiteSpace(field.Text))) e.Cancel = true;
+                if (!answers.Any(a => PermissionText.Answer(a.Picked, a.Typed.Text).Length == 0)) return;
+                error.Text = "每个问题都需要回答"; error.Visibility = Visibility.Visible; e.Cancel = true;
             };
-            var allow = await dialog.ShowAsync() == ContentDialogResult.Primary;
-            if (taskId != watched) return;
-            object answer = elicitation ? new { interaction = new { action = "cancel" } } :
-                new { allow, answers = fields.ToDictionary(pair => pair.Key, pair => pair.Value.Text) };
+
+            openApproval = dialog; openApprovalId = id;
+            ContentDialogResult result;
+            try { result = await dialog.ShowAsync(); }
+            finally { openApproval = null; openApprovalId = null; }
+            // Closed because the remote withdrew the request, or the conversation changed: nothing to send.
+            if (taskId != watched || !approvalDialogs.Contains(id)) return;
+
+            var allow = result == ContentDialogResult.Primary;
+            object answer;
+            if (elicitation) answer = new { interaction = new { action = "cancel" } };
+            else if (question && allow) answer = new { allow = true, answers = answers.ToDictionary(a => a.Question, a => PermissionText.Answer(a.Picked, a.Typed.Text)) };
+            else answer = new { allow, useSuggestedPermissions = allow && remember?.IsChecked == true, reason = reason?.Text ?? "" };
             await RequireAgent().TaskCommandAsync(watched, new { kind = "respond", permissionId = id, answer });
+            answered = true;
         }
-        finally { permissionLock.Release(); }
+        finally
+        {
+            // Not answered (switched away, send failed): forget the id so the next update asks again
+            // instead of leaving the remote task waiting on a dialog that will never reappear.
+            if (!answered) approvalDialogs.Remove(id);
+            permissionLock.Release();
+        }
     }
+    private static TextBlock Muted(string text) =>
+        new() { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Foreground = ThemeBrush("TextFillColorSecondaryBrush") };
+    private static Microsoft.UI.Xaml.Media.Brush ThemeBrush(string key) =>
+        (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[key];
     private async Task StopAsync() { if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
     private async Task<string?> PickAsync()
     {

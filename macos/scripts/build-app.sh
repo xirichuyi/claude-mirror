@@ -2,7 +2,7 @@
 # Builds macos/dist/claude-mirror.app. Needs Xcode command line tools, Node.js, and `npm ci` at the repo root.
 set -eu
 cd "$(dirname "$0")/.."
-node scripts/prepare-server.cjs Resources/server
+npm --prefix .. run prepare-server -- "$PWD/Resources/server"
 cargo build --release --locked --manifest-path Helpers/WincPreview/Cargo.toml
 swift build -c "${BUILD_CONFIGURATION:-release}" --product RemoteCC
 STAGING=$(mktemp -d "${TMPDIR:-/tmp}/remotecc-build.XXXXXX")

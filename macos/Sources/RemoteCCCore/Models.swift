@@ -134,6 +134,7 @@ public struct Preferences: Codable, Hashable, Sendable {
     public var selectedModel: String?
     public var effort: String?
     public var permissionMode: String?
+    public var executionUser: String?
     public var fastMode: Bool?
     public var outputStyle: String?
     public var promptCacheTtl: String?
@@ -170,6 +171,12 @@ public struct RemoteAgent: Codable, Hashable, Sendable, Identifiable {
     public var id: String { name }
 }
 
+public struct PermissionStatus: Codable, Hashable, Sendable {
+    public var fullAccessAvailable: Bool
+    public var requiresExecutionUser: Bool
+    public var executionUser: String
+}
+
 public struct Capabilities: Codable, Hashable, Sendable {
     public var commands: [RemoteCommand]
     public var models: [RemoteModel]
@@ -177,6 +184,7 @@ public struct Capabilities: Codable, Hashable, Sendable {
     public var version: String?
     public var outputStyles: [String]?
     public var fetchedAt: Double?
+    public var permissionStatus: PermissionStatus?
     public init(commands: [RemoteCommand] = [], models: [RemoteModel] = []) { self.commands = commands; self.models = models }
 }
 
