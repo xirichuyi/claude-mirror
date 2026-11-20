@@ -253,10 +253,21 @@ public final class ChatEngine {
 
     public func exportMarkdown(_ id: String) throws -> String {
         let session = sessions[try index(id)]
-        let body = session.messages.map { message -> String in
-            let text = message.text ?? (message.blocks ?? []).filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n\n")
-            return "## " + (message.role == "user" ? "User" : "Claude") + "\n\n" + text
+        // A message steered into a reply splits it: Claude, User, Claude.
+        var sections: [(user: Bool, text: [String])] = []
+        for message in session.messages {
+            sections.append((message.role == "user", message.text.map { [$0] } ?? []))
+            guard message.text == nil else { continue }
+            for block in message.blocks ?? [] {
+                guard let text = block.text, block.type == "text" || (block.type == "user" && block.cancelled != true) else { continue }
+                let last = sections.count - 1, user = block.type == "user"
+                if user != sections[last].user {
+                    if sections[last].text.isEmpty { sections[last].user = user } else { sections.append((user, [])) }
+                }
+                sections[sections.count - 1].text.append(text)
+            }
         }
+        let body = sections.map { "## " + ($0.user ? "User" : "Claude") + "\n\n" + $0.text.joined(separator: "\n\n") }
         return "# " + session.name + "\n\n" + body.joined(separator: "\n\n")
     }
 

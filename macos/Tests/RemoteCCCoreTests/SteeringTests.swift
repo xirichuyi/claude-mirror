@@ -39,6 +39,7 @@ final class SteeringTests: XCTestCase {
         XCTAssertEqual(session.messages.last?.blocks?.last?.text, "now")
         XCTAssertEqual(session.messages.last?.blocks?.last?.pending, true)
         XCTAssertEqual(session.status, "permission")
+        XCTAssertTrue(try engine.exportMarkdown(id).hasSuffix("## User\n\nnow"), "an export keeps what the user said mid-reply")
 
         // Typed and sent with the steer shortcut in one step.
         try engine.submit(id, text: "direct", steer: true)
