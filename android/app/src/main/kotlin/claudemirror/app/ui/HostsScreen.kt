@@ -146,6 +146,8 @@ fun HostEditScreen(model: AppModel, id: String, onDone: () -> Unit) {
                     privateKey, { privateKey = it }, field, label = { Text("私钥") }, minLines = 4, maxLines = 8,
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     supportingText = { Text("粘贴私钥文件的全部内容（以 -----BEGIN 开头）。加密保存在本机，不会上传。") },
+                    // A password field to the keyboard: no suggestions, nothing learned from the key.
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 )
                 OutlinedTextField(passphrase, { passphrase = it }, field, label = { Text("私钥口令（没有则留空）") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             }
