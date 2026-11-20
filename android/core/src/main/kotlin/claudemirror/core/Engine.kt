@@ -265,8 +265,10 @@ class Engine(
         val session = session(id) ?: return
         if ((session.remoteTask == null && session.remoteOwner == null) || watchers[id] != null) return
         val host = hostOf(session)
-        ensureInstalled(host)
         val taskId = session.remoteTask?.id ?: session.remoteOwner!!.id
+        ensureInstalled(host)
+        // Installing can take a while; a reply stopped in the meantime must not be started.
+        if (ownerId(id) != taskId || watchers[id] != null) return
         val messageId = session.remoteTask?.messageId ?: session.remoteOwner?.messageId
         val message = session.messages.firstOrNull { it.id == messageId } ?: session.messages.lastOrNull()
         agents.call(host, "task", buildJsonObject {
