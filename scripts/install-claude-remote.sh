@@ -170,7 +170,11 @@ setup_runner() {
     real=$(readlink -f -- "$project")
     # Parents get traversal only; the project itself gets read/write, also for files created later.
     parent=$(dirname "$real")
-    while [ "$parent" != / ]; do setfacl -m "u:$runner:--x" -- "$parent"; parent=$(dirname "$parent"); done
+    while [ "$parent" != / ]; do
+      # A parent the runner can already enter is left alone: it may be an earlier project.
+      as_runner test -x "$parent" || setfacl -m "u:$runner:--x" -- "$parent"
+      parent=$(dirname "$parent")
+    done
     setfacl -R -P -m "u:$runner:rwX" -- "$real"
     find "$real" -type d -exec setfacl -m "d:u:$runner:rwx" -- {} +
     as_runner sh -c 'cd -- "$1" && test -r . && test -w .' sh "$real" || { echo "$runner still cannot write to $real; the filesystem may not support ACLs." >&2; return 1; }
