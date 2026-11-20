@@ -100,7 +100,8 @@ struct RootView: View {
         .tint(WorkbenchTheme.accent)
         .accentColor(WorkbenchTheme.accent)
         .foregroundStyle(WorkbenchTheme.ink)
-        .overlay(alignment: .bottom) {
+        // At the top, clear of the composer and its toolbar.
+        .overlay(alignment: .top) {
             if let toast = model.toast {
                 Text(toast)
                     .font(.callout).padding(.horizontal, 14).padding(.vertical, 9)
@@ -108,7 +109,7 @@ struct RootView: View {
                     .background(WorkbenchTheme.popup, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
                     .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.popupBorder))
                     .shadow(color: WorkbenchTheme.shadow, radius: 16, y: 6)
-                    .padding(.bottom, 24).frame(maxWidth: 650).textSelection(.enabled)
+                    .padding(.top, 12).frame(maxWidth: 650).textSelection(.enabled)
                     .transition(Motion.card(reduce: reduceMotion))
             }
         }
