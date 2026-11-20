@@ -189,13 +189,27 @@ public sealed partial class MainWindow : Window
     private async Task NewConversationAsync()
     {
         if (busy) throw new IOException("请先停止当前回复");
+        await ConfirmLeavingQueueAsync();
         conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); queue.Clear(); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
+    }
+    /// Queued prompts belong to the open conversation. Leaving it asks first; declining keeps the conversation and stops the caller.
+    private async Task ConfirmLeavingQueueAsync()
+    {
+        if (queue.Items.Count == 0) return;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = root.XamlRoot, Title = "还有未发送的消息", Content = $"队列里有 {queue.Items.Count} 条消息还没有发送，离开这个对话会丢弃它们。",
+            PrimaryButtonText = "丢弃并离开", CloseButtonText = "留在这里", DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) throw new IOException("已保留当前对话和未发送的消息");
     }
     private async Task SelectAsync(Conversation selected)
     {
         if (busy) throw new IOException("请先停止当前回复");
-        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; queue.Clear(); RenderQueue(); RenderPermissions(null, null);
+        // Reopening the same conversation keeps its queued prompts.
+        if (!IsCurrent(selected)) { await ConfirmLeavingQueueAsync(); queue.Clear(); }
+        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; RenderQueue(); RenderPermissions(null, null);
         RefreshWorkbench(); RenderHistory();
         var page = await RequireAgent().CallAsync("history", new { operation = "messages", reference = selected.Reference });
         foreach (var message in History.Messages(page["records"] as JsonArray)) AddMessage("", Presentation.Text(message["role"]) == "user").Show(message);

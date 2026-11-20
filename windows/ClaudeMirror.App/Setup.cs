@@ -45,7 +45,7 @@ public sealed partial class MainWindow
 
     private async Task AfterAgentStartedAsync(RemoteAgent connected)
     {
-        availableModels.Clear(); availableCommands.Clear(); selectedModel = null; busy = false;
+        availableModels.Clear(); availableCommands.Clear(); selectedModel = null; busy = false; queue.Clear();
         directory.Text = connected.Home;
         health = MachineHealth.Issues(null, connected.Hello, null);
         await NewConversationAsync(); await RefreshHistoryAsync(); status.Text = "已连接";
