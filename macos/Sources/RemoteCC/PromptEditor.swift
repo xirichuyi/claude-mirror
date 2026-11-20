@@ -4,7 +4,7 @@ import AppKit
 import UniformTypeIdentifiers
 import RemoteCCCore
 
-enum PromptKey { case up, down, tab, enter, escape }
+enum PromptKey { case up, down, tab, enter, commandEnter, escape }
 
 /// NSTextView rather than TextEditor: Enter handling must respect Chinese input-method composition,
 /// which only the AppKit text system can report.
@@ -52,6 +52,7 @@ struct PromptEditor: NSViewRepresentable {
         view.onDropFiles = onDropFiles
         view.acceptsFileDrops = acceptsFileDrops
         view.onFileDrag = onFileDrag
+        view.onCommandReturn = { [weak coordinator = context.coordinator] in coordinator?.parent.handler(.commandEnter) ?? false }
         view.registerForDraggedTypes([.fileURL])
         scroll.documentView = view
         DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
@@ -178,6 +179,16 @@ final class PasteAwareTextView: NSTextView {
         super.concludeDragOperation(sender)
     }
     var placeholder = ""
+    var onCommandReturn: (() -> Bool)?
+
+    /// Command-Return arrives as a key equivalent, never as `insertNewline:`.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.type == .keyDown, window?.firstResponder === self, !hasMarkedText(), event.keyCode == 36 || event.keyCode == 76,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command, let onCommandReturn {
+            return onCommandReturn()
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 
     override func keyDown(with event: NSEvent) {
         // Use the event's modifiers; global modifier state can change before the delegate runs.

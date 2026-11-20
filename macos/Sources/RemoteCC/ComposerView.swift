@@ -143,22 +143,61 @@ struct ComposerArea: View {
 
     @ViewBuilder private func queue(_ session: ChatSession) -> some View {
         if let queue = session.queue, !queue.isEmpty {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(session.queuePaused == true ? "队列已暂停" : "回复完成后依次发送").foregroundStyle(WorkbenchTheme.inkMuted)
-                    if session.queuePaused == true {
-                        Button("继续队列") { model.perform { try model.engine?.resumeQueue(session.id) } }.disabled(!model.isConnected)
+            let paused = session.queuePaused == true
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(paused ? "队列已暂停 · \(queue.count) 条未发送" : "排队 \(queue.count) 条 · 回复完成后依次发送")
+                        .foregroundStyle(WorkbenchTheme.inkMuted)
+                    Spacer(minLength: 8)
+                    if paused {
+                        Button("继续发送") { model.perform { try model.engine?.resumeQueue(session.id) } }
+                            .buttonStyle(WorkbenchButtonStyle()).disabled(!model.isConnected || session.isBusy)
                     }
+                    Button("清空") { model.perform { try model.engine?.clearQueue(session.id) } }
+                        .buttonStyle(QuietButtonStyle()).foregroundStyle(WorkbenchTheme.inkMuted)
                 }
-                ForEach(queue) { item in
-                    HStack {
-                        Text(item.text).lineLimit(1)
-                        Spacer()
-                        Button("取消") { model.perform { try model.engine?.cancelQueued(session.id, item: item.id) } }
-                    }
-                }
+                ForEach(queue) { item in queuedRow(item, session: session) }
             }
-            .font(.caption).controlSize(.small)
+            .font(WorkbenchMetrics.caption)
+            .padding(10).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+        }
+    }
+
+    private func queuedRow(_ item: QueuedMessage, session: ChatSession) -> some View {
+        // While Claude replies, "send now" steers the running reply; otherwise it sends the message first.
+        let steerHelp = session.isBusy ? "立即发送 · Claude 会在下一步读到，不中断当前回复" : "立即发送"
+        return HStack(spacing: 2) {
+            Text(item.text).lineLimit(1).truncationMode(.tail)
+            if !item.attachments.isEmpty {
+                Text("· \(item.attachments.count) 个附件").foregroundStyle(WorkbenchTheme.inkMuted).fixedSize()
+            }
+            Spacer(minLength: 8)
+            Button { model.perform { try await model.engine?.steer(session.id, item: item.id) } } label: { WorkbenchIcon(symbol: "arrow.turn.right.up") }
+                .help(steerHelp).accessibilityLabel("立即发送").disabled(!model.isConnected || session.status == "stopping")
+            Button { model.editQueued(item, in: session.id) } label: { WorkbenchIcon(symbol: "pencil") }
+                .help("放回输入框编辑").accessibilityLabel("编辑")
+            Button { model.perform { try model.engine?.cancelQueued(session.id, item: item.id) } } label: { WorkbenchIcon(symbol: "xmark") }
+                .help("从队列移除").accessibilityLabel("从队列移除")
+        }
+        .buttonStyle(WorkbenchIconButtonStyle(size: 22))
+    }
+
+    /// Context window in use, next to the send button: "128k / 1M".
+    @ViewBuilder private func contextMeter(_ session: ChatSession?) -> some View {
+        if let context = session?.context {
+            let tint = context.fraction >= 0.9 ? WorkbenchTheme.error : context.fraction >= 0.75 ? WorkbenchTheme.warning : WorkbenchTheme.inkMuted
+            Button { model.showUsage = true } label: {
+                HStack(spacing: 5) {
+                    ZStack {
+                        Circle().stroke(WorkbenchTheme.border, lineWidth: 2)
+                        Circle().trim(from: 0, to: context.fraction).stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
+                    }.frame(width: 12, height: 12)
+                    Text(context.label).font(.system(size: 11)).monospacedDigit().lineLimit(1).fixedSize()
+                }.foregroundStyle(tint)
+            }
+            .buttonStyle(QuietButtonStyle())
+            .help("上下文已用 \(Int((context.fraction * 100).rounded()))% · \(Int(context.usedTokens)) / \(Int(context.maxTokens)) tokens")
+            .accessibilityLabel("上下文用量 \(context.label)")
         }
     }
 
@@ -277,24 +316,30 @@ struct ComposerArea: View {
             }
             if session == nil { Spacer() }
             HStack(spacing: 8) {
+                contextMeter(session)
                 if busy && canSend {
+                    Button { send(steer: true) } label: { WorkbenchIcon(symbol: "arrow.turn.right.up") }
+                        .buttonStyle(ComposerActionStyle())
+                        .help("立即发送 · ⌘ Enter · Claude 会在下一步读到，不中断当前回复").accessibilityLabel("立即发送")
                     Button { send() } label: { WorkbenchIcon(symbol: "text.badge.plus") }
                         .buttonStyle(ComposerActionStyle())
-                        .help("加入队列").accessibilityLabel("加入队列")
+                        .help("加入队列 · Enter · 回复完成后发送").accessibilityLabel("加入队列")
                 }
+                // Esc is this button's key equivalent, so it stops the reply wherever the focus is.
                 Button { if busy { model.stop() } else { send() } } label: {
                     WorkbenchIcon(symbol: busy ? "stop.fill" : "arrow.up")
                 }
                 .buttonStyle(ComposerActionStyle())
-                .help(busy ? "停止生成" : "发送消息 · Enter 发送，Shift + Enter 换行")
-                .accessibilityLabel(busy ? "停止生成" : "发送消息")
+                .keyboardShortcut(busy ? KeyboardShortcut.cancelAction : nil)
+                .help(busy ? (session?.status == "stopping" ? "正在停止…" : "停止 · Esc") : "发送消息 · Enter 发送，Shift + Enter 换行")
+                .accessibilityLabel(busy ? "停止" : "发送消息")
                 .disabled(busy ? session?.status == "stopping" || !model.isConnected : !canSend)
             }
 
         }
     }
 
-    private func send() {
+    private func send(steer: Bool = false) {
         guard canSend else { return }
         if model.active == nil {
             let draft = text.wrappedValue
@@ -308,7 +353,7 @@ struct ComposerArea: View {
                 model.select(session.id)
                 model.submit(text: draft)
             }
-        } else { model.submit(text: text.wrappedValue) }
+        } else { model.submit(text: text.wrappedValue, steer: steer) }
     }
 
     private func handleKey(_ key: PromptKey) -> Bool {
@@ -317,7 +362,7 @@ struct ComposerArea: View {
             case .up: selection = (selection - 1 + completions.count) % completions.count; return true
             case .down: selection = (selection + 1) % completions.count; return true
             case .tab: choose(completions[min(selection, completions.count - 1)], execute: false); return true
-            case .enter: choose(completions[min(selection, completions.count - 1)], execute: true); return true
+            case .enter, .commandEnter: choose(completions[min(selection, completions.count - 1)], execute: true); return true
             case .escape: dismissedText = text.wrappedValue; return true
             }
         }
@@ -325,13 +370,15 @@ struct ComposerArea: View {
             switch key {
             case .up: selection = (selection - 1 + mentions.count) % mentions.count; return true
             case .down: selection = (selection + 1) % mentions.count; return true
-            case .tab, .enter: chooseMention(mentions[min(selection, mentions.count - 1)]); return true
+            case .tab, .enter, .commandEnter: chooseMention(mentions[min(selection, mentions.count - 1)]); return true
             case .escape: mentions = []; return true
             }
         }
         switch key {
         case .enter: send(); return true
+        case .commandEnter: send(steer: true); return true
         case .escape:
+            // Esc never sends or clears the draft; it only stops a running reply.
             if model.active?.isBusy == true { model.stop(); return true }
             return false
         default: return false
