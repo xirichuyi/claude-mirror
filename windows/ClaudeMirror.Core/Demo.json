@@ -1,0 +1,236 @@
+{
+ "file.hello": {
+  "home": "/home/dev",
+  "node": "v22.11.0",
+  "nodeSupported": true,
+  "claude": "/home/dev/.local/bin/claude"
+ },
+ "file.claudeStatus": {
+  "claude": "2.1.0",
+  "auth": "loggedIn"
+ },
+ "history.list": {
+  "sessions": [
+   {
+    "name": "刷新令牌改成一次性",
+    "directory": "/home/dev/projects/atlas-api",
+    "sessionId": "s-auth",
+    "reference": "ref-auth"
+   },
+   {
+    "name": "排查支付回调超时",
+    "directory": "/home/dev/projects/atlas-api",
+    "sessionId": "s-pay",
+    "reference": "ref-pay"
+   },
+   {
+    "name": "给订单表加索引",
+    "directory": "/home/dev/projects/atlas-api",
+    "sessionId": "s-index",
+    "reference": "ref-index"
+   },
+   {
+    "name": "首页首屏加载优化",
+    "directory": "/home/dev/projects/atlas-web",
+    "sessionId": "s-web",
+    "reference": "ref-web"
+   },
+   {
+    "name": "升级到 React 19",
+    "directory": "/home/dev/projects/atlas-web",
+    "sessionId": "s-react",
+    "reference": "ref-react"
+   },
+   {
+    "name": "整理部署脚本",
+    "directory": "/home/dev/ops/deploy",
+    "sessionId": "s-ops",
+    "reference": "ref-ops"
+   }
+  ]
+ },
+ "history.messages": {
+  "records": [
+   {
+    "type": "user",
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "这个对话的内容没有包含在演示数据里。"
+      }
+     ]
+    }
+   }
+  ],
+  "before": null
+ },
+ "history.messages:ref-auth": {
+  "records": [
+   {
+    "type": "user",
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "帮我看一下登录流程，刷新令牌现在可以重复使用，我想改成只能用一次。"
+      }
+     ]
+    }
+   },
+   {
+    "type": "assistant",
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "先确认刷新令牌在哪里校验。"
+      },
+      {
+       "type": "text",
+       "text": "我先看一下 `src/auth/refresh.ts` 里现在是怎么校验的。"
+      },
+      {
+       "type": "tool_use",
+       "id": "h1",
+       "name": "Read",
+       "input": {
+        "file_path": "/home/dev/projects/atlas-api/src/auth/refresh.ts"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "type": "user",
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "好，直接改吧，改完跑一下测试。"
+      }
+     ]
+    }
+   }
+  ],
+  "directory": "/home/dev/projects/atlas-api",
+  "before": null
+ },
+ "task.inspect": {
+  "models": [
+   {
+    "value": "",
+    "displayName": "默认（推荐）"
+   },
+   {
+    "value": "opus",
+    "displayName": "Opus"
+   },
+   {
+    "value": "sonnet",
+    "displayName": "Sonnet"
+   },
+   {
+    "value": "haiku",
+    "displayName": "Haiku"
+   }
+  ],
+  "commands": [
+   {
+    "name": "compact",
+    "description": "压缩对话上下文"
+   },
+   {
+    "name": "review",
+    "description": "审查当前改动"
+   },
+   {
+    "name": "init",
+    "description": "生成 CLAUDE.md"
+   }
+  ]
+ },
+ "task.install": {},
+ "task.start": {},
+ "task.command": {
+  "ok": true
+ },
+ "taskWatch:00000000-0000-4000-8000-000000000001": {
+  "version": 1,
+  "status": "working",
+  "remoteSessionId": "s-auth",
+  "permissions": [],
+  "message": {
+   "id": "m-live",
+   "role": "assistant",
+   "blocks": [
+    {
+     "type": "thinking",
+     "text": "用户想让刷新令牌只能用一次。先看现有实现，再决定在哪里做吊销。"
+    },
+    {
+     "type": "tool",
+     "id": "t1",
+     "name": "Read",
+     "input": {
+      "file_path": "/home/dev/projects/atlas-api/src/auth/refresh.ts"
+     },
+     "status": "done",
+     "output": "export async function refresh(token: string): Promise<Session> {\n  const record = await store.find(token);\n  ..."
+    },
+    {
+     "type": "tool",
+     "id": "t2",
+     "name": "Grep",
+     "input": {
+      "pattern": "refresh\\(",
+      "path": "src"
+     },
+     "status": "done",
+     "output": "src/auth/refresh.ts:1\nsrc/routes/session.ts:42\ntest/auth.test.ts:88"
+    },
+    {
+     "type": "tool",
+     "id": "t3",
+     "name": "Edit",
+     "input": {
+      "file_path": "/home/dev/projects/atlas-api/src/auth/refresh.ts",
+      "old_string": "  if (record.expiresAt < Date.now()) throw new AuthError('expired');\n  return store.issue(record.userId);",
+      "new_string": "  if (record.expiresAt < Date.now()) throw new AuthError('expired');\n  // Rotate: the old refresh token is revoked in the same transaction.\n  return store.transaction(async tx => {\n    await tx.revoke(record.id);\n    return tx.issue(record.userId, { ttl: 30 * 24 * 3600 });\n  });"
+     },
+     "status": "done",
+     "output": "The file has been updated."
+    },
+    {
+     "type": "tool",
+     "id": "t4",
+     "name": "Bash",
+     "input": {
+      "command": "npm test -- auth",
+      "description": "运行认证相关测试"
+     },
+     "status": "error",
+     "output": "FAIL test/auth.test.ts\n  ● refresh › rejects a replayed token\n    expected 401, received 200\nTests: 1 failed, 14 passed, 15 total"
+    },
+    {
+     "type": "text",
+     "text": "## 登录流程梳理\n\n刷新令牌现在是**一次性**的：每次刷新都会吊销旧令牌并签发新令牌，见 `src/auth/refresh.ts`。\n\n1. 客户端带着刷新令牌请求 `/api/refresh`\n2. 服务端校验令牌未吊销、未过期\n3. 在同一个事务里吊销旧令牌并签发新令牌\n\n> 注意：吊销是不可逆的，重放旧令牌会直接返回 `invalid_token`。\n\n```ts\nexport async function refresh(token: string): Promise<Session> {\n  const record = await store.find(token);\n  if (!record || record.revoked) throw new AuthError('invalid_token');\n  if (record.expiresAt < Date.now()) throw new AuthError('expired');\n  // Rotate: the old refresh token is revoked in the same transaction.\n  return store.transaction(async tx => {\n    await tx.revoke(record.id);\n    return tx.issue(record.userId, { ttl: 30 * 24 * 3600 });\n  });\n}\n```\n\n| 场景 | 状态码 | 说明 |\n| --- | --- | --- |\n| 令牌有效 | 200 | 返回新的访问令牌和刷新令牌 |\n| 令牌已吊销 | 401 | `invalid_token`，需要重新登录 |\n| 令牌过期 | 401 | `expired`，需要重新登录 |\n\n迁移脚本比较长，完整列表如下：\n\n```ts\nconst steps = {\n  step01: await migrate('0001_add_index_1.sql'), // batch 0\n  step02: await migrate('0002_add_index_2.sql'), // batch 0\n  step03: await migrate('0003_add_index_3.sql'), // batch 0\n  step04: await migrate('0004_add_index_4.sql'), // batch 0\n  step05: await migrate('0005_add_index_5.sql'), // batch 0\n  step06: await migrate('0006_add_index_6.sql'), // batch 0\n  step07: await migrate('0007_add_index_7.sql'), // batch 0\n  step08: await migrate('0008_add_index_8.sql'), // batch 0\n  step09: await migrate('0009_add_index_9.sql'), // batch 0\n  step10: await migrate('0010_add_index_10.sql'), // batch 1\n  step11: await migrate('0011_add_index_11.sql'), // batch 1\n  step12: await migrate('0012_add_index_12.sql'), // batch 1\n  step13: await migrate('0013_add_index_13.sql'), // batch 1\n  step14: await migrate('0014_add_index_14.sql'), // batch 1\n  step15: await migrate('0015_add_index_15.sql'), // batch 1\n  step16: await migrate('0016_add_index_16.sql'), // batch 1\n  step17: await migrate('0017_add_index_17.sql'), // batch 1\n  step18: await migrate('0018_add_index_18.sql'), // batch 1\n  step19: await migrate('0019_add_index_19.sql'), // batch 1\n  step20: await migrate('0020_add_index_20.sql'), // batch 2\n  step21: await migrate('0021_add_index_21.sql'), // batch 2\n  step22: await migrate('0022_add_index_22.sql'), // batch 2\n  step23: await migrate('0023_add_index_23.sql'), // batch 2\n  step24: await migrate('0024_add_index_24.sql'), // batch 2\n  step25: await migrate('0025_add_index_25.sql'), // batch 2\n  step26: await migrate('0026_add_index_26.sql'), // batch 2\n  step27: await migrate('0027_add_index_27.sql'), // batch 2\n  step28: await migrate('0028_add_index_28.sql'), // batch 2\n  step29: await migrate('0029_add_index_29.sql'), // batch 2\n  step30: await migrate('0030_add_index_30.sql'), // batch 3\n  step31: await migrate('0031_add_index_31.sql'), // batch 3\n  step32: await migrate('0032_add_index_32.sql'), // batch 3\n  step33: await migrate('0033_add_index_33.sql'), // batch 3\n  step34: await migrate('0034_add_index_34.sql'), // batch 3\n  step35: await migrate('0035_add_index_35.sql'), // batch 3\n  step36: await migrate('0036_add_index_36.sql'), // batch 3\n  step37: await migrate('0037_add_index_37.sql'), // batch 3\n  step38: await migrate('0038_add_index_38.sql'), // batch 3\n  step39: await migrate('0039_add_index_39.sql'), // batch 3\n  step40: await migrate('0040_add_index_40.sql'), // batch 4\n  step41: await migrate('0041_add_index_41.sql'), // batch 4\n  step42: await migrate('0042_add_index_42.sql'), // batch 4\n  step43: await migrate('0043_add_index_43.sql'), // batch 4\n  step44: await migrate('0044_add_index_44.sql'), // batch 4\n  step45: await migrate('0045_add_index_45.sql'), // batch 4\n  step46: await migrate('0046_add_index_46.sql'), // batch 4\n  step47: await migrate('0047_add_index_47.sql'), // batch 4\n  step48: await migrate('0048_add_index_48.sql'), // batch 4\n  step49: await migrate('0049_add_index_49.sql'), // batch 4\n  step50: await migrate('0050_add_index_50.sql'), // batch 5\n  step51: await migrate('0051_add_index_51.sql'), // batch 5\n  step52: await migrate('0052_add_index_52.sql'), // batch 5\n  step53: await migrate('0053_add_index_53.sql'), // batch 5\n  step54: await migrate('0054_add_index_54.sql'), // batch 5\n  step55: await migrate('0055_add_index_55.sql'), // batch 5\n  step56: await migrate('0056_add_index_56.sql'), // batch 5\n  step57: await migrate('0057_add_index_57.sql'), // batch 5\n  step58: await migrate('0058_add_index_58.sql'), // batch 5\n  step59: await migrate('0059_add_index_59.sql'), // batch 5\n  step60: await migrate('0060_add_index_60.sql'), // batch 6\n};\n```\n"
+    },
+    {
+     "type": "tool",
+     "id": "t5",
+     "name": "Bash",
+     "input": {
+      "command": "npm test -- auth",
+      "description": "修复后重新运行测试"
+     },
+     "status": "running"
+    }
+   ]
+  }
+ }
+}
