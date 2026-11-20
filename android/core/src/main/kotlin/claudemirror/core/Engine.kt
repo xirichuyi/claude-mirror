@@ -192,7 +192,13 @@ class Engine(
                 remoteTask = RemoteTask(id = owner?.id ?: newId(), prompt = value, messageId = reply.id, continuation = owner != null),
             )
         }
-        scope.launch { if (owner != null) continueTurn(id) else attach(id) }
+        // The task ID is on disk before the server hears of it, so a reply started
+        // just before the app is killed can still be found afterwards.
+        val saved = written
+        scope.launch {
+            saved?.join()
+            if (owner != null) continueTurn(id) else attach(id)
+        }
     }
 
     /** Gives the prompt to the worker that is still alive from the previous reply. */
