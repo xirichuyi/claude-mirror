@@ -71,19 +71,36 @@ extension EnvironmentValues {
         }
         window.makeFirstResponder(self); scope.clear()
         let anchor = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        var scrolling: NSScrollView?
         while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantFuture, inMode: .eventTracking, dequeue: true) {
-            scope.select(from: self, anchor: anchor, to: next.locationInWindow)
-            if next.type == .leftMouseUp { break }
-            // Code and tables have their own horizontal scroller. Drag selection
-            // must still reach the outer conversation's vertical scroller.
-            var ancestor = superview
-            var vertical: NSScrollView?
-            while let view = ancestor {
-                if let scroll = view as? NSScrollView,
-                   (scroll.documentView?.bounds.height ?? 0) > scroll.contentView.bounds.height + 1 { vertical = scroll }
-                ancestor = view.superview
+            var point = next.locationInWindow
+            if next.type == .leftMouseDragged {
+                scrolling = nil
+                // Code and tables have their own scroller. A capped code block scrolls first, and the
+                // selection ends inside it until it has no more lines that way; then the drag reaches
+                // the outer conversation's vertical scroller.
+                var ancestor = superview
+                var vertical: NSScrollView?
+                while let view = ancestor {
+                    if let scroll = view as? NSScrollView,
+                       (scroll.documentView?.bounds.height ?? 0) > scroll.contentView.bounds.height + 1 { vertical = scroll }
+                    ancestor = view.superview
+                }
+                if let inner = enclosingScrollView, inner !== vertical, inner.enclosingScrollView != nil,
+                   (inner.documentView?.bounds.height ?? 0) > inner.contentView.bounds.height + 1,
+                   inner.contentView.autoscroll(with: next) {
+                    scrolling = inner
+                } else {
+                    (vertical ?? enclosingScrollView)?.contentView.autoscroll(with: next)
+                }
             }
-            (vertical ?? enclosingScrollView)?.contentView.autoscroll(with: next)
+            // Releasing while the block still scrolls ends the selection in it too.
+            if let scrolling {
+                let rect = scrolling.contentView.convert(scrolling.contentView.bounds, to: nil)
+                point.y = min(max(point.y, rect.minY + 1), rect.maxY - 1)
+            }
+            scope.select(from: self, anchor: anchor, to: point)
+            if next.type == .leftMouseUp { break }
         }
     }
 }
