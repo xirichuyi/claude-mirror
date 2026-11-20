@@ -424,6 +424,8 @@ class Engine(
     /**
      * The server entry now points at another machine or account. What ran on the old one
      * stays there: nothing unfinished is sent to the new one, and it is set up from scratch.
+     * Messages still waiting in the queue were written for the old machine and are dropped,
+     * so a later reply cannot send them to the new one.
      */
     fun endpointChanged(host: String) {
         installs.remove(host)
@@ -435,7 +437,7 @@ class Engine(
                     messages = it.messages.map { message -> if (message.id == reply) message.copy(interrupted = true) else message },
                     status = if (it.isBusy) "stopped" else it.status, permissions = emptyList(), transportError = null,
                     remoteTask = null, remoteOwner = null, remoteSessionId = null,
-                    queuePaused = it.queuePaused || it.queue.isNotEmpty(),
+                    queue = emptyList(), queuePaused = false,
                 )
             }
         }

@@ -242,7 +242,7 @@ class EngineTest {
         assertNull(left.remoteOwner)
         assertNull(left.remoteSessionId)
         assertTrue(left.messages.last().interrupted == true)
-        assertTrue(left.queuePaused)
+        assertTrue(left.queue.isEmpty())
 
         // Nothing of the old conversation reaches the new machine by itself, and it is set up again.
         engine.restore(testHost)
@@ -250,6 +250,13 @@ class EngineTest {
         assertEquals(1, agent.starts().size)
         engine.send(session.id, "new machine")
         until("a new task starts") { agent.starts().size == 2 }
+        val next = current(session.id).remoteTask!!
+        until("the new worker is followed") { agent.follows(next.id) }
+        agent.emit(next.id, state(next, 1, "idle", "hello", ""","done":true"""))
+        until("the new reply ends") { current(session.id).remoteTask == null }
+        delay(200)
+        assertEquals("the old queued message must not follow", 2, agent.starts().size)
+        assertTrue(agent.commands("send").isEmpty())
         assertEquals(2, agent.calls.count { it.operation == "installed" })
         assertEquals("new machine", agent.starts().last()["request"]!!.jsonObject["prompt"].string())
         assertNull(agent.starts().last()["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"])
