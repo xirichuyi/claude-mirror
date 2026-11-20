@@ -1,0 +1,1 @@
+D="$(dirname "@AGENT@")"; T="$D/.install.$$"; mkdir -p "$D" && chmod 700 "$D" && cat > "$T" && [ "$(wc -c < "$T" | tr -d ' ')" = "@SIZE@" ] && mv "$T" "@AGENT@" || { rm -f "$T"; echo "无法写入远端代理程序" >&2; exit 1; }

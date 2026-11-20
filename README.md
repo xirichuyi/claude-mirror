@@ -18,6 +18,7 @@
 | Intel Mac | 可尝试使用对应 Mac 从源码构建；本次不提供已验证的 Intel 安装包 |
 | Electron 客户端 | 仓库保留跨平台实现，可从源码启动；与原生版功能尚未完全一致 |
 | Windows 原生客户端（预览） | C# / WinUI 3，Windows 10 1809+ / Windows 11 x64；从[统一稳定发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载 `Claude-Mirror-Setup-x64.exe`；首次统一发布之前使用 [Windows 首发安装包](https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.1-windows.1/Claude-Mirror-Setup-x64.exe)；[使用与构建说明](windows/README.md)，[下载 CI 工件](https://github.com/xirichuyi/claude-mirror/actions/workflows/windows.yml) |
+| Android 客户端（预览） | Kotlin / Jetpack Compose，Android 8.0+；目前从源码构建，见“[Android 客户端](#android-客户端)” |
 | Linux 本地客户端 | 可尝试 Electron 源码版本；未完成发行验收 |
 | 远端服务器 | 通过 SSH 访问；主要验证 Linux。安装脚本支持 Linux、macOS、WSL 的 Linux 环境 |
 
@@ -142,6 +143,29 @@ npm start
 ```
 
 此入口启动跨平台 Electron 界面，不会启动 SwiftUI 客户端。需要本机 Node.js、npm 和系统 OpenSSH；Linux 还需要图形桌面及 Electron 运行依赖。Windows/Linux 尚需平台验证，旧界面也不包含所有原生版新功能。
+
+### Android 客户端
+
+```sh
+cd android
+./gradlew assembleDebug        # 产物：app/build/outputs/apk/debug/app-debug.apk
+./gradlew test                 # 引擎与协议测试，会在本机运行真实的远端代理
+```
+
+需要 JDK 17、Android SDK（`compileSdk 37`）和 Node.js：构建时会用仓库里的 TypeScript 源码生成随 App 携带的服务端程序。
+
+手机端和 macOS 版走同一套 SSH 协议，不经过任何中转服务：
+
+- 添加服务器（地址、端口、用户名、项目目录），用密码或粘贴的私钥登录。密码和私钥用 Android Keystore 加密保存在本机。
+- 第一次连接要核对并确认服务器的密钥指纹；之后指纹变了会拒绝连接。
+- 对话、流式回复、工具调用、权限确认和 Claude 的提问。
+- 回复过程中可以排队或插队，队列可编辑、移除、清空；停止后队列暂停。
+- 输入框上方显示上下文已用 / 总量（需要服务端支持）。
+- 切到后台或断网不影响服务器上的回复，回到前台自动接回。
+
+目前没有的：导入服务器上已有的 Claude 历史、附件上传、模型切换、MCP 表单填写。
+
+`SshEndToEndTest` 默认跳过；设置 `CLAUDE_MIRROR_E2E_HOST` 等环境变量后，会通过真实 SSH 对一台准备好的服务器跑完整对话（说明见该文件开头）。
 
 ### 自行打包 DMG
 
