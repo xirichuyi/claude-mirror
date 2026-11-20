@@ -316,6 +316,7 @@ public sealed partial class MainWindow : Window
         var remote = RequireAgent(); var preview = await remote.CallAsync("file", new { operation = "preview", path, @base = directory.Text });
         if (!ReferenceEquals(remote,agent) || host==null) return;
         if ((string?)preview["kind"]=="text") { OpenTextEditor(path,LocalState.HostKey(host),preview);return; }
+        if ((string?)preview["kind"]=="pdf") { await OpenPdfAsync(path);return; }
         UIElement content = new TextBlock { Text = preview["text"]?.GetValue<string>() ?? "此文件请下载后查看", IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap };
         if (preview["kind"]?.GetValue<string>() == "image")
         {
