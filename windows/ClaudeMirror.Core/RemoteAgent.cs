@@ -153,10 +153,12 @@ public sealed class RemoteAgent : IDisposable
         return agent;
     }
     /// <summary>Proves a key logs in on its own, pinning the host fingerprint already trusted for this host.</summary>
-    public static async Task VerifyKeyLoginAsync(HostProfile profile, string expectedFingerprint)
+    /// <param name="via">The live connection to this host. When it goes through a jump host, the check uses the same relay.</param>
+    public static async Task VerifyKeyLoginAsync(HostProfile profile, string expectedFingerprint, RemoteAgent? via = null)
     {
         using var key = new PrivateKeyFile(profile.KeyFile!);
-        using var probe = new SshClient(new ConnectionInfo(profile.Host, profile.Port, profile.User, new PrivateKeyAuthenticationMethod(profile.User, key)) { Timeout = TimeSpan.FromSeconds(20) });
+        var (address, port) = via?.tunnel is { IsStarted: true } relay ? ("127.0.0.1", (int)relay.BoundPort) : (profile.Host, profile.Port);
+        using var probe = new SshClient(new ConnectionInfo(address, port, profile.User, new PrivateKeyAuthenticationMethod(profile.User, key)) { Timeout = TimeSpan.FromSeconds(20) });
         probe.HostKeyReceived += (_, e) => e.CanTrust = "SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(e.HostKey)).TrimEnd('=') == expectedFingerprint;
         await Task.Run(() => { probe.Connect(); probe.Disconnect(); });
     }
