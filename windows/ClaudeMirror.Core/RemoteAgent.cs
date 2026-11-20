@@ -9,6 +9,7 @@ public sealed class RemoteAgent : IDisposable
 {
     private SshClient? ssh, jump;
     private ForwardedPortLocal? tunnel;
+    private readonly Dictionary<int, (Tunnel Tunnel, ForwardedPortLocal Port)> forwards = [];
     private SshCommand? command;
     private StreamWriter? writer;
     private readonly SemaphoreSlim writeLock = new(1);
@@ -255,8 +256,41 @@ public sealed class RemoteAgent : IDisposable
         if (upload.ExitStatus != 0) throw new IOException(upload.Error);
         return remote;
     }
+    /// <summary>Makes a port on the server's loopback reachable at 127.0.0.1 on this computer for as long as the connection lasts.</summary>
+    public void Forward(Tunnel tunnel)
+    {
+        if (tunnel.LocalPort is < 1 or > 65535 || tunnel.RemotePort is < 1 or > 65535) throw new ArgumentException("端口需在 1–65535 之间");
+        if (ssh is null || !ssh.IsConnected) throw new IOException("请先连接服务器");
+        lock (forwards)
+        {
+            if (forwards.ContainsKey(tunnel.LocalPort)) throw new IOException($"本地端口 {tunnel.LocalPort} 已在转发");
+            var port = new ForwardedPortLocal("127.0.0.1", (uint)tunnel.LocalPort, "127.0.0.1", (uint)tunnel.RemotePort);
+            ssh.AddForwardedPort(port);
+            try { port.Start(); }
+            catch (System.Net.Sockets.SocketException e)
+            {
+                ssh.RemoveForwardedPort(port); port.Dispose();
+                throw new IOException($"无法监听本地端口 {tunnel.LocalPort}：{e.Message}", e);
+            }
+            forwards[tunnel.LocalPort] = (tunnel, port);
+        }
+    }
+
+    public void CloseForward(int localPort)
+    {
+        lock (forwards)
+        {
+            if (!forwards.Remove(localPort, out var entry)) return;
+            try { entry.Port.Stop(); ssh?.RemoveForwardedPort(entry.Port); } catch (Exception e) when (e is ObjectDisposedException or Renci.SshNet.Common.SshException) { }
+            entry.Port.Dispose();
+        }
+    }
+
+    public IReadOnlyList<Tunnel> Tunnels { get { lock (forwards) return forwards.Values.Select(entry => entry.Tunnel).OrderBy(tunnel => tunnel.LocalPort).ToList(); } }
+
     public void Dispose()
     {
+        foreach (var tunnel in Tunnels) CloseForward(tunnel.LocalPort);
         lifetime.Cancel(); writer?.Dispose(); command?.Dispose(); ssh?.Dispose(); tunnel?.Dispose(); jump?.Dispose();
         foreach (var request in requests.Values) request.TrySetCanceled(); requests.Clear(); watches.Clear();
     }

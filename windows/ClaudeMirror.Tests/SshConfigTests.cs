@@ -43,4 +43,15 @@ public class SshConfigTests
         Assert.Throws<ArgumentException>(() => SshConfig.Jump("a,b", "me", null));
         Assert.Throws<ArgumentException>(() => SshConfig.Jump("gate:0", "me", null));
     }
+
+    [Fact]
+    public void ForwardingNeedsValidPortsAndAConnection()
+    {
+        using var agent = new RemoteAgent();
+        Assert.Throws<ArgumentException>(() => agent.Forward(new Tunnel(0, 3000)));
+        Assert.Throws<ArgumentException>(() => agent.Forward(new Tunnel(3000, 70000)));
+        Assert.Throws<IOException>(() => agent.Forward(new Tunnel(3000, 3000)));
+        Assert.Empty(agent.Tunnels);
+        agent.CloseForward(3000);
+    }
 }

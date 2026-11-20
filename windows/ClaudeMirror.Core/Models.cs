@@ -5,6 +5,8 @@ namespace ClaudeMirror.Core;
 
 /// <param name="ProxyJump">One jump host as <c>user@host[:port]</c>; it logs in with <paramref name="JumpKeyFile"/> (the host's own key file when null).</param>
 public sealed record HostProfile(string Name, string Host, int Port, string User, string? KeyFile = null, string? ProxyJump = null, string? JumpKeyFile = null);
+/// <summary>A port on the server's loopback made reachable on this computer's loopback.</summary>
+public sealed record Tunnel(int LocalPort, int RemotePort);
 public sealed record Conversation(string Name, string Directory, string? SessionId, string? Reference)
 {
     public override string ToString() => Name;

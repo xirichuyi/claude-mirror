@@ -1,5 +1,6 @@
 using ClaudeMirror.Core;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 
 namespace ClaudeMirror.App;
 
@@ -53,7 +54,9 @@ public sealed partial class MainWindow
                 continue;
             }
             if (attempt.IsCancellationRequested || host != profile) { next.Dispose(); return; }
+            var tunnels = agent?.Tunnels ?? [];
             agent?.Dispose(); agent = next;
+            foreach (var tunnel in tunnels) try { next.Forward(tunnel); } catch (IOException) { } // A port taken meanwhile is simply not restored.
             next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
             await RunAsync(async () =>
             {
@@ -65,5 +68,42 @@ public sealed partial class MainWindow
             RefreshWorkbench();
             return;
         }
+    }
+
+    private readonly StackPanel tunnelList = new() { Spacing = 6 };
+
+    /// Port forwarding: a port on the server's loopback opened at 127.0.0.1 on this computer, until it is closed or the app disconnects.
+    private FrameworkElement TunnelPanel()
+    {
+        var localPort = new NumberBox { Header = "本地端口", Minimum = 1, Maximum = 65535, Width = 120 };
+        var remotePort = new NumberBox { Header = "服务器端口", Minimum = 1, Maximum = 65535, Width = 120 };
+        var add = Button("转发", () =>
+        {
+            if (double.IsNaN(localPort.Value) || double.IsNaN(remotePort.Value)) throw new IOException("请填写两个端口");
+            RequireSsh().Forward(new Tunnel((int)localPort.Value, (int)remotePort.Value));
+            localPort.Value = double.NaN; remotePort.Value = double.NaN; RenderTunnels();
+            return Task.CompletedTask;
+        });
+        add.VerticalAlignment = VerticalAlignment.Bottom;
+        var panel = new StackPanel { Spacing = 12, Width = 340 };
+        panel.Children.Add(new TextBlock { Text = "端口转发", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink });
+        panel.Children.Add(new TextBlock { Text = "把服务器上只在本机监听的端口（例如开发服务器）接到这台电脑的 127.0.0.1。", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(Row(localPort, remotePort, add)); panel.Children.Add(tunnelList);
+        RenderTunnels();
+        return panel;
+    }
+
+    private RemoteAgent RequireSsh() => agent is { SshConnected: true } connected ? connected : throw new IOException("请先连接服务器");
+
+    private void RenderTunnels()
+    {
+        tunnelList.Children.Clear();
+        foreach (var tunnel in agent?.Tunnels ?? [])
+        {
+            var open = new HyperlinkButton { Content = $"localhost:{tunnel.LocalPort} → 服务器 {tunnel.RemotePort}", NavigateUri = new Uri($"http://127.0.0.1:{tunnel.LocalPort}"), Padding = new Thickness(0) };
+            var close = Button("关闭", () => { agent?.CloseForward(tunnel.LocalPort); RenderTunnels(); return Task.CompletedTask; });
+            tunnelList.Children.Add(Row(open, close));
+        }
+        if (tunnelList.Children.Count == 0) tunnelList.Children.Add(new TextBlock { Text = "还没有转发的端口", FontSize = 12, Foreground = muted });
     }
 }

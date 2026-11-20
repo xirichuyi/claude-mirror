@@ -209,7 +209,9 @@ public sealed partial class MainWindow
         project.Flyout = new Flyout { Content = directory };
         var editors = ActionButton("切换文件编辑器","\uE8A5",()=>{ if(openFiles.Count==0)return BrowseAsync(); showEditor=!showEditor;LayoutSplit();return Task.CompletedTask; });
         var more=ActionButton("更多操作","\uE712",()=>Task.CompletedTask);
-        more.Flyout=new Flyout { Content=new StackPanel {Children={project,editors,update}} };
+        var tunnels=ActionButton("端口转发","\uE968",()=>Task.CompletedTask,true);
+        var tunnelFlyout=new Flyout { Content=TunnelPanel() }; tunnelFlyout.Opening+=(_,_)=>RenderTunnels(); tunnels.Flyout=tunnelFlyout;
+        more.Flyout=new Flyout { Content=new StackPanel {Children={project,editors,tunnels,update}} };
         restartButton=ActionButton("重启更新","\uE895",InstallUpdateAsync,true);
         restartButton.Visibility=Visibility.Collapsed;
         var headerActions = Row(restartButton,files,more);
