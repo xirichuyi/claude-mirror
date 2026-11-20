@@ -362,7 +362,7 @@ struct ComposerArea: View {
             case .up: selection = (selection - 1 + completions.count) % completions.count; return true
             case .down: selection = (selection + 1) % completions.count; return true
             case .tab: choose(completions[min(selection, completions.count - 1)], execute: false); return true
-            case .enter, .commandEnter: choose(completions[min(selection, completions.count - 1)], execute: true); return true
+            case .enter, .commandEnter: choose(completions[min(selection, completions.count - 1)], execute: true, steer: key == .commandEnter); return true
             case .escape: dismissedText = text.wrappedValue; return true
             }
         }
@@ -396,13 +396,13 @@ struct ComposerArea: View {
         }
     }
 
-    private func choose(_ command: RemoteCommand, execute: Bool) {
+    private func choose(_ command: RemoteCommand, execute: Bool, steer: Bool = false) {
         guard let token = CommandCompletion.token(text.wrappedValue, caret: caret) else { return }
         let completed = CommandCompletion.complete(text.wrappedValue, stop: token.stop, command: command)
         text.wrappedValue = completed
         dismissedText = completed
         caret = (completed as NSString).length
-        if execute { send() }
+        if execute { send(steer: steer) }
     }
 
     private func refreshMentions() {
