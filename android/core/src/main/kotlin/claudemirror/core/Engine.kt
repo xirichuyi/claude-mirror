@@ -400,7 +400,8 @@ class Engine(
         val response = agents.call(hostOf(session), "task", buildJsonObject {
             put("operation", "command"); put("taskId", owner); put("commandId", commandId)
             put("command", buildJsonObject { fields(); put("kind", kind) })
-            put("wait", session.remoteOwner != null || kind == "send")
+            // A prompt must not count as delivered before the worker has taken it.
+            put("wait", session.remoteOwner != null || kind == "send" || kind == "steer")
         }).obj()
         if (response?.get("ok") == kotlinx.serialization.json.JsonPrimitive(false)) {
             throw RemoteException(response["error"].string() ?: "远端操作失败", confirmed = !response["uncertain"].truthy)
