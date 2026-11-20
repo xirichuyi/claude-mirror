@@ -117,12 +117,14 @@ public sealed partial class MainWindow : Window
         {
             if (import.SelectedIndex < 0) return;
             var entry = configured[import.SelectedIndex];
-            name.Text = entry.Alias; address.Text = entry.User is null ? entry.Host : entry.User + "@" + entry.Host; port.Value = entry.Port;
+            // OpenSSH logs in as the local account when the config names no user, for the host and for its jump host alike.
+            var account = entry.User ?? Environment.UserName;
+            name.Text = entry.Alias; address.Text = account + "@" + entry.Host; port.Value = entry.Port;
             key.Text = entry.KeyFile ?? ""; mode.SelectedIndex = entry.KeyFile is null ? 0 : 1; jump.Text = ""; jumpKey.Text = "";
             if (entry.ProxyJump is not null)
                 try
                 {
-                    var hop = SshConfig.Jump(entry.ProxyJump, entry.User ?? "", entry.KeyFile, configured);
+                    var hop = SshConfig.Jump(entry.ProxyJump, Environment.UserName, entry.KeyFile, configured);
                     jump.Text = SshConfig.JumpSpec(hop); jumpKey.Text = hop.KeyFile == entry.KeyFile ? "" : hop.KeyFile ?? "";
                 }
                 catch (ArgumentException) { jump.Text = entry.ProxyJump; }
