@@ -6,10 +6,11 @@ import RemoteCCCore
 
 func gitColor(_ code: String?) -> Color {
     switch code {
-    case "M", "R": return .orange
-    case "A", "?": return .green
-    case "D", "U": return .red
-    default: return .primary
+    case "M", "R": return WorkbenchTheme.modified
+    case "A", "?": return WorkbenchTheme.added
+    case "D": return WorkbenchTheme.removed
+    case "U": return WorkbenchTheme.error
+    default: return WorkbenchTheme.ink
     }
 }
 
@@ -22,35 +23,74 @@ struct FilePanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Label("工作区", systemImage: "folder").font(.callout.weight(.semibold))
-                Spacer()
-                Button { model.showFiles = false } label: { Image(systemName: "xmark") }
-                    .buttonStyle(QuietButtonStyle()).help("关闭文件面板").accessibilityLabel("关闭文件面板")
-            }.padding(.horizontal, 12).padding(.top, 8)
-            CapsulePicker(label: "工作区面板", options: SidePanel.allCases, selection: $model.panel) { panel in
-                if panel == .changes, let count = model.activeWorkspace?.gitStatus?.files.count, count > 0 {
-                    return "变更 \(count)"
-                }
-                return panel.rawValue
-            }.padding(8)
-            Divider()
             if let workspace = model.activeWorkspace {
-                if !model.isConnected {
-                    Label("连接已断开", systemImage: "network.slash")
-                        .font(.caption).foregroundStyle(.secondary).padding(8)
-                }
-                Group {
-                    switch model.panel {
-                    case .files: FileTreeView(workspace: workspace)
-                    case .changes: ChangesView(workspace: workspace)
-                    case .search: SearchView(workspace: workspace)
-                    }
-                }.disabled(!model.isConnected)
+                RetainedPaneLayout(selection: model.panel == .files ? 0 : model.panel == .changes ? 1 : 2, parkInactive: false) {
+                    FileTreeView(workspace: workspace).sidebarPaneVisible(model.showFiles && model.panel == .files)
+                    VStack(spacing: 0) {
+                        workspacePath(workspace)
+                        ChangesView(workspace: workspace)
+                    }.sidebarPaneVisible(model.showFiles && model.panel == .changes)
+                    VStack(spacing: 0) {
+                        workspacePath(workspace)
+                        SearchView(workspace: workspace, state: model.searchState(for: workspace))
+                    }.sidebarPaneVisible(model.showFiles && model.panel == .search)
+                }.clipped().id(ObjectIdentifier(workspace)).disabled(!model.isConnected)
             } else {
-                ContentUnavailableView("未连接 SSH", systemImage: "network.slash").frame(maxHeight: .infinity)
+                ContentUnavailableView(model.isConnected ? "选择项目对话" : "未连接 SSH",
+                    systemImage: model.isConnected ? "folder" : "network.slash")
+                    .frame(maxHeight: .infinity)
             }
-        }.background { FrostedBackground() }
+        }.background(WorkbenchTheme.sidebar)
+        .overlay(alignment: .topTrailing) {
+            if !model.isConnected {
+                Image(systemName: "network.slash").foregroundStyle(WorkbenchTheme.inkMuted)
+                    .padding(8).help("连接已断开")
+            }
+        }
+    }
+
+    private func workspacePath(_ workspace: Workspace) -> some View {
+        Text(workspace.root ?? model.active?.directory ?? "")
+            .font(.system(size: 11)).foregroundStyle(WorkbenchTheme.inkMuted)
+            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10).frame(height: 32)
+    }
+}
+
+/// 24 pt rows indented 16 pt per level: chevron, file mark, name, Git letter.
+struct FileTreeRow: View {
+    let row: TreeRow
+    let selected: Bool
+    @State private var hovered = false
+
+    var body: some View {
+        let entry = row.entry
+        let tint = entry.broken == true ? WorkbenchTheme.inkDim : gitColor(row.gitCode)
+        HStack(spacing: 4) {
+            WorkbenchIcon(symbol: "chevron.right")
+                .font(.system(size: 9, weight: .semibold)).foregroundStyle(WorkbenchTheme.inkMuted)
+                .rotationEffect(.degrees(row.expanded ? 90 : 0))
+                .frame(width: 12).opacity(entry.directory ? 1 : 0)
+            FileIcon(name: entry.name, directory: entry.directory, expanded: row.expanded)
+            Text(entry.name + (entry.symlink == true ? " ↗" : ""))
+                .font(.system(size: 13, weight: row.touched ? .semibold : .regular))
+                .foregroundStyle(tint)
+                .strikethrough(entry.broken == true)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 4)
+            if row.loading { ProgressView().controlSize(.mini).frame(width: 12).accessibilityLabel("读取目录") }
+            if let code = row.gitCode {
+                Text(code == "?" ? "U" : code).font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundStyle(tint)
+            }
+        }
+        .padding(.leading, CGFloat(row.depth) * 16 + 4).padding(.trailing, 8)
+        .frame(height: 24)
+        .background(selected ? WorkbenchTheme.selected : hovered ? WorkbenchTheme.hover : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -66,78 +106,187 @@ struct FileTreeView: View {
     @EnvironmentObject private var model: AppModel
     let workspace: Workspace
     @State private var path = ""
-    @State private var prompt: NamePrompt?
+    @State private var editingPath = false
+    @FocusState private var pathFocused: Bool
+    @FocusState private var treeFocused: Bool
+    @State private var selectedPath: String?
+    @State private var revealRequest = UUID()
+    @State private var lastReveal: String?
+
+    private var visible: Bool { model.showFiles && model.sidebarVisible && model.panel == .files }
+
+    private var prompt: NamePrompt? {
+        get { if case .fileName(let value, _) = model.presentation { return value }; return nil }
+        nonmutating set { if let newValue { model.presentation = .fileName(newValue, workspace) } }
+    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var rootName: String {
+        guard let root = workspace.root else { return "工作区" }
+        return root == "/" ? "/" : (root as NSString).lastPathComponent
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                Button { Task { await workspace.goToParent() } } label: { Image(systemName: "arrow.up") }.buttonStyle(QuietButtonStyle()).help("上一级").accessibilityLabel("上一级目录")
-                TextField("远端目录", text: $path).textFieldStyle(WorkbenchTextFieldStyle()).font(.system(size: 11, design: .monospaced))
-                    .onSubmit { Task { await workspace.browse(path) } }
-                Button { Task { await workspace.reload(force: true) } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(QuietButtonStyle()).help("刷新文件").accessibilityLabel("刷新文件")
-                Button { model.pickAndUpload(to: workspace.root) } label: { Label("上传", systemImage: "square.and.arrow.up") }
-                    .buttonStyle(.plain).help("上传文件").accessibilityLabel("上传文件")
-                Menu {
-                    Button("新建文件…") { if let root = workspace.root { prompt = NamePrompt(title: "新文件名称", initial: "", action: .newFile(root)) } }
-                    Button("新建文件夹…") { if let root = workspace.root { prompt = NamePrompt(title: "新文件夹名称", initial: "", action: .newFolder(root)) } }
+            projectRow
+            fileActions
+            if let error = workspace.error { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.error).padding(.horizontal, 12).padding(.bottom, 4).textSelection(.enabled) }
+            ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(workspace.rows) { row in
+                        rowView(row).id(row.id)
+                    }
+                }
+                .padding(.horizontal, 6).padding(.bottom, 6)
+            }
+            .focusable().focused($treeFocused).focusEffectDisabled()
+            .onKeyPress(.downArrow) { moveSelection(1); return .handled }
+            .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
+            .onKeyPress(.rightArrow) { expandSelection(); return .handled }
+            .onKeyPress(.leftArrow) { collapseSelection(); return .handled }
+            .onKeyPress(.return) { openSelection(); return .handled }
+            .onKeyPress(.escape) { treeFocused = false; model.focusWorkspace(); return .handled }
+            .onChange(of: selectedPath) { if let selectedPath { proxy.scrollTo(selectedPath) } }
+            .onChange(of: model.sidebarFocus) { if visible { focusTree() } }
+            .onChange(of: visible) { if visible { focusTree() } else { treeFocused = false } }
+            .overlay { if workspace.rows.isEmpty && workspace.error == nil && workspace.root != nil { InterfaceState(title: "空目录", detail: "", symbol: "folder") } }
+                .task(id: "\(model.showFiles && model.sidebarVisible && model.panel == .files):\(workspace.root ?? ""):\(workspace.activeTabId ?? ""):\(revealRequest)") {
+                    guard model.showFiles, model.sidebarVisible, model.panel == .files else { return }
+                    let request = "\(workspace.root ?? ""):\(workspace.activeTabId ?? ""):\(revealRequest)"
+                    guard lastReveal != request else { return }
+                    if let path = await workspace.revealActiveFile() {
+                        await Task.yield()
+                        guard !Task.isCancelled else { return }
+                        lastReveal = request
+                        selectedPath = path
+                        proxy.scrollTo(path, anchor: .center)
+                    }
+                }
+            }
+            Rectangle().fill(WorkbenchTheme.separator).frame(height: 1)
+            Text(workspace.footer).font(.system(size: 11)).foregroundStyle(WorkbenchTheme.inkDim)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).frame(height: 26)
+        }
+        .onAppear { path = workspace.root ?? model.active?.directory ?? "~" }
+        .onChange(of: workspace.root) { if let root = workspace.root { path = root }; selectedPath = workspace.rows.first?.id }
+    }
+
+    private func focusTree() {
+        guard !editingPath, model.presentation == nil else { return }
+        if selectedPath == nil { selectedPath = workspace.activeTab?.path ?? workspace.rows.first?.id }
+        treeFocused = true
+    }
+
+    private func moveSelection(_ offset: Int) {
+        let rows = workspace.rows
+        guard !rows.isEmpty else { return }
+        let index = rows.firstIndex { $0.id == selectedPath } ?? (offset > 0 ? -1 : rows.count)
+        selectedPath = rows[min(rows.count - 1, max(0, index + offset))].id
+    }
+
+    private var selectedRow: TreeRow? { workspace.rows.first { $0.id == selectedPath } }
+
+    private func expandSelection() {
+        guard let row = selectedRow, row.entry.directory else { return }
+        if row.expanded { moveSelection(1) }
+        else { Task { await workspace.toggle(row.id) } }
+    }
+
+    private func collapseSelection() {
+        guard let row = selectedRow else { return }
+        if row.expanded { Task { await workspace.toggle(row.id) } }
+        else {
+            let parent = (row.id as NSString).deletingLastPathComponent
+            if workspace.rows.contains(where: { $0.id == parent }) { selectedPath = parent }
+        }
+    }
+
+    private func openSelection() {
+        guard let row = selectedRow else { return }
+        if row.entry.directory { Task { await workspace.toggle(row.id) } }
+        else { treeFocused = false; model.open(row.id) }
+    }
+
+    /// The project name with its menu and quick actions, as in the reference sidebar.
+    private var projectRow: some View {
+        HStack(spacing: 2) {
+            if editingPath {
+                TextField("远端目录", text: $path).textFieldStyle(WorkbenchTextFieldStyle()).font(.system(size: 11.5, design: .monospaced))
+                    .focused($pathFocused)
+                    .onSubmit { editingPath = false; Task { await workspace.browse(path) } }
+                    .onExitCommand { editingPath = false }
+                    .onAppear { pathFocused = true }
+            } else {
+                WorkbenchMenu {
+                    Button("前往目录…") { path = workspace.root ?? path; editingPath = true }
+                    Button("上一级目录") { Task { await workspace.goToParent() } }.disabled(workspace.root == nil || workspace.root == "/")
                     Divider()
                     Button("设为工作目录") { useFolder() }.disabled(workspace.root == nil)
                     Toggle("显示隐藏文件", isOn: Binding(get: { workspace.showHidden }, set: { workspace.showHidden = $0 }))
-                } label: { Image(systemName: "ellipsis") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help("目录操作").accessibilityLabel("目录操作")
-            }
-            .controlSize(.small).padding(8)
-            if let error = workspace.error { Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 10).textSelection(.enabled) }
-            Divider()
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(workspace.rows) { row in rowView(row) }
+                    if let root = workspace.root { Divider(); Button("复制路径") { copyToPasteboard(root) } }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(String(rootName.prefix(1)).uppercased())
+                            .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 16, height: 16)
+                            .background(WorkbenchTheme.primaryButton, in: RoundedRectangle(cornerRadius: 4))
+                        Text(rootName).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        WorkbenchIcon(symbol: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(WorkbenchTheme.inkMuted)
+                    }
                 }
-                .padding(4)
+                // The button style keeps the custom label; a borderless menu would drop it.
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(workspace.root ?? "").accessibilityLabel("目录：" + rootName)
+
+
             }
-            .overlay { if workspace.rows.isEmpty && workspace.error == nil && workspace.root != nil { InterfaceState(title: "空目录", detail: "可上传文件，或从目录菜单新建文件。", symbol: "folder") } }
-            Divider()
-            Text(workspace.footer).font(.caption2).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(8)
         }
-        .onAppear { path = workspace.root ?? model.active?.directory ?? "~" }
-        .onChange(of: workspace.root) { if let root = workspace.root { path = root } }
-        .sheet(item: $prompt) { NameSheet(prompt: $0, workspace: workspace).workbenchPanel() }
+        .padding(.leading, 12).padding(.trailing, 6).frame(height: 32)
+    }
+
+    private var fileActions: some View {
+        HStack(spacing: 2) {
+                Button {
+                    if let root = workspace.root { prompt = NamePrompt(title: "新文件名称", initial: "", action: .newFile(root)) }
+                } label: { WorkbenchIcon(symbol: "doc.badge.plus") }
+                    .buttonStyle(WorkbenchIconButtonStyle()).help("新建文件").accessibilityLabel("新建文件").disabled(workspace.root == nil)
+                Button {
+                    if let root = workspace.root { prompt = NamePrompt(title: "新文件夹名称", initial: "", action: .newFolder(root)) }
+                } label: { WorkbenchIcon(symbol: "folder.badge.plus") }
+                    .buttonStyle(WorkbenchIconButtonStyle()).help("新建文件夹").accessibilityLabel("新建文件夹").disabled(workspace.root == nil)
+                Button { Task { await workspace.reload(force: true) } } label: {
+                    WorkbenchIcon(symbol: "arrow.clockwise")
+                }.buttonStyle(WorkbenchIconButtonStyle()).help("刷新文件").accessibilityLabel("刷新文件").disabled(workspace.root == nil)
+                Button { Task { await workspace.collapseAll(); selectedPath = workspace.rows.first?.id } } label: {
+                    WorkbenchIcon(symbol: "rectangle.compress.vertical")
+                }.buttonStyle(WorkbenchIconButtonStyle()).help("全部折叠").accessibilityLabel("全部折叠")
+                Button { revealRequest = UUID() } label: {
+                    WorkbenchIcon(symbol: "scope")
+                }.buttonStyle(WorkbenchIconButtonStyle()).help("定位当前文件").accessibilityLabel("定位当前文件")
+                    .disabled(workspace.activeTab == nil)
+                Spacer(minLength: 0)
+                WorkbenchMenu(iconOnly: true) {
+                    Button("上传文件", systemImage: "square.and.arrow.up") { model.pickAndUpload(to: workspace.root) }
+                } label: { WorkbenchIcon(symbol: "ellipsis") }
+                .buttonStyle(WorkbenchIconButtonStyle()).accessibilityLabel("目录操作").help("更多文件操作")
+                .disabled(workspace.root == nil)
+        }
+        .foregroundStyle(WorkbenchTheme.inkMuted)
+        .padding(.horizontal, 8).frame(height: 28)
+        .disabled(workspace.root == nil || !model.isConnected)
     }
 
     private func rowView(_ row: TreeRow) -> some View {
-        HStack(spacing: 4) {
-            rowLabel(row)
-            Menu { menu(row) } label: { Image(systemName: "ellipsis") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help("文件操作").accessibilityLabel(row.entry.name + " 操作")
-                .padding(.trailing, 8)
-        }
-        .contextMenu { menu(row) }
-    }
-
-    private func rowLabel(_ row: TreeRow) -> some View {
-        let entry = row.entry
-        let color = row.entry.broken == true ? Color.secondary : gitColor(row.gitCode)
-        return HStack(spacing: 5) {
-            Image(systemName: entry.directory ? (row.expanded ? "chevron.down" : "chevron.right") : "doc")
-                .font(.caption2).foregroundStyle(.secondary).frame(width: 12)
-            Text(entry.name + (entry.symlink == true ? " ↗" : ""))
-                .font(.system(size: 12, weight: row.touched ? .semibold : .regular))
-                .foregroundStyle(color)
-                .strikethrough(entry.broken == true)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            Text(row.gitCode.map { $0 == "?" ? "U" : $0 } ?? (entry.directory ? "" : byteText(entry.size)))
-                .font(.caption2).foregroundStyle(row.gitCode == nil ? Color.secondary : color)
-        }
-        .padding(.leading, CGFloat(row.depth) * 13 + 4).padding(.trailing, 6).padding(.vertical, 3)
-        .contentShape(Rectangle())
-        .help(entry.path)
-        .onTapGesture(count: 2) { if entry.directory { Task { await workspace.browse(entry.path) } } }
-        .simultaneousGesture(TapGesture().onEnded {
-            if entry.directory { Task { await workspace.toggle(entry.path) } } else { model.open(entry.path) }
-        })
+        FileTreeRow(row: row, selected: treeFocused ? selectedPath == row.id : workspace.activeTab.map { !$0.isDiff && $0.path == row.entry.path } ?? false)
+            .help(row.entry.path)
+            .onTapGesture {
+                selectedPath = row.id
+                treeFocused = row.entry.directory
+                if row.entry.directory { Task { await workspace.toggle(row.entry.path) } } else { model.open(row.entry.path) }
+            }
+            .contextMenu { menu(row) }
     }
 
     @ViewBuilder private func menu(_ row: TreeRow) -> some View {
@@ -151,7 +300,7 @@ struct FileTreeView: View {
             Button("附加到消息") { model.attach(entry.path) }
             Button("下载…") { model.download(entry.path) }
             Button("用本机软件打开") { model.openLocally(entry.path) }
-            if row.gitCode != nil { Button("查看变更") { Task { await workspace.openDiff(entry.path) } } }
+            if row.gitCode != nil { Button("查看变更") { model.showingChat = false; Task { await workspace.openDiff(entry.path) } } }
         }
         Button("复制路径") { copyToPasteboard(entry.path) }
         Divider()
@@ -160,14 +309,11 @@ struct FileTreeView: View {
     }
 
     private func remove(_ entry: FileEntry) {
-        let alert = NSAlert()
-        alert.messageText = entry.directory ? "删除文件夹 \(entry.path) 及其全部内容？" : "删除文件 \(entry.path)？"
-        alert.informativeText = "此操作在服务器上执行，无法撤销。"
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "取消")
-        alert.addButton(withTitle: "删除")
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
-        model.perform { try await workspace.remove(entry) }
+        model.presentation = .confirmation(WorkbenchConfirmation(
+            title: entry.directory ? "删除文件夹及其全部内容？" : "删除文件？",
+            detail: entry.path + "\n此操作在服务器上执行，无法撤销。", actionTitle: "删除", destructive: true) {
+                model.perform { try await workspace.remove(entry) }
+            })
     }
 
     /// A conversation with messages keeps its context, so a new folder starts a new conversation.
@@ -179,14 +325,14 @@ struct FileTreeView: View {
 
 struct NameSheet: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     let prompt: NamePrompt
     let workspace: Workspace
     @State private var name = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(prompt.title).font(.headline)
+            SheetHeading(title: prompt.title) { dismiss() }
             TextField("名称", text: $name).textFieldStyle(WorkbenchTextFieldStyle()).onSubmit(confirm)
             HStack {
                 Spacer()
@@ -213,22 +359,23 @@ struct NameSheet: View {
 }
 
 struct ChangesView: View {
+    @EnvironmentObject private var model: AppModel
     let workspace: Workspace
 
     var body: some View {
         let status = workspace.gitStatus
         VStack(alignment: .leading, spacing: 0) {
             Text(summary(status))
-                .font(.caption).foregroundStyle(.secondary).padding(10)
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1).padding(.horizontal, 10).frame(height: 28)
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(status?.files ?? []) { file in
-                        Button { Task { await workspace.openDiff(file.path) } } label: {
+                        Button { model.showingChat = false; Task { await workspace.openDiff(file.path) } } label: {
                             HStack {
                                 Text(file.relative).foregroundStyle(gitColor(file.code)).lineLimit(1).truncationMode(.head)
                                 Spacer()
-                                // Same letter as the file tree: git's "??" is an untracked file.
-                                Text(file.status.trimmingCharacters(in: .whitespaces) == "??" ? "U" : file.status.trimmingCharacters(in: .whitespaces)).foregroundStyle(.secondary)
+                                // git prints "??" for untracked files; show the letter the file tree uses.
+                                Text(file.status.trimmingCharacters(in: .whitespaces) == "??" ? "U" : file.status.trimmingCharacters(in: .whitespaces)).foregroundStyle(WorkbenchTheme.inkMuted)
                             }
                             .font(.callout).padding(.horizontal, 10).padding(.vertical, 4).contentShape(Rectangle())
                         }
@@ -237,7 +384,9 @@ struct ChangesView: View {
                 }
             }
         }
-        .task { await workspace.refreshGit() }
+        .task(id: model.showFiles && model.sidebarVisible && model.panel == .changes) {
+            if model.showFiles && model.sidebarVisible && model.panel == .changes { await workspace.refreshGit() }
+        }
     }
 
     private func summary(_ status: GitStatus?) -> String {
@@ -250,117 +399,97 @@ struct ChangesView: View {
 struct SearchView: View {
     @EnvironmentObject private var model: AppModel
     let workspace: Workspace
-    @State private var query = ""
-    @State private var status = ""
-    @State private var matches: [SearchMatch] = []
-    @State private var task: Task<Void, Never>?
-    @State private var searching = false
+    @Bindable var state: WorkspaceSearchState
+    @State private var collapsed = Set<String>()
     @FocusState private var focused: Bool
+
+    private var visible: Bool { model.showFiles && model.sidebarVisible && model.panel == .search }
+    private var groups: [(path: String, matches: [SearchMatch])] {
+        var paths: [String] = []
+        var grouped: [String: [SearchMatch]] = [:]
+        for match in state.matches {
+            if grouped[match.path] == nil { paths.append(match.path) }
+            grouped[match.path, default: []].append(match)
+        }
+        return paths.map { ($0, grouped[$0] ?? []) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                TextField("搜索文件内容", text: $query)
-                    .textFieldStyle(WorkbenchTextFieldStyle()).focused($focused).onSubmit(run)
-                    .onExitCommand { query = "" }
-                Button(action: run) { Image(systemName: "magnifyingglass") }
-                    .buttonStyle(QuietButtonStyle()).help("搜索 · Enter").accessibilityLabel("搜索文件内容")
-                    .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.isConnected || searching)
-            }.padding(8)
-            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 8) }
+            HStack(spacing: 4) {
+                TextField("搜索", text: $state.query).focused($focused).onSubmit { run() }
+                    .onExitCommand { focused = false; model.focusWorkspace() }
+                if state.searching { ProgressView().controlSize(.mini) }
+                else if !state.query.isEmpty {
+                    Button { state.query = "" } label: { WorkbenchIcon(symbol: "xmark") }
+                        .buttonStyle(QuietButtonStyle()).help("清空").accessibilityLabel("清空搜索")
+                }
+            }.padding(.horizontal, 8).frame(height: 28)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(matches) { match in
-                        Button { model.open(match.path, line: match.line) } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("\(match.relative):\(match.line)").font(.caption.weight(.medium)).lineLimit(1)
-                                Text(match.text.trimmingCharacters(in: .whitespaces)).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).lineLimit(2)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }.buttonStyle(QuietButtonStyle()).help(match.path)
+                    ForEach(groups, id: \.path) { group in
+                        Button {
+                            if collapsed.contains(group.path) { collapsed.remove(group.path) }
+                            else { collapsed.insert(group.path) }
+                        } label: {
+                            HStack(spacing: 5) {
+                                WorkbenchIcon(symbol: "chevron.right").font(.system(size: 9))
+                                    .rotationEffect(.degrees(collapsed.contains(group.path) ? 0 : 90))
+                                FileIcon(name: group.path)
+                                Text((group.path as NSString).lastPathComponent).lineLimit(1)
+                                Spacer(minLength: 0)
+                                Text("\(group.matches.count)").foregroundStyle(WorkbenchTheme.inkMuted)
+                            }.font(.system(size: 12)).frame(height: 24)
+                        }.buttonStyle(QuietButtonStyle()).help(group.path)
+                        if !collapsed.contains(group.path) {
+                            ForEach(group.matches) { match in
+                                Button { model.open(match.path, line: match.line) } label: {
+                                    HStack(spacing: 6) {
+                                        Text(highlight(match.text.trimmingCharacters(in: .whitespaces)))
+                                            .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                                        Text("\(match.line)").foregroundStyle(WorkbenchTheme.inkDim)
+                                    }.font(.system(size: 11, design: .monospaced)).padding(.leading, 20).frame(height: 24)
+                                }.buttonStyle(QuietButtonStyle()).help("\(match.relative):\(match.line)")
+                            }
+                        }
                     }
-                }.padding(.horizontal, 4)
-            }.overlay {
-                if searching {
-                    InterfaceState(title: "正在搜索…", detail: "", loading: true)
-                } else if matches.isEmpty && status.isEmpty {
-                    InterfaceState(title: "搜索项目内容", detail: "输入关键词，按 Enter 搜索。点击结果可打开对应行。", symbol: "doc.text.magnifyingglass")
-                }
+                }.padding(.horizontal, 4).padding(.bottom, 24)
             }
         }
-        .task { await Task.yield(); focused = true }
-        .onChange(of: query) { task?.cancel(); searching = false; matches = []; status = "" }
-        .onDisappear { task?.cancel() }
-    }
-
-    private func run() {
-        task?.cancel()
-        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty, model.isConnected else { return }
-        status = ""; matches = []; searching = true
-        task = Task {
-            do {
-                let result = try await workspace.search(term)
-                guard !Task.isCancelled else { return }
-                matches = result.matches
-                status = result.matches.isEmpty ? "没有找到匹配内容，试试其他关键词。" : "\(result.matches.count) 处匹配" + (result.truncated == true ? "（仅显示部分结果，请缩小搜索范围）" : "")
-                searching = false
-            } catch { if !Task.isCancelled { status = error.localizedDescription; searching = false } }
-        }
-    }
-}
-
-struct QuickOpenSheet: View {
-    @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var query = ""
-    @State private var status = ""
-    @FocusState private var focused: Bool
-    @State private var results: [FileEntry] = []
-    @State private var selection = 0
-    @State private var task: Task<Void, Never>?
-
-    var body: some View {
-        VStack(spacing: 6) {
-            TextField("按名称查找服务器上的文件", text: $query)
-                .textFieldStyle(WorkbenchTextFieldStyle()).focused($focused)
-                .onSubmit { if let file = results[safeIndex: selection] { choose(file) } }
-                .onKeyPress(.downArrow) { selection = min(selection + 1, max(results.count - 1, 0)); return .handled }
-                .onKeyPress(.upArrow) { selection = max(selection - 1, 0); return .handled }
-                .onKeyPress(.escape) { dismiss(); return .handled }
-            if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary).padding(8) }
-            MenuList(count: results.count, selection: selection) { index in
-                let file = results[index]
-                return AnyView(Button { choose(file) } label: {
-                    Text(file.relative ?? file.name).font(.system(size: 12, design: .monospaced)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain).help(file.path))
+        .overlay(alignment: .bottomLeading) {
+            if !state.status.isEmpty {
+                Text(state.matches.isEmpty ? state.status : "\(state.matches.count) 处 · \(groups.count) 个文件")
+                    .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                    .lineLimit(1).padding(.horizontal, 10).frame(height: 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(WorkbenchTheme.sidebar)
+                    .help(state.status)
             }
         }
-        .padding(10).frame(width: 560)
-        .onChange(of: query) { search() }
-        .task { await Task.yield(); focused = true; search() }
-        .onDisappear { task?.cancel() }
-    }
-
-    private func search() {
-        task?.cancel()
-        results = []; selection = 0
-        guard let workspace = model.activeWorkspace, model.isConnected else { status = "连接服务器并打开项目后查找文件。"; return }
-        status = "正在查找…"
-        let current = query
-        task = Task {
-            try? await Task.sleep(nanoseconds: 60_000_000)
-            guard !Task.isCancelled else { return }
-            do {
-                let found = try await workspace.suggest(current)
-                guard !Task.isCancelled else { return }
-                results = found; selection = 0
-                status = found.isEmpty ? "未找到文件，试试其他名称。" : "↑ ↓ 选择 · Enter 打开 · Esc 关闭"
-            } catch { if !Task.isCancelled { status = error.localizedDescription } }
+        .task(id: state.query) { if model.isConnected { state.run(in: workspace, delay: true) } }
+        .task(id: visible) { await Task.yield(); focused = visible }
+        .onChange(of: model.sidebarFocus) { if visible { focused = true } }
+        .task(id: workspace.root) {
+            state.updateRoot(workspace.root)
+            if visible && model.isConnected { state.run(in: workspace, delay: true) }
         }
     }
 
-    private func choose(_ file: FileEntry) { dismiss(); model.open(file.path) }
+    private func highlight(_ value: String) -> AttributedString {
+        var result = AttributedString(value)
+        let query = state.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return result }
+        var start = value.startIndex
+        while start < value.endIndex, let match = value.range(of: query, options: .caseInsensitive, range: start..<value.endIndex) {
+            if let range = Range(match, in: result) { result[range].backgroundColor = WorkbenchTheme.accent.opacity(0.18) }
+            start = match.upperBound
+        }
+        return result
+    }
+
+    private func run() { if model.isConnected { state.run(in: workspace) } }
 }
+
 
 extension Array {
     subscript(safeIndex index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
@@ -369,55 +498,80 @@ extension Array {
 struct EditorPane: View {
     @EnvironmentObject private var model: AppModel
     let workspace: Workspace
+    var showsTabs = true
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
+            if showsTabs {
+            // Tabs 26 pt tall with 4 pt gaps, centred in a 40 pt bar, as in the reference.
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(workspace.tabs) { tab in tabButton(tab) }
+                HStack(spacing: 4) {
+                    ForEach(workspace.tabs) { tab in
+                        EditorTabButton(tab: tab, active: tab.id == workspace.activeTabId,
+                                        select: { Task { await workspace.select(tab) } },
+                                        close: { model.close(tab, in: workspace) })
+                        .transition(Motion.tab(reduce: reduceMotion))
+                    }
                 }
+                .padding(.horizontal, 7)
+                .animation(Motion.animation(Motion.slide, reduce: reduceMotion), value: workspace.tabs.map(\.id))
             }
-            .background(Color.secondary.opacity(0.08))
-            Divider()
+            .frame(height: 40)
+            }
+            Rectangle().fill(WorkbenchTheme.separator).frame(height: 1)
             if let tab = workspace.activeTab {
                 header(tab)
-                Divider()
                 if tab.conflict {
                     Text("服务器上的文件已被修改。保存会被拒绝，请先复制你的修改再重新打开。")
-                        .font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color.yellow.opacity(0.15))
+                        .font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(WorkbenchTheme.warning.opacity(0.15))
                 }
-                EditorContent(tab: tab, workspace: workspace).id(tab.id)
+                EditorContentDeck(workspace: workspace).id(ObjectIdentifier(workspace)).clipped()
+                EditorStatusBar(tab: tab, workspace: workspace)
             }
         }
     }
 
-    private func tabButton(_ tab: EditorTab) -> some View {
-        HStack(spacing: 4) {
-            Button { Task { await workspace.select(tab) } } label: {
-                Text((tab.isDirty ? "● " : "") + tab.title).font(.caption).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180)
-                    .foregroundStyle(tab.id == workspace.activeTabId ? Color.primary : Color.secondary)
-            }.buttonStyle(.plain).help(tab.path)
-            Button { model.close(tab, in: workspace) } label: { Image(systemName: "xmark").font(.caption2).frame(width: 24, height: 24) }.buttonStyle(.plain).foregroundStyle(.secondary).help("关闭 " + tab.title).accessibilityLabel("关闭 " + tab.title)
-        }
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(tab.id == workspace.activeTabId ? WorkbenchTheme.surface : Color.clear)
+    /// The tab's path relative to the workspace root, as breadcrumbs.
+    private func breadcrumbs(_ tab: EditorTab) -> [String] {
+        var path = tab.path
+        if let root = workspace.root, path.hasPrefix(root + "/") { path = String(path.dropFirst(root.count + 1)) }
+        return path.split(separator: "/").map(String.init)
     }
 
     private func header(_ tab: EditorTab) -> some View {
         let preview = tab.preview
+        let parts = breadcrumbs(tab)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+                        if index > 0 { WorkbenchIcon(symbol: "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(WorkbenchTheme.inkDim) }
+                        if index == parts.count - 1 { FileIcon(name: part).frame(width: 14) }
+                        Text(part).font(.system(size: 11.5)).lineLimit(1)
+                            .foregroundStyle(index == parts.count - 1 ? WorkbenchTheme.ink : WorkbenchTheme.inkMuted)
+                    }
+                }
+                .help(tab.path)
                 if tab.notice != nil || tab.error != nil || preview == nil || preview?.truncated == true {
-                    Text(tab.notice ?? tab.error.map { _ in "无法预览" } ?? info(tab)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text(tab.notice ?? tab.error.map { _ in "无法预览" } ?? info(tab)).font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1)
                 }
                 if !tab.isDiff, let preview {
                     if tab.draft != nil {
                         Button("保存到远端") { Task { await workspace.save(tab) } }
                     } else if preview.kind == "text", preview.truncated != true, preview.revision != nil {
-                        Button("编辑") { workspace.beginEditing(tab) }.disabled(tab.isValidating || tab.error != nil)
+                        Button { workspace.beginEditing(tab) } label: { WorkbenchIcon(symbol: "square.and.pencil") }
+                            .buttonStyle(WorkbenchIconButtonStyle()).help("编辑文件").accessibilityLabel("编辑文件")
+                            .disabled(tab.isValidating || tab.error != nil)
                     }
-                    if isMarkdown(preview), tab.draft == nil {
-                        Button(tab.showSource ? "预览" : "源码") { tab.showSource.toggle(); model.objectWillChange.send() }
+                    if preview.kind == "text", (isMarkdown(preview) || FilePreviewSupport.hasVisualPreview(preview.name)), tab.draft == nil {
+                        HStack(spacing: 2) {
+                            Button { tab.showSource = true } label: { WorkbenchIcon(symbol: "chevron.left.forwardslash.chevron.right") }
+                                .buttonStyle(WorkbenchIconButtonStyle(selected: tab.showSource)).help("源码").accessibilityLabel("源码")
+                            Button { tab.showSource = false } label: { WorkbenchIcon(symbol: "eye") }
+                                .buttonStyle(WorkbenchIconButtonStyle(selected: !tab.showSource)).help("预览").accessibilityLabel("预览")
+                        }
                     }
                     if preview.kind == "text", preview.truncated == true, (preview.nextOffset ?? 1048576) < 1048576 {
                         Button("加载更多") { Task { await workspace.loadMoreText(tab) } }.disabled(tab.isValidating)
@@ -427,17 +581,19 @@ struct EditorPane: View {
                     }
                     if tab.isValidating { ProgressView().controlSize(.mini).help("检查远端版本") }
                     Spacer(minLength: 0)
-                    Menu {
+                    Button { model.download(preview.path) } label: { WorkbenchIcon(symbol: "arrow.down.to.line") }
+                        .buttonStyle(WorkbenchIconButtonStyle()).help("下载到本机…").accessibilityLabel("下载到本机")
+                    WorkbenchMenu(iconOnly: true) {
                         Button("附加到对话") { model.attach(preview.path) }
                         Button("下载…") { model.download(preview.path) }
                         Button("本地打开") { model.openLocally(preview.path) }
                         Button("复制路径") { copyToPasteboard(preview.path) }
-                    } label: { Image(systemName: "ellipsis") }
+                    } label: { WorkbenchIcon(symbol: "ellipsis") }
                     .menuStyle(.borderlessButton).fixedSize().help("文件操作").accessibilityLabel("文件操作")
                 }
             }
         }
-        .controlSize(.small).padding(.horizontal, 10).padding(.vertical, 6)
+        .controlSize(.small).buttonStyle(QuietButtonStyle()).padding(.horizontal, 10).frame(height: 30)
     }
 
     private func info(_ tab: EditorTab) -> String {
@@ -447,9 +603,99 @@ struct EditorPane: View {
     }
 }
 
+/// A tab: file mark, title, and a close button that appears on hover or for the current tab.
+struct EditorTabButton: View {
+    let tab: EditorTab
+    let active: Bool
+    let select: () -> Void
+    let close: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            FileIcon(name: (tab.path as NSString).lastPathComponent).frame(width: 16)
+            Text(tab.title).font(.system(size: 12, weight: active ? .medium : .regular)).lineLimit(1).truncationMode(.middle)
+                .foregroundStyle(active ? WorkbenchTheme.ink : WorkbenchTheme.inkMuted)
+            ZStack {
+                if tab.isDirty && !hovered {
+                    Circle().fill(WorkbenchTheme.ink.opacity(0.6)).frame(width: 7, height: 7).accessibilityLabel("未保存")
+                } else {
+                    Button(action: close) { WorkbenchIcon(symbol: "xmark").font(.system(size: 8.5, weight: .bold)).frame(width: 16, height: 16) }
+                        .buttonStyle(WorkbenchIconButtonStyle(size: 20))
+                        .foregroundStyle(WorkbenchTheme.inkMuted)
+                        .opacity(active || hovered ? 1 : 0)
+                        .help("关闭 " + tab.title).accessibilityLabel("关闭 " + tab.title)
+                }
+            }.frame(width: 16, height: 16)
+        }
+        .padding(.leading, 8).padding(.trailing, 5)
+        .frame(minWidth: 80, maxWidth: 180, minHeight: 26, maxHeight: 26)
+        .background(active ? WorkbenchTheme.userBubble : hovered ? WorkbenchTheme.hover : .clear, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(active ? WorkbenchTheme.accent.opacity(0.35) : .clear))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
+        .onHover { hovered = $0 }
+        .help(tab.path)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(tab.title)
+        .accessibilityAddTraits(active ? [.isSelected, .isButton] : .isButton)
+    }
+}
+
+/// A 26 pt status line under the editor: branch on the left, position and file facts on the right.
+struct EditorStatusBar: View {
+    let tab: EditorTab
+    let workspace: Workspace
+
+    var body: some View {
+        let kind = FileKind.of((tab.path as NSString).lastPathComponent)
+        let text = tab.draft ?? tab.preview?.text
+        HStack(spacing: 14) {
+            Spacer(minLength: 8)
+            if let line = tab.line { Text("第 \(line) 行") }
+            if tab.isDiff { Text("变更") } else {
+                Text(kind.language)
+                if let text {
+                    Text("UTF-8")
+                    Text("\(text.reduce(into: 1) { if $1 == "\n" { $0 += 1 } }) 行")
+                }
+                if let size = tab.preview?.size { Text(byteText(size)) }
+            }
+        }
+        .font(.system(size: 11)).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1)
+        .padding(.horizontal, 12).frame(height: 26)
+        .overlay(alignment: .top) { Rectangle().fill(WorkbenchTheme.separator).frame(height: 1) }
+    }
+}
+
 func isMarkdown(_ preview: FilePreview) -> Bool {
     let name = preview.name.lowercased()
     return (name.hasSuffix(".md") || name.hasSuffix(".markdown")) && preview.truncated != true
+}
+
+/// Keep the three most recently viewed file surfaces alive, including scroll and decoded previews.
+private struct EditorContentDeck: View {
+    let workspace: Workspace
+    @State private var recent: [String] = []
+    private var tabs: [EditorTab] {
+        workspace.tabs.filter { recent.contains($0.id) || $0.id == workspace.activeTabId }
+    }
+    var body: some View {
+        let tabs = tabs
+        RetainedPaneLayout(selection: tabs.firstIndex { $0.id == workspace.activeTabId } ?? 0) {
+            ForEach(tabs) { tab in
+                EditorContent(tab: tab, workspace: workspace)
+                    .paneVisible(tab.id == workspace.activeTabId)
+            }
+        }
+        .onChange(of: workspace.activeTabId, initial: true) {
+            guard let id = workspace.activeTabId else { return }
+            recent.removeAll { candidate in candidate == id || !workspace.tabs.contains(where: { $0.id == candidate }) }
+            recent.append(id)
+            recent = Array(recent.suffix(3))
+        }
+        .transaction { $0.animation = nil }
+    }
 }
 
 struct EditorContent: View {
@@ -460,20 +706,18 @@ struct EditorContent: View {
     var body: some View {
         Group {
             if let error = tab.error, tab.preview == nil {
-                Text(error).foregroundStyle(.secondary).padding().textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Text(error).foregroundStyle(WorkbenchTheme.inkMuted).padding().textSelection(.enabled).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else if tab.isDiff {
                 if let text = tab.diffText {
-                    let rows = unifiedDiffRows(text)
-                    if rows.isEmpty { Text("没有差异").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity) }
-                    else { DiffView(rows: rows) }
+                    SplitDiffView(text: text, path: tab.path)
                 } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             } else if let preview = tab.preview {
                 VStack(spacing: 0) {
                     if let error = tab.error {
                         Text("刷新失败，保留上次加载的内容：" + error)
-                            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled)
                             .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.orange.opacity(0.08))
+                            .background(WorkbenchTheme.warning.opacity(0.08))
                     }
                     content(preview)
                 }
@@ -487,25 +731,31 @@ struct EditorContent: View {
         switch preview.kind {
         case "text":
             if tab.draft != nil {
-                TextEditor(text: Binding(get: { tab.draft ?? "" }, set: { tab.draft = $0; model.objectWillChange.send() }))
+                TextEditor(text: Binding(get: { tab.draft ?? "" }, set: { tab.draft = $0 }))
                     .font(.system(size: 12, design: .monospaced))
                     .scrollContentBackground(.hidden).background(WorkbenchTheme.surface)
-            } else if isMarkdown(preview), !tab.showSource {
-                ScrollView {
-                    MarkdownView(text: preview.text ?? "", actions: FileActions(open: { model.open($0, line: $1) }))
-                        .textSelection(.enabled).padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                }
+            } else if FilePreviewSupport.hasVisualPreview(preview.name), !tab.showSource {
+                RemoteDocumentPreview(preview: preview, workspace: workspace)
             } else {
-                CodeTextView(text: preview.text ?? "", line: tab.line)
+                CodeTextView(text: preview.text ?? "", line: tab.line, path: tab.path, focusToken: model.editorFocus)
             }
         case "image":
-            if let data = preview.data, let image = NSImage(data: data) {
-                ScrollView([.horizontal, .vertical]) { Image(nsImage: image).padding() }
-            } else { Text("无法显示图片").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            RemoteDocumentPreview(preview: preview, workspace: workspace)
         case "pdf":
             if let data = preview.data { PDFContent(data: data) }
         default:
-            Text(preview.reason ?? "此格式请下载或在本地打开").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if FilePreviewSupport.hasVisualPreview(preview.name) {
+                RemoteDocumentPreview(preview: preview, workspace: workspace)
+            } else {
+                VStack(spacing: 12) {
+                    FileIcon(name: preview.name).frame(width: 32, height: 32)
+                    Text("此格式暂不支持预览").foregroundStyle(WorkbenchTheme.inkMuted)
+                    HStack {
+                        Button("下载…") { model.download(preview.path) }
+                        Button("本地打开") { model.openLocally(preview.path) }
+                    }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 }
@@ -525,13 +775,16 @@ struct PDFContent: NSViewRepresentable {
     final class Coordinator { var shown: Data? }
 }
 
-/// AppKit's text system handles megabyte files that a SwiftUI Text cannot.
+/// AppKit's text system handles megabyte files that a SwiftUI Text cannot. Code is coloured by
+/// file type, and line numbers live in a ruler so copied text never contains them.
 struct CodeTextView: NSViewRepresentable {
     let text: String
     let line: Int?
+    var path: String = ""
+    var focusToken: UUID?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
-    final class Coordinator { var text: String?; var line: Int? }
+    final class Coordinator { var text: String?; var line: Int?; var path: String?; var focusToken: UUID? }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -539,49 +792,131 @@ struct CodeTextView: NSViewRepresentable {
         let view = scroll.documentView as! NSTextView
         view.drawsBackground = false
         view.isEditable = false; view.isSelectable = true; view.isRichText = false
-        view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        view.textContainerInset = NSSize(width: 8, height: 10)
+        view.font = CodeStyle.font
+        view.textContainerInset = NSSize(width: 10, height: 10)
+        view.selectedTextAttributes = [.backgroundColor: NSTheme.selection]
+        // ⌘F / ⌘G use AppKit's find bar, with incremental highlighting as you type.
+        view.usesFindBar = true; view.isIncrementalSearchingEnabled = true
+        scroll.findBarPosition = .aboveContent
         // Long lines scroll rather than wrap, so line numbers from Claude stay meaningful.
         view.isHorizontallyResizable = true
         view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         view.textContainer?.widthTracksTextView = false
         view.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         scroll.hasHorizontalScroller = true
+        let ruler = LineNumberRuler(textView: view, scrollView: scroll)
+        scroll.verticalRulerView = ruler
+        scroll.hasVerticalRuler = true
+        scroll.rulersVisible = true
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let view = scroll.documentView as? NSTextView else { return }
+        guard let view = scroll.documentView as? NSTextView, let ruler = scroll.verticalRulerView as? LineNumberRuler else { return }
         // Updates arrive constantly while Claude works; only real changes may move the view.
-        guard context.coordinator.text != text || context.coordinator.line != line else { return }
-        let lineChanged = context.coordinator.line != line
-        context.coordinator.text = text; context.coordinator.line = line
-        let numbered = numberedText()
-        let visible = scroll.contentView.bounds.origin
-        view.string = numbered
-        guard lineChanged, let line, line > 0 else { scroll.contentView.scroll(to: visible); return }
-        var index = numbered.startIndex
-        for _ in 1..<line {
-            guard let newline = numbered[index...].firstIndex(of: "\n") else { break }
-            index = numbered.index(after: newline)
+        let coordinator = context.coordinator
+        if coordinator.focusToken != focusToken {
+            coordinator.focusToken = focusToken
+            DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
         }
-        let location = NSRange(index..<index, in: numbered).location
-        let lineRange = (numbered as NSString).lineRange(for: NSRange(location: location, length: 0))
+        guard coordinator.text != text || coordinator.line != line || coordinator.path != path else { return }
+        let lineChanged = coordinator.line != line
+        if coordinator.text != text || coordinator.path != path {
+            let visible = scroll.contentView.bounds.origin
+            view.textStorage?.setAttributedString(CodeStyle.attributed(text, grammar: SyntaxGrammar.forFile(path)))
+            ruler.reload()
+            scroll.contentView.scroll(to: visible)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        coordinator.text = text; coordinator.line = line; coordinator.path = path
+        ruler.activeLine = line
+        guard lineChanged, let line, line > 0, let range = ruler.range(ofLine: line) else { return }
         DispatchQueue.main.async {
-            view.scrollRangeToVisible(lineRange)
-            view.setSelectedRange(lineRange)
+            // Reveal the start, not the entire long line: the latter scrolls sideways
+            // when the editor first appears in a narrow split.
+            let insertion = NSRange(location: range.location, length: 0)
+            view.setSelectedRange(insertion)
+            view.scrollRangeToVisible(insertion)
+            // NSScrollView's leading bound can be negative when a ruler adds insets.
+            var leadingBounds = scroll.contentView.bounds
+            leadingBounds.origin.x = -1_000_000
+            scroll.contentView.scroll(to: scroll.contentView.constrainBoundsRect(leadingBounds).origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
         }
     }
+}
 
-    private func numberedText() -> String {
-        let lines = text.components(separatedBy: "\n")
-        let width = String(lines.count).count
-        // Beyond this size the gutter costs more than it helps.
-        guard lines.count < 50_000 else { return text }
-        return lines.enumerated().map { index, line in
-            let number = String(index + 1)
-            return String(repeating: " ", count: width - number.count) + number + "  " + line
-        }.joined(separator: "\n")
+/// Draws line numbers beside a non-wrapping text view, using the same font and line height so
+/// every number sits on its line's baseline.
+final class LineNumberRuler: NSRulerView {
+    private weak var textView: NSTextView?
+    private var lineStarts: [Int] = [0]
+    var activeLine: Int? { didSet { if activeLine != oldValue { needsDisplay = true } } }
+
+    init(textView: NSTextView, scrollView: NSScrollView) {
+        self.textView = textView
+        super.init(scrollView: scrollView, orientation: .verticalRuler)
+        clientView = textView
+        ruleThickness = 40
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+    }
+    required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    override var isFlipped: Bool { true }
+    @objc private func scrolled() { needsDisplay = true }
+
+    /// Re-indexes line starts after the text changes.
+    func reload() {
+        var starts = [0]
+        if let text = textView?.string {
+            var index = 0
+            for unit in text.utf16 { index += 1; if unit == 10 { starts.append(index) } }
+        }
+        lineStarts = starts
+        let digits = max(2, String(starts.count).count)
+        let width = ("8" as NSString).size(withAttributes: [.font: CodeStyle.font]).width
+        ruleThickness = ceil(CGFloat(digits) * width + 22)
+        needsDisplay = true
+    }
+
+    /// The character range of a 1-based line, without its line break.
+    func range(ofLine line: Int) -> NSRange? {
+        guard line >= 1, line <= lineStarts.count, let length = (textView?.string as NSString?)?.length else { return nil }
+        let start = lineStarts[line - 1]
+        let end = line < lineStarts.count ? lineStarts[line] - 1 : length
+        return NSRange(location: start, length: max(0, end - start))
+    }
+
+    override func drawHashMarksAndLabels(in rect: NSRect) {
+        NSTheme.card.setFill(); bounds.fill()
+        NSTheme.border.setFill(); NSRect(x: bounds.maxX - 1, y: bounds.minY, width: 1, height: bounds.height).fill()
+        guard let textView, let layout = textView.layoutManager, let container = textView.textContainer else { return }
+        let length = (textView.string as NSString).length
+        let paragraph = CodeStyle.paragraph(); paragraph.alignment = .right
+        let origin = textView.textContainerOrigin
+        func draw(_ number: Int, fragment: NSRect) {
+            let top = convert(NSPoint(x: 0, y: fragment.minY + origin.y), from: textView).y
+            let attributes: [NSAttributedString.Key: Any] = [.font: CodeStyle.font, .paragraphStyle: paragraph, .baselineOffset: CodeStyle.baselineOffset(CodeStyle.font),
+                                                             .foregroundColor: number == activeLine ? NSTheme.gutterActive : NSTheme.gutter]
+            NSAttributedString(string: String(number), attributes: attributes)
+                .draw(in: NSRect(x: 0, y: top, width: ruleThickness - 12, height: fragment.height))
+        }
+        guard length > 0 else { draw(1, fragment: layout.extraLineFragmentRect); return }
+        let glyphs = layout.glyphRange(forBoundingRect: textView.visibleRect, in: container)
+        let characters = layout.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        // The first visible line: the last start at or before the first visible character.
+        var low = 0, high = lineStarts.count - 1
+        while low < high { let mid = (low + high + 1) / 2; if lineStarts[mid] <= characters.location { low = mid } else { high = mid - 1 } }
+        var line = low
+        while line < lineStarts.count, lineStarts[line] <= NSMaxRange(characters) {
+            let start = lineStarts[line]
+            let fragment = start >= length ? layout.extraLineFragmentRect
+                : layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: start), effectiveRange: nil)
+            draw(line + 1, fragment: fragment)
+            line += 1
+        }
     }
 }
 #endif

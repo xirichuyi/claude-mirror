@@ -21,7 +21,9 @@ final class LiveRemoteTests: XCTestCase {
             let code = await child.waitForExit()
             guard code == 0 else { throw RemoteError(child.stderrText) }
         }
+        func stage(_ name: String) { FileHandle.standardError.write(Data(("LIVE: " + name + "\n").utf8)) }
         do {
+            stage("connect")
             try await ssh.connect(config)
             try await remote("mkdir " + shellQuote(config.directory))
             let local = environment.home.appendingPathComponent("中文 file.txt")
@@ -30,6 +32,15 @@ final class LiveRemoteTests: XCTestCase {
             let uploaded = try await files.upload(config, file: local, directory: config.directory)
             let preview = try await files.preview(config, uploaded.path)
             XCTAssertEqual(preview.text, String(decoding: bytes, as: UTF8.self))
+            stage("folder and file links")
+            let workspace = Workspace(files: files, agents: agents, config: config)
+            let openedDirectory = try await workspace.openReference(config.directory + "/")
+            XCTAssertTrue(openedDirectory)
+            XCTAssertTrue(workspace.tabs.isEmpty)
+            XCTAssertTrue(workspace.rows.contains { $0.entry.path == uploaded.path })
+            let openedFile = try await workspace.openReference(uploaded.path)
+            XCTAssertFalse(openedFile)
+            XCTAssertEqual(workspace.activeTab?.preview?.text, String(decoding: bytes, as: UTF8.self))
             let destination = environment.home.appendingPathComponent("download.txt")
             try await files.download(config, uploaded.path, to: destination)
             XCTAssertEqual(try Data(contentsOf: destination), bytes)
@@ -73,6 +84,7 @@ final class LiveRemoteTests: XCTestCase {
                 try await engine.remove(id)
                 print("PASS native Swift attachment → real model Edit → checkpoint preview/apply → exact original contents, chat preserved")
             }
+            stage("history")
             let discovered = try await engine.discoverHistory(config)
             XCTAssertGreaterThan(discovered.total, 0)
             let originalCount = engine.sessions.count
@@ -91,6 +103,13 @@ final class LiveRemoteTests: XCTestCase {
                     XCTAssertTrue(messages.contains { $0.error?.contains("hit your 5-hour limit") == true }, "Real quota failure lost its error marker")
                 }
             }
+            stage("account and quota")
+            let account = try await engine.machineDetails(config, section: "accountStatus")
+            XCTAssertNotNil(account["account"]?["email"]?.string, "Remote account identity missing")
+            XCTAssertEqual(account["quota"]?["available"]?.bool, true, "Remote quota unavailable")
+            XCTAssertEqual(Set((account["quota"]?["windows"]?.array ?? []).compactMap { $0["id"]?.string }), Set(["five_hour", "seven_day"]))
+            print("PASS real remote account identity and both subscription quota windows")
+            stage("reconnect")
             agents.close(config)
             await ssh.disconnect(config)
             try await ssh.connect(config)

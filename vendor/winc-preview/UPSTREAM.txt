@@ -1,0 +1,6 @@
+Source: https://github.com/DEEIX-AI/Winc
+Version: 0.1.502
+Revision: a8a42da (matches installed Winc)
+License: Apache-2.0, see LICENSE
+crates/winc-preview and crates/winc-i18n are copied verbatim.
+Root Cargo.toml only narrows workspace membership; the Swift/CLI bridge lives outside this directory.

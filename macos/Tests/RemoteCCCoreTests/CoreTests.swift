@@ -61,18 +61,21 @@ final class AgentEnvironment {
     let files: RemoteFiles
     let config: ConnectionConfig
 
-    init(standIn: Bool = true) throws {
+    init(standIn: Bool = true, workerSource: String? = nil) throws {
         home = FileManager.default.temporaryDirectory.appendingPathComponent("rcc-swift-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         resourcesDirectory = home.appendingPathComponent("resources")
         let node = try XCTUnwrap(Self.which("node"))
-        // Keep the fixture's login shell on the same Node as the test process.
-        let nodeDirectory = URL(fileURLWithPath: node).deletingLastPathComponent().path.replacingOccurrences(of: "'", with: "'\"'\"'")
-        try ("export PATH='" + nodeDirectory + "':$PATH\n").write(to: home.appendingPathComponent(".bash_profile"), atomically: true, encoding: .utf8)
+        // The login shell resets PATH. Keep both fixture generation and the agent
+        // on the same Node/Python installations (including CI's Pillow environment).
+        let executables = [node, Self.which("python3")].compactMap { $0 }
+        let toolDirectories = executables.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }
+        try ("export PATH=" + shellQuote(toolDirectories.joined(separator: ":")) + ":$PATH\n")
+            .write(to: home.appendingPathComponent(".bash_profile"), atomically: true, encoding: .utf8)
         _ = try run(node, [repository.appendingPathComponent("macos/scripts/prepare-server.cjs").path, resourcesDirectory.path])
         if standIn {
             let script = "const{createHash:c}=require('crypto'),z=require('zlib'),fs=require('fs');const d=Buffer.from(JSON.stringify({'task-worker.cjs':fs.readFileSync(0,'utf8')}));const m=JSON.parse(fs.readFileSync(process.argv[1]));m.bundleDigest=c('sha256').update(d).digest('hex');m.bundlePayload=z.gzipSync(d).toString('base64');fs.writeFileSync(process.argv[1],JSON.stringify(m));"
-            _ = try run(node, ["-e", script, resourcesDirectory.appendingPathComponent("manifest.json").path], input: Data(standInWorker.utf8))
+            _ = try run(node, ["-e", script, resourcesDirectory.appendingPathComponent("manifest.json").path], input: Data((workerSource ?? standInWorker).utf8))
         }
         launcher = LocalLauncher(home: home.path)
         agents = AgentClient(launcher: launcher, resources: try ServerResources(directory: resourcesDirectory))
@@ -353,13 +356,9 @@ final class AgentTests: XCTestCase {
 
     func testThumbnailIsSeparateFromOriginalDownload() async throws {
         let env = try AgentEnvironment(); defer { env.cleanup() }
-        // `run` asserts on the exit status, so probe for Pillow without it: a missing module skips the test.
-        guard let python = AgentEnvironment.which("python3") else { throw XCTSkip("Pillow is optional") }
-        let probe = Process()
-        probe.executableURL = URL(fileURLWithPath: python); probe.arguments = ["-c", "import PIL"]
-        probe.standardOutput = FileHandle.nullDevice; probe.standardError = FileHandle.nullDevice
-        try probe.run(); probe.waitUntilExit()
-        guard probe.terminationStatus == 0 else { throw XCTSkip("Pillow is optional") }
+        guard let python = AgentEnvironment.which("python3"), (try? RemoteCCCoreTests.run(python, ["-c", "import PIL"])) != nil else {
+            throw XCTSkip("Pillow is optional")
+        }
         let file = env.home.appendingPathComponent("large.png")
         _ = try RemoteCCCoreTests.run(python, ["-c", "from PIL import Image; import sys; Image.effect_noise((1600,1600),80).convert('RGB').save(sys.argv[1])", file.path])
         let original = try Data(contentsOf: file)
@@ -708,7 +707,8 @@ final class LogicTests: XCTestCase {
         XCTAssertEqual(blocks[5], .table([["h", "i"], ["1", "2"]])); XCTAssertEqual(blocks[6], .rule); XCTAssertEqual(blocks[7], .paragraph("end"))
         XCTAssertEqual(remotePathReference("src/app.js:12")?.path, "src/app.js"); XCTAssertEqual(remotePathReference("src/app.js:12")?.line, 12)
         XCTAssertEqual(remotePathReference("/etc/hosts")?.path, "/etc/hosts"); XCTAssertEqual(remotePathReference("a.pdf")?.path, "a.pdf")
-        for text in ["e.g.", "v1.2", "npm install", "https://x.y/z", "/"] { XCTAssertNil(remotePathReference(text), text) }
+        XCTAssertEqual(remotePathReference("/")?.path, "/") // Root is a navigable folder.
+        for text in ["e.g.", "v1.2", "npm install", "https://x.y/z"] { XCTAssertNil(remotePathReference(text), text) }
     }
 
     func testSchemaFields() throws {

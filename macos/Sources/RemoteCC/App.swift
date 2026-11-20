@@ -18,7 +18,7 @@ struct RemoteCCApp: App {
                 .onAppear { delegate.model = model; model.startUpdateChecks() }
         }
         .defaultSize(width: 1160, height: 760)
-        .windowToolbarStyle(.unifiedCompact)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("检查更新…") { Task { await model.checkForUpdates(manual: true) } }
@@ -35,8 +35,9 @@ struct RemoteCCApp: App {
                 Button("保存到远端") { model.saveActiveTab() }.keyboardShortcut("s")
             }
             CommandMenu("工作区") {
-                Button("在文件中搜索") { model.panel = .search; model.showFiles = true }.keyboardShortcut("f", modifiers: [.command, .shift])
-                Button("显示 / 隐藏文件面板") { model.showFiles.toggle() }.keyboardShortcut("b")
+                Button("显示文件") { model.openPanel(.files) }.keyboardShortcut("e", modifiers: [.command, .shift])
+                Button("在文件中搜索") { model.openPanel(.search) }.keyboardShortcut("f", modifiers: [.command, .shift])
+                Button("显示 / 隐藏侧栏") { model.sidebarVisible.toggle() }.keyboardShortcut("b")
                 Divider()
                 Button("模型与会话设置…") { model.showPreferences = true }
                 Button("连接 SSH…") { model.showConnect = true }
@@ -56,6 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A bare SwiftPM executable starts as a background process unless told otherwise.
         UNUserNotificationCenter.current().delegate = self
+        // A replaced or directly launched app can retain a generic system icon.
+        // Supply the bundled icon for running-app surfaces as well as Info.plist.
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         #if DEBUG
@@ -89,10 +96,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             switch environment["MIRROR_SCENE"] {
             case "connect": self?.model?.showConnect = true
             case "home": self?.model?.activeId = nil
-            case "files", "markdown-files": self?.model?.showFiles = true
+            case "settings": self?.model?.presentation = .settings
+            case "palette":
+                if let workspace = self?.model?.activeWorkspace { DemoData.seed(workspace) }
+                self?.model?.presentation = .quickOpen
+            case "tools": self?.model?.presentation = .sessionTools
+            case "account": self?.model?.presentation = .account
+            case "activity": self?.model?.presentation = .activity
+            case "account-usage": self?.model?.presentation = .accountUsage
+            case "usage": self?.model?.presentation = .usage
+            case "preferences": self?.model?.presentation = .preferences
+            case "projects": self?.model?.presentation = .projectPicker
+            case "worktree": self?.model?.presentation = .worktree
+            case "remote-setup": self?.model?.presentation = .remoteSetup(DemoData.config)
+            case "edit-machine": self?.model?.presentation = .editMachine(DemoData.config)
+            case "key-login": self?.model?.presentation = .keyLogin(DemoData.config)
             case "details": self?.model?.showSessionDetails = true
-            case "gallery": self?.model?.showChatGallery = true
+            case "archive": self?.model?.showArchived = true
+            case "gallery": self?.model?.presentation = .chatGallery
+            case "rename": self?.model?.presentation = .rename(WorkbenchRename(title: "重命名对话", initial: "检查登录接口", save: { _ in }))
+            case "confirmation": self?.model?.presentation = .confirmation(WorkbenchConfirmation(title: "从侧栏移除项目？", detail: "/workspace/web-app", actionTitle: "移除", action: {}))
+            case "changes", "search":
+                if let workspace = self?.model?.activeWorkspace { DemoData.seed(workspace) }
+                self?.model?.openPanel(environment["MIRROR_SCENE"] == "changes" ? .changes : .search)
+            case "diff":
+                self?.model?.showFiles = false
+                if let workspace = self?.model?.activeWorkspace {
+                    DemoData.seed(workspace)
+                    workspace.activeTabId = workspace.tabs.first { $0.isDiff }?.id
+                    workspace.onChange?()
+                }
             case "toast": self?.model?.show("文档示例不连接服务器")
+            case "files", "markdown-files":
+                self?.model?.showFiles = true
+                if let workspace = self?.model?.activeWorkspace { DemoData.seed(workspace) }
             default: break
             }
         }

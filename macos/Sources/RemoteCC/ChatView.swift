@@ -5,35 +5,10 @@ import RemoteCCCore
 
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 0) {
-                if let session = model.active, model.projectMissing(session) {
-                    HStack {
-                        Label("远端目录已不存在，历史对话仍可查看", systemImage: "folder.badge.questionmark")
-                        Spacer()
-                        Button("选择项目") { model.showProjectPicker = true }
-                    }.font(.callout).padding(12).background(Color.orange.opacity(0.08))
-                }
-                if model.active == nil {
-                    MachineHomeView()
-                } else if let session = model.active, !session.messages.isEmpty || session.remoteHistoryRef != nil {
-                    if model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil || session.historyLoaded == false {
-                        HistoryNotice(session: session).padding(.horizontal, 24).padding(.vertical, 10)
-                            .background(WorkbenchTheme.surface.opacity(0.5))
-                    }
-                    MessagesList(session: session, feed: model.replyFeed).id(session.id)
-                        // The previous conversation leaves at once; fading both would lay out two transcripts.
-                        .transition(.asymmetric(insertion: .opacity, removal: .identity))
-                } else {
-                    WelcomeView()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: model.activeId)
+            ChatContent(model: model, transcript: model.transcript)
 
             // Reserve real layout space for the composer. A safe-area inset on the
             // outer stack lets the nested native transcript draw behind the input.
@@ -47,6 +22,62 @@ struct ChatView: View {
         .background(WorkbenchTheme.canvas)
     }
 }
+
+@MainActor final class TranscriptState: ObservableObject {
+    @Published private(set) var session: ChatSession?
+    func update(_ value: ChatSession?) {
+        if session != value { session = value }
+    }
+}
+
+private struct ChatContent: View {
+    let model: AppModel
+    @ObservedObject var transcript: TranscriptState
+    var body: some View {
+        Group {
+            if transcript.session == nil {
+                MachineHomeView()
+            } else if let session = transcript.session, !session.messages.isEmpty || session.remoteHistoryRef != nil {
+                MessagesList(session: session, model: model,
+                    historyError: model.historyRefreshErrors[session.id], refreshing: model.refreshingHistory.contains(session.id))
+                    .id(session.id)
+                    .padding(.top, 32)
+            } else {
+                WelcomeView()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .top) {
+            if let session = transcript.session {
+                HStack(spacing: 8) {
+                    if model.projectMissing(session) {
+                        Label("目录已不存在", systemImage: "folder.badge.questionmark")
+                        Button("选择项目") { model.showProjectPicker = true }
+                    } else if let config = model.currentConfig,
+                              let issue = model.machineHealth[config.key]?.first(where: { $0.blocking }) {
+                        Label(issue.title, systemImage: "exclamationmark.triangle").lineLimit(1)
+                        switch issue.action {
+                        case .install: Button("安装") { model.openRemoteSetup(config) }
+                        case .login(let command): Button("登录") { model.runInTerminal(config, command: command) }
+                        case .copy(let command): Button("复制命令") { model.copyCommand(command, note: "已复制") }
+                        case nil: EmptyView()
+                        }
+                        Button("重试") { model.recheckMachine(config) }
+                            .disabled(model.checkingHealth.contains(config.key))
+                    } else if model.refreshingHistory.contains(session.id) || model.historyRefreshErrors[session.id] != nil || session.historyLoaded == false {
+                        HistoryNotice(session: session).id(session.id)
+                    }
+                    Spacer(minLength: 0)
+                }.font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                    .padding(.horizontal, 24).frame(height: 32)
+                    .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
+                    .background(WorkbenchTheme.canvas)
+            }
+        }
+        .clipped()
+    }
+}
+
 
 struct WelcomeView: View {
     @EnvironmentObject private var model: AppModel
@@ -86,35 +117,53 @@ struct WelcomeView: View {
 }
 
 struct MessagesList: View {
-    @EnvironmentObject private var model: AppModel
-    /// As of the last app-wide update. Streamed reply text arrives through `feed` without one, so `body` reads the engine.
     let session: ChatSession
-    @ObservedObject var feed: ReplyFeed
+    // Actions use the model, but unrelated toolbar/draft changes must not invalidate the transcript.
+    let model: AppModel
+    let historyError: String?
+    let refreshing: Bool
+
+    private let viewportState: TranscriptViewport
     @StateObject private var selection = TranscriptSelection()
     @State private var followsReply = true
     @State private var farFromBottom = false
-    @State private var visibleMessageLimit = 50
+    @State private var messageWindow = TranscriptWindow()
+    @State private var followTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    init(session: ChatSession, model: AppModel, historyError: String?, refreshing: Bool,
+         initialWindow: TranscriptWindow? = nil) {
+        self.session = session; self.model = model
+        self.historyError = historyError; self.refreshing = refreshing
+        let state = model.transcriptViewport(for: session.id)
+        viewportState = state
+        _followsReply = State(initialValue: state.following)
+        _messageWindow = State(initialValue: initialWindow ?? state.window)
+    }
+
     var body: some View {
-        let session = model.engine?.session(self.session.id) ?? self.session
+        let visibleRange = messageWindow.range(in: session.messages)
+        GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if session.messages.count > visibleMessageLimit {
-                        Button("加载更早消息") {
-                            let anchor = session.messages.suffix(visibleMessageLimit).first?.id
+                // This bounded window needs exact heights. Lazy estimates combined
+                // with bottom anchoring can repeatedly relayout long streaming replies.
+                VStack(alignment: .leading, spacing: 12) {
+                    if visibleRange.lowerBound > 0 {
+                        Button("更早消息") {
                             followsReply = false
-                            visibleMessageLimit += 50
+                            let anchor = session.messages[visibleRange.lowerBound].id
+                            messageWindow.earlier(in: session.messages)
                             Task { @MainActor in
                                 await Task.yield()
-                                if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                                proxy.scrollTo(anchor, anchor: .top)
                             }
-                        }
-                            .font(.caption)
+                        }.font(.caption)
                     }
-                    if session.remoteHistoryRef != nil,
-                       session.historyBefore != nil && session.historyLoaded != false {
+                    if visibleRange.lowerBound == 0, session.remoteHistoryRef != nil,
+                       session.historyBefore != nil && session.historyLoaded != false,
+                       historyError == nil,
+                       !refreshing {
                         HistoryNotice(session: session) {
                             followsReply = false
                             let anchor = session.messages.first?.id
@@ -126,9 +175,9 @@ struct MessagesList: View {
                             }
                         }
                     }
-                    ForEach(Array(session.messages.enumerated().suffix(visibleMessageLimit)), id: \.element.id) { index, message in
+                    ForEach(session.messages[visibleRange]) { message in
                         // Equatable lets unchanged messages skip rendering while the last one streams.
-                        MessageRow(message: message, busy: index == session.messages.count - 1 && session.isBusy, sessionStatus: session.status, showHeader: index == 0 || session.messages[index - 1].role != "assistant", actions: FileActions(open: { model.open($0, line: $1) }))
+                        MessageRow(message: message, busy: message.id == session.messages.last?.id && session.isBusy, sessionStatus: session.status, actions: FileActions(open: { model.open($0, line: $1) }, model: model, connected: model.isConnected))
                             .equatable()
                             .id(message.id)
                     }
@@ -137,52 +186,94 @@ struct MessagesList: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("这条历史记录未保存用量结果", systemImage: "chart.bar").font(.callout.weight(.medium))
                             Text("可直接查看账户当前的五小时与本周用量，无需发送消息。")
-                                .font(.callout).foregroundStyle(.secondary)
+                                .font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
                             Button("查看当前用量") { model.presentation = .accountUsage }
                                 .buttonStyle(WorkbenchButtonStyle())
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                             .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 12))
                     }
+                    if visibleRange.upperBound < session.messages.count {
+                        Button("较新消息") {
+                            let anchor = session.messages[visibleRange.upperBound - 1].id
+                            messageWindow.later(in: session.messages)
+                            Task { @MainActor in
+                                await Task.yield()
+                                proxy.scrollTo(anchor, anchor: .bottom)
+                            }
+                        }.font(.caption)
+                    }
                     Color.clear.frame(height: 1).id("bottom")
+                        .onAppear { if #unavailable(macOS 15) { farFromBottom = false } }
+                        .onDisappear { if #unavailable(macOS 15) { farFromBottom = true } }
                 }
+                .background(TranscriptViewportBridge(state: viewportState))
                 .environment(\.transcriptSelection, selection)
-                .padding(.horizontal, 28).padding(.vertical, 24)
+                .padding(.horizontal, 24).padding(.vertical, 20)
                 .frame(maxWidth: WorkbenchTheme.conversationWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
-                .background(ReplyScrollObserver(follows: followsReply, selection: selection) { far, near in
-                    // Only threshold crossings arrive here, so scrolling does not re-evaluate the transcript.
-                    farFromBottom = far
-                    if near { followsReply = true }
-                })
             }
             .clipped()
-            .defaultScrollAnchor(.bottom)
-            .background(ScrollReadingDetector { followsReply = false })
-            .overlay(alignment: .bottomTrailing) {
-                // The animation is scoped to this stack so streamed transcript layout never animates.
-                ZStack {
-                    if farFromBottom && !followsReply {
-                        Button {
-                            followsReply = true
-                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
-                        } label: {
-                            Image(systemName: "arrow.down").font(.system(size: 14, weight: .medium))
-                                .frame(width: 34, height: 34)
-                                .background(WorkbenchTheme.surface, in: Circle())
-                                .overlay(Circle().strokeBorder(WorkbenchTheme.border))
-                        }.buttonStyle(.plain).help("回到最新").accessibilityLabel("回到最新")
-                            .shadow(color: .black.opacity(0.06), radius: 5, y: 2).padding(16)
-                            .transition(.opacity.combined(with: .scale(scale: 0.85)))
-                    }
+            .coordinateSpace(name: "replyViewport")
+            .onChange(of: session.messages.last, initial: true) { scheduleFollow(proxy) }
+            .onChange(of: followsReply) {
+                // Reaching the bottom only arms future streaming updates. A scrollTo
+                // here fights the trackpad momentum/rubber-band settling.
+                if !followsReply {
+                    cancelFollow()
+                    messageWindow.pin(in: session.messages)
+                } else if messageWindow.range(in: session.messages).upperBound == session.messages.count {
+                    messageWindow.latest()
                 }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: farFromBottom && !followsReply)
             }
-            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
-            .onChange(of: followsReply) { if followsReply { proxy.scrollTo("bottom", anchor: .bottom) } }
-            .onChange(of: session.messages.count) { oldCount, newCount in
-                // New replies must not evict the messages the user is reading.
-                visibleMessageLimit += max(0, newCount - oldCount)
+            .onChange(of: messageWindow) { viewportState.window = messageWindow }
+            .onChange(of: followsReply) { viewportState.following = followsReply }
+            .onDisappear {
+                cancelFollow()
+                viewportState.window = messageWindow
+                viewportState.following = followsReply
             }
+            .modifier(TranscriptScrollTracking(farFromBottom: $farFromBottom, following: $followsReply))
+            .overlay(alignment: .bottomTrailing) {
+                // AX scrolling does not necessarily emit wheel events. The return
+                // control is available whenever the latest message is off screen.
+                if farFromBottom || visibleRange.upperBound < session.messages.count {
+                    Button {
+                        messageWindow.latest()
+                        followsReply = true
+                        Task { @MainActor in
+                        await Task.yield()
+                        withAnimation(Motion.animation(Motion.scroll, reduce: reduceMotion)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.down").font(.system(size: 14, weight: .medium))
+                            .frame(width: 34, height: 34)
+                            .background(WorkbenchTheme.surface, in: Circle())
+                            .overlay(Circle().strokeBorder(WorkbenchTheme.border))
+                    }.buttonStyle(.plain).help("回到最新").accessibilityLabel("回到最新")
+                        .shadow(color: .black.opacity(0.06), radius: 5, y: 2).padding(16)
+                }
+            }
+
+        }
+        }
+    }
+
+    private func cancelFollow() {
+        followTask?.cancel()
+        followTask = nil
+    }
+
+    private func scheduleFollow(_ proxy: ScrollViewProxy) {
+        guard followsReply, messageWindow.range(in: session.messages).upperBound == session.messages.count, followTask == nil else { return }
+        followTask = Task { @MainActor in
+            // Coalesce streaming updates without cancelling every pending scroll.
+            do { try await Task.sleep(for: .milliseconds(50)) }
+            catch { return }
+            followTask = nil
+            guard followsReply, model.activeId == session.id else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
         }
     }
 }
@@ -191,6 +282,7 @@ struct HistoryNotice: View {
     @EnvironmentObject private var model: AppModel
     let session: ChatSession
     var loadEarlier: (() -> Void)? = nil
+    @State private var showsError = false
     private var refreshing: Bool { model.refreshingHistory.contains(session.id) }
 
     var body: some View {
@@ -199,10 +291,37 @@ struct HistoryNotice: View {
                 ProgressView().controlSize(.mini)
                 Text(session.historyLoaded == false ? "正在加载历史消息…" : "正在同步最新消息…")
             } else if let error = model.historyRefreshErrors[session.id] {
-                Label("消息同步失败", systemImage: "exclamationmark.circle")
-                Text(error).lineLimit(1).help(error)
-                Spacer()
-                Button("重试") { Task { await model.refreshVisibleHistory(session.id) } }.disabled(!model.isConnected)
+                HStack(spacing: 2) {
+                    Button { showsError.toggle() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.circle")
+                                .foregroundStyle(WorkbenchTheme.warning)
+                            Text("同步失败")
+                        }
+                        .padding(.leading, 8).padding(.trailing, 6)
+                        .frame(height: 28)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("查看同步详情")
+                    .popover(isPresented: $showsError, arrowEdge: .bottom) {
+                        Text(error)
+                            .font(.callout)
+                            .foregroundStyle(WorkbenchTheme.inkMuted)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(width: 300, alignment: .leading)
+                            .padding(16)
+                    }
+                    Button { Task { await model.refreshVisibleHistory(session.id) } } label: {
+                        WorkbenchIcon(symbol: "arrow.clockwise")
+                    }
+                    .buttonStyle(WorkbenchIconButtonStyle())
+                    .help("重试同步").accessibilityLabel("重试同步")
+                    .disabled(!model.isConnected)
+                    .padding(.trailing, 2)
+                }
+                .background(WorkbenchTheme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
             } else if session.historyLoaded == false {
                 Text(model.isConnected ? "历史消息尚未加载" : "连接服务器后加载历史消息")
                 Spacer()
@@ -213,13 +332,15 @@ struct HistoryNotice: View {
                     else { model.perform { try await model.engine?.loadHistory(session.id, older: true) } }
                 }.disabled(session.isBusy || !model.isConnected)
             }
-        }.font(.caption).foregroundStyle(.secondary).buttonStyle(.borderless)
+        }.font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).buttonStyle(.borderless)
     }
 }
 
 /// Closures are not comparable, so they are left out of MessageRow's equality.
 struct FileActions {
     let open: (String, Int?) -> Void
+    var model: AppModel? = nil
+    var connected = false
 }
 
 struct MessageRow: View, Equatable {
@@ -228,26 +349,23 @@ struct MessageRow: View, Equatable {
     var sessionStatus: String = "idle"
     var showHeader = true
     let actions: FileActions
-    @EnvironmentObject private var model: AppModel
-    @State private var copied = false
+    private var model: AppModel? { actions.model }
     @Environment(\.transcriptSelection) private var selection
-    @State private var showRewind = false
 
-    static func == (a: MessageRow, b: MessageRow) -> Bool { a.busy == b.busy && a.sessionStatus == b.sessionStatus && a.showHeader == b.showHeader && a.message == b.message }
+
+    static func == (a: MessageRow, b: MessageRow) -> Bool { a.busy == b.busy && a.sessionStatus == b.sessionStatus && a.showHeader == b.showHeader && a.message == b.message && a.actions.connected == b.actions.connected }
 
     var body: some View {
         Group { if message.role == "user" { userBody } else { assistantBody } }
-            .sheet(isPresented: $showRewind) {
-                if let checkpoint = message.checkpointId, let id = model.activeId { RewindSheet(sessionId: id, checkpoint: checkpoint).workbenchPanel() }
-            }
+
     }
 
     private var userBody: some View {
         VStack(alignment: .trailing, spacing: 6) {
             if let text = message.text, !text.isEmpty {
             SelectableTranscriptText(text: text, markdown: false, scope: selection)
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.large))
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(WorkbenchTheme.ink.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
             }
             if let files = message.attachments {
                 ForEach(files) { file in
@@ -261,8 +379,10 @@ struct MessageRow: View, Equatable {
     private var assistantBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array((message.blocks ?? []).enumerated()).filter { !isDuplicateError($0.element) }, id: \.offset) { index, block in
-                BlockView(block: block, actions: actions, thinkingActive: busy && sessionStatus == "working" && index == (message.blocks?.count ?? 0) - 1)
-                    .environment(\.replyStreaming, busy && index == (message.blocks?.count ?? 0) - 1)
+                let writing = busy && index == (message.blocks?.count ?? 0) - 1
+                BlockView(block: block, actions: actions, thinkingActive: writing && sessionStatus == "working")
+                    .equatable()
+                    .environment(\.replyStreaming, writing)
             }
             if let issue = message.serviceIssue {
                 VStack(alignment: .leading, spacing: 6) {
@@ -272,20 +392,26 @@ struct MessageRow: View, Equatable {
                         Text("预计恢复：" + Date(timeIntervalSince1970: reset).formatted(date: .abbreviated, time: .shortened)).font(.caption)
                     }
                 }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
+                    .background(WorkbenchTheme.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             }
             if let error = message.error {
-                ReplyFailureView(error: error, canEdit: model.active?.isBusy != true, edit: restoreRequest)
+                ReplyFailureView(error: error, canEdit: model?.active?.isBusy != true, edit: restoreRequest)
             }
-            if busy && message.error == nil && !hasInlineProgress {
-                HStack(spacing: 8) {
-                    if sessionStatus == "permission" { Image(systemName: "hand.raised").foregroundStyle(WorkbenchTheme.accent) }
-                    else { ProgressView().controlSize(.mini) }
-                    Text(message.activity ?? activityLabel).font(.callout).foregroundStyle(.secondary)
-                }.padding(.vertical, 8).accessibilityElement(children: .combine)
-            }
-            if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(.secondary) }
-            if !busy { footer }
+            ZStack(alignment: .leading) {
+                if busy && message.error == nil && !hasInlineProgress {
+                    HStack(spacing: 8) {
+                        if sessionStatus == "permission" { Image(systemName: "hand.raised").foregroundStyle(WorkbenchTheme.accent) }
+                        else { ProgressView().controlSize(.mini) }
+                        Text(message.activity ?? activityLabel).font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
+                    }.accessibilityElement(children: .combine)
+                } else if !busy {
+                    HStack(spacing: 8) {
+                        if message.interrupted == true { Text("已停止").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
+                        MessageFooter(message: message, model: model)
+                    }
+                }
+            }.frame(height: 28, alignment: .leading)
+
         }
     }
 
@@ -308,7 +434,7 @@ struct MessageRow: View, Equatable {
     }
 
     private func restoreRequest() {
-        guard let session = model.active,
+        guard let model, let session = model.active,
               let index = session.messages.firstIndex(where: { $0.id == message.id }),
               let request = session.messages[..<index].last(where: { $0.role == "user" }) else { return }
         guard (model.drafts[session.id] ?? "").isEmpty, (model.attachments[session.id] ?? []).isEmpty else {
@@ -319,7 +445,16 @@ struct MessageRow: View, Equatable {
         model.composerFocus = UUID()
     }
 
-    @ViewBuilder private var footer: some View {
+}
+
+// Keep pointer feedback local to the controls; hovering must not invalidate
+// the message body and its native text layout.
+private struct MessageFooter: View {
+    let message: ChatMessage
+    let model: AppModel?
+    @State private var copied = false
+
+    @ViewBuilder var body: some View {
         let text = (message.blocks ?? []).filter { $0.type == "text" && !isDuplicateError($0) }.compactMap(\.text).joined(separator: "\n\n")
         let isUsageReport = (message.blocks ?? []).contains { UsageReport($0.text ?? "") != nil }
         let parts = isUsageReport ? [] : [message.model, message.durationMs.map { String(format: "%.1fs", $0 / 1000) }, message.costUSD.map { String(format: "$%.4f", $0) }].compactMap { $0 }
@@ -328,17 +463,21 @@ struct MessageRow: View, Equatable {
                 if !text.isEmpty {
                     Button { copyToPasteboard(text); copied = true } label: {
                         Label(copied ? "已复制" : "复制回复", systemImage: copied ? "checkmark" : "doc.on.doc")
-                    }.labelStyle(.iconOnly).help(copied ? "已复制" : "复制回复").buttonStyle(QuietButtonStyle()).task(id: copied) {
+                    }.labelStyle(.iconOnly).help(copied ? "已复制" : "复制回复").buttonStyle(WorkbenchIconButtonStyle()).task(id: copied) {
                         if copied { try? await Task.sleep(nanoseconds: 2_000_000_000); copied = false }
                     }
                 }
                 if message.checkpointId != nil && message.error == nil && !isUsageReport {
-                    Button { showRewind = true } label: { Label("回退文件", systemImage: "arrow.uturn.backward") }.buttonStyle(QuietButtonStyle()).disabled(model.active?.isBusy == true || !model.isConnected)
+                    Button { if let model, let checkpoint = message.checkpointId, let id = model.activeId { model.presentation = .rewind(session: id, checkpoint: checkpoint) } } label: { Label("回退文件", systemImage: "arrow.uturn.backward") }.buttonStyle(QuietButtonStyle()).disabled(model?.active?.isBusy == true || model?.isConnected != true)
                 }
                 Text(parts.joined(separator: " · ")).lineLimit(1).truncationMode(.middle)
             }
-            .font(.caption2).foregroundStyle(.secondary)
+            .font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted)
         }
+    }
+
+    private func isDuplicateError(_ block: Block) -> Bool {
+        message.error.map { ReplyFailure($0).duplicates(block) } ?? false
     }
 }
 
@@ -355,30 +494,41 @@ struct ReplyFailureView: View {
 
     var body: some View {
         let failure = ReplyFailure(error)
-        VStack(alignment: .leading, spacing: 10) {
-            Label(failure.title, systemImage: "exclamationmark.circle")
-                .font(.callout.weight(.medium)).foregroundStyle(.orange)
-            Text(failure.summary).font(.callout).foregroundStyle(.secondary).lineLimit(expanded ? nil : 2)
-            HStack(spacing: 12) {
-                Button("编辑请求", action: edit).disabled(!canEdit)
-                Button(expanded ? "收起详情" : "查看详情") { expanded.toggle() }
-                if expanded { Button("复制错误") { copyToPasteboard(error) } }
-            }.buttonStyle(.borderless).font(.caption)
-            if expanded {
-                Text(error).font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled).foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "exclamationmark.circle").foregroundStyle(WorkbenchTheme.warning).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(failure.title).font(.system(size: 12, weight: .medium))
+                if !failure.isQuotaProtection {
+                    Text(failure.summary).font(.system(size: 12)).foregroundStyle(WorkbenchTheme.inkMuted)
+                        .lineLimit(expanded ? nil : 2)
+                }
+                HStack(spacing: 12) {
+                    Button(expanded ? "收起" : "详情") { expanded.toggle() }
+                    Button("编辑请求", action: edit).disabled(!canEdit)
+                    if expanded { Button("复制错误") { copyToPasteboard(error) } }
+                }.buttonStyle(.borderless).font(.system(size: 11))
+                if expanded {
+                    Text(error).font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled).foregroundStyle(WorkbenchTheme.inkMuted)
+                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                }
             }
         }
-        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
-        .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
+        .padding(.vertical, 8).padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(WorkbenchTheme.ink.opacity(0.025), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
-struct BlockView: View {
+struct BlockView: View, Equatable {
     let block: Block
     let actions: FileActions
     var thinkingActive = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.block == rhs.block && lhs.thinkingActive == rhs.thinkingActive && lhs.actions.connected == rhs.actions.connected
+    }
 
     var body: some View {
         switch block.type {
@@ -390,22 +540,25 @@ struct BlockView: View {
                     .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 10))
             } else { MarkdownView(text: block.text ?? "", actions: actions) }
-        case "thinking": ThinkingCard(text: block.text ?? "", active: thinkingActive)
+        case "thinking":
+            if thinkingActive || !(block.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                ThinkingCard(text: block.text ?? "", active: thinkingActive)
+            }
         case "tool": ToolCard(block: block, actions: actions)
         case "notice":
             Text(block.text ?? "").font(.caption)
-                .foregroundStyle(block.level == "error" ? Color.red : Color.secondary)
+                .foregroundStyle(block.level == "error" ? WorkbenchTheme.error : WorkbenchTheme.inkMuted)
                 .frame(maxWidth: .infinity, alignment: block.level == "boundary" ? .center : .leading)
                 .padding(.vertical, 6)
                 .overlay(alignment: .top) { if block.level == "boundary" { Divider() } }
                 .overlay(alignment: .bottom) { if block.level == "boundary" { Divider() } }
-        default: Text(block.text ?? "暂不支持的消息类型：\(block.type)").font(.caption).foregroundStyle(.secondary)
+        default: Text(block.text ?? "暂不支持的消息类型：\(block.type)").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
         }
     }
 }
 
 struct ToolCard: View {
-    @EnvironmentObject private var model: AppModel
+    private var model: AppModel? { actions.model }
     let block: Block
     let actions: FileActions
     @State private var expanded: Bool?
@@ -416,8 +569,8 @@ struct ToolCard: View {
     }
     private var dotColor: Color {
         switch block.status {
-        case "running": return .orange
-        case "error": return .red
+        case "running": return WorkbenchTheme.warning
+        case "error": return WorkbenchTheme.error
         case "stopped", "history": return .gray
         default: return WorkbenchTheme.sage
         }
@@ -435,30 +588,30 @@ struct ToolCard: View {
                 if let file = view.file, ["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"].contains(block.name ?? "") {
                     HStack {
                         Button("打开文件") { actions.open(file, view.line) }
-                        Button("下载") { model.download(file) }
-                        if block.name != "Read" { Button("查看变更") { model.panel = .changes; model.showFiles = true } }
-                    }.font(.caption).disabled(!model.isConnected)
+                        Button("下载") { model?.download(file) }
+                        if block.name != "Read" { Button("查看变更") { model?.openPanel(.changes) } }
+                    }.font(.caption).disabled(model?.isConnected != true)
                 }
-                if let summary = block.summary { Text(summary).font(.caption).foregroundStyle(.secondary) }
+                if let summary = block.summary { Text(summary).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
                 if let body = view.body { ToolBodyView(body: body, actions: actions) }
                 if let children = block.children, !children.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(children) { child in
                             let step = ToolPresentation(name: child.name, input: child.input)
                             HStack(spacing: 8) {
-                                Text(step.title).fontWeight(.medium).foregroundStyle(child.status == "running" ? Color.orange : child.status == "error" ? Color.red : Color.primary)
-                                Text(step.file ?? step.subject ?? "").foregroundStyle(.secondary).lineLimit(1)
+                                Text(step.title).fontWeight(.medium).foregroundStyle(child.status == "running" ? WorkbenchTheme.warning : child.status == "error" ? WorkbenchTheme.error : Color.primary)
+                                Text(step.file ?? step.subject ?? "").foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1)
                             }
                         }
                     }
                     .font(.caption)
                 }
-                if let text = block.agentText { Text(text).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                if let text = block.agentText { Text(text).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled) }
                 if let output = block.output, !output.isEmpty, !view.hidesOutput || block.status == "error" {
-                    CodeBlock(text: output, color: block.status == "error" ? .red : .secondary)
+                    CodeBlock(text: output, color: block.status == "error" ? WorkbenchTheme.error : WorkbenchTheme.inkMuted)
                 } else if block.name == "Read" {
                     Text(block.status == "running" ? "正在读取…" : block.status == "history" ? "读取结果未保存在历史中" : "无输出")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                 }
             }
             .padding(.top, 4)
@@ -470,14 +623,14 @@ struct ToolCard: View {
                 if let file = view.file {
                     Button((file as NSString).lastPathComponent) { actions.open(file, view.line) }.buttonStyle(.link).lineLimit(1).truncationMode(.middle).help(file)
                 }
-                if let subject = view.subject { Text(subject).foregroundStyle(.secondary).lineLimit(1) }
+                if let subject = view.subject { Text(subject).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(1) }
                 Spacer(minLength: 4)
-                if !statusText.isEmpty { Text(statusText).foregroundStyle(block.status == "error" ? Color.red : Color.secondary) }
+                if !statusText.isEmpty { Text(statusText).foregroundStyle(block.status == "error" ? WorkbenchTheme.error : WorkbenchTheme.inkMuted) }
             }
             .font(.caption)
         }
         .padding(.vertical, 2).padding(.horizontal, 2)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(WorkbenchTheme.inkMuted)
     }
 }
 
@@ -488,8 +641,8 @@ struct ToolBodyView: View {
 
     var body: some View {
         switch body_ {
-        case .command(let text): CodeBlock(text: text, color: .primary)
-        case .code(let text): CodeBlock(text: text, color: .secondary)
+        case .command(let text): CodeBlock(text: text, color: WorkbenchTheme.ink)
+        case .code(let text): CodeBlock(text: text, color: WorkbenchTheme.inkMuted)
         case .diff(let rows): DiffView(rows: rows, maxHeight: 420)
         case .markdown(let text): MarkdownView(text: text, actions: actions)
         case .todos(let items): TodoList(items: items)
@@ -504,10 +657,10 @@ struct TodoList: View {
             ForEach(items) { item in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: item.status == "completed" ? "checkmark.circle.fill" : item.status == "in_progress" ? "circle.lefthalf.filled" : "circle")
-                        .foregroundStyle(item.status == "in_progress" ? Color.orange : Color.secondary)
+                        .foregroundStyle(item.status == "in_progress" ? WorkbenchTheme.warning : WorkbenchTheme.inkMuted)
                     Text(item.text)
                         .strikethrough(item.status == "completed")
-                        .foregroundStyle(item.status == "completed" ? Color.secondary : Color.primary)
+                        .foregroundStyle(item.status == "completed" ? WorkbenchTheme.inkMuted : Color.primary)
                         .fontWeight(item.status == "in_progress" ? .semibold : .regular)
                 }
             }
@@ -518,27 +671,39 @@ struct TodoList: View {
 
 struct CodeBlock: View {
     let text: String
-    var color: Color = .primary
+    var color: Color = WorkbenchTheme.ink
+    @State private var expanded = false
 
     var body: some View {
-        OverflowScroll(axes: [.horizontal, .vertical]) {
-            Text(text).font(.system(size: 11, design: .monospaced)).foregroundStyle(color).textSelection(.enabled)
-                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        VStack(alignment: .leading, spacing: 0) {
+            OverflowScroll {
+                Text(expanded ? text : lines.prefix(18).joined(separator: "\n"))
+                    .font(.system(size: 12, design: .monospaced)).lineSpacing(3)
+                    .foregroundStyle(color).textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: true).padding(10)
+            }.fixedSize(horizontal: false, vertical: true)
+            if lines.count > 18 {
+                Button(expanded ? "收起" : "展开全部 \(lines.count) 行") { expanded.toggle() }
+                    .buttonStyle(QuietButtonStyle()).font(.caption).padding(.horizontal, 8).padding(.bottom, 4)
+            }
         }
-        .frame(maxHeight: 320)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+        .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small))
+        .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.small).strokeBorder(WorkbenchTheme.border))
     }
 }
 
 struct DiffView: View {
     let rows: [DiffRow]
     var maxHeight: CGFloat? = nil
+    @State private var expanded = false
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+        let limit = Int((maxHeight ?? 320) / 18)
+        VStack(alignment: .leading, spacing: 4) {
+        ScrollView(.horizontal) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array((expanded ? rows : Array(rows.prefix(limit))).enumerated()), id: \.offset) { _, row in
                     Text(prefix(row) + row.text)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(foreground(row))
@@ -549,18 +714,21 @@ struct DiffView: View {
             }
             .textSelection(.enabled)
         }
-        // A diff shorter than the pane starts at the top instead of floating in the middle.
-        .defaultScrollAnchor(.topLeading)
-        .frame(maxHeight: maxHeight)
+        .fixedSize(horizontal: false, vertical: true)
+        if rows.count > limit {
+            Button(expanded ? "收起" : "展开全部 \(rows.count) 行") { expanded.toggle() }
+                .buttonStyle(QuietButtonStyle()).font(.caption)
+        }
+        }
     }
     private func prefix(_ row: DiffRow) -> String {
         switch row.kind { case .added: return "+ "; case .removed: return "- "; case .context: return "  "; case .hunk: return "" }
     }
     private func foreground(_ row: DiffRow) -> Color {
-        switch row.kind { case .added: return .green; case .removed: return .red; case .hunk: return .blue; case .context: return .primary }
+        switch row.kind { case .added: return WorkbenchTheme.added; case .removed: return WorkbenchTheme.removed; case .hunk: return WorkbenchTheme.modified; case .context: return WorkbenchTheme.ink }
     }
     private func rowBackground(_ row: DiffRow) -> Color {
-        switch row.kind { case .added: return .green.opacity(0.1); case .removed: return .red.opacity(0.1); case .hunk: return .blue.opacity(0.06); case .context: return .clear }
+        switch row.kind { case .added: return WorkbenchTheme.added.opacity(0.12); case .removed: return WorkbenchTheme.removed.opacity(0.12); case .hunk: return WorkbenchTheme.modified.opacity(0.08); case .context: return .clear }
     }
 }
 

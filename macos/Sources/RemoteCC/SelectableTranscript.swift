@@ -4,6 +4,15 @@ import SwiftUI
 import RemoteCCCore
 
 /// One selection scope per conversation; text stays native and tool controls remain interactive.
+private struct ReplyStreamingKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// True for the block a reply is still writing, so a capped code block keeps its newest lines in view.
+    var replyStreaming: Bool {
+        get { self[ReplyStreamingKey.self] }
+        set { self[ReplyStreamingKey.self] = newValue }
+    }
+}
+
 @MainActor final class TranscriptSelection: ObservableObject {
     private let views = NSHashTable<TranscriptTextView>.weakObjects()
     func register(_ view: TranscriptTextView) { views.add(view) }
@@ -19,8 +28,6 @@ import RemoteCCCore
         let visible = rect.intersection(inner.contentView.convert(inner.contentView.bounds, to: nil))
         return visible.isEmpty ? rect : visible
     }
-    /// Top to bottom, as laid out in the window.
-    var visibleViews: [TranscriptTextView] { ordered }
     func clear() { for view in ordered { view.setSelectedRange(NSRange(location: 0, length: 0)) } }
     func select(from origin: TranscriptTextView, anchor: Int, to point: NSPoint) {
         let items = ordered
@@ -52,13 +59,6 @@ import RemoteCCCore
 
 @MainActor final class TranscriptTextView: NSTextView {
     weak var selectionScope: TranscriptSelection?
-    /// SwiftUI can reuse a size it measured earlier for the same width without measuring again, which
-    /// leaves the text wrapped for whatever width was measured last. The frame it sets is the truth.
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        guard let container = textContainer, newSize.width > 0, abs(container.containerSize.width - newSize.width) > 0.5 else { return }
-        container.containerSize = NSSize(width: newSize.width, height: .greatestFiniteMagnitude)
-    }
     override func copy(_ sender: Any?) {
         guard let text = selectionScope?.selectedText, !text.isEmpty else { super.copy(sender); return }
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
@@ -71,19 +71,36 @@ import RemoteCCCore
         }
         window.makeFirstResponder(self); scope.clear()
         let anchor = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        var scrolling: NSScrollView?
         while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantFuture, inMode: .eventTracking, dequeue: true) {
-            scope.select(from: self, anchor: anchor, to: next.locationInWindow)
-            if next.type == .leftMouseUp { break }
-            // Code and tables have their own horizontal scroller. Drag selection
-            // must still reach the outer conversation's vertical scroller.
-            var ancestor = superview
-            var vertical: NSScrollView?
-            while let view = ancestor {
-                if let scroll = view as? NSScrollView,
-                   (scroll.documentView?.bounds.height ?? 0) > scroll.contentView.bounds.height + 1 { vertical = scroll }
-                ancestor = view.superview
+            var point = next.locationInWindow
+            if next.type == .leftMouseDragged {
+                scrolling = nil
+                // Code and tables have their own scroller. A capped code block scrolls first, and the
+                // selection ends inside it until it has no more lines that way; then the drag reaches
+                // the outer conversation's vertical scroller.
+                var ancestor = superview
+                var vertical: NSScrollView?
+                while let view = ancestor {
+                    if let scroll = view as? NSScrollView,
+                       (scroll.documentView?.bounds.height ?? 0) > scroll.contentView.bounds.height + 1 { vertical = scroll }
+                    ancestor = view.superview
+                }
+                if let inner = enclosingScrollView, inner !== vertical, inner.enclosingScrollView != nil,
+                   (inner.documentView?.bounds.height ?? 0) > inner.contentView.bounds.height + 1,
+                   inner.contentView.autoscroll(with: next) {
+                    scrolling = inner
+                } else {
+                    (vertical ?? enclosingScrollView)?.contentView.autoscroll(with: next)
+                }
             }
-            (vertical ?? enclosingScrollView)?.contentView.autoscroll(with: next)
+            // Releasing while the block still scrolls ends the selection in it too.
+            if let scrolling {
+                let rect = scrolling.contentView.convert(scrolling.contentView.bounds, to: nil)
+                point.y = min(max(point.y, rect.minY + 1), rect.maxY - 1)
+            }
+            scope.select(from: self, anchor: anchor, to: point)
+            if next.type == .leftMouseUp { break }
         }
     }
 }
@@ -114,13 +131,39 @@ struct SelectableTranscriptText: NSViewRepresentable {
         context.coordinator.source = text
         context.coordinator.measuredWidth = nil
         let range = view.selectedRange()
-        view.textStorage?.setAttributedString(attributed ?? Self.render(text, markdown: markdown))
+        if let storage = view.textStorage {
+            let rendered = attributed ?? Self.render(text, markdown: markdown)
+            Self.replaceChangedSuffix(in: storage, with: rendered, previous: context.coordinator.rendered)
+            context.coordinator.rendered = rendered
+        }
         if NSMaxRange(range) <= (view.string as NSString).length { view.setSelectedRange(range) }
         view.invalidateIntrinsicContentSize()
     }
+    /// Preserve TextKit's layout for unchanged paragraphs during streaming. Compare
+    /// attributes as well as text: closing Markdown can restyle an earlier prefix.
+    static func replaceChangedSuffix(in storage: NSTextStorage, with content: NSAttributedString, previous: NSAttributedString? = nil) {
+        let old = storage.string as NSString, new = content.string as NSString
+        var prefix = 0
+        let limit = min(old.length, new.length)
+        while prefix < limit, old.character(at: prefix) == new.character(at: prefix) { prefix += 1 }
+        // Edit on a paragraph boundary, never inside a composed character.
+        if prefix < old.length || prefix < new.length {
+            while prefix > 0, new.character(at: prefix - 1) != 10 { prefix -= 1 }
+        }
+        if prefix > 0 {
+            let range = NSRange(location: 0, length: prefix)
+            // Compare source attributes, not TextKit’s substituted CJK/emoji fonts.
+            let original = previous ?? storage
+            if original.length < prefix || !original.attributedSubstring(from: range).isEqual(to: content.attributedSubstring(from: range)) { prefix = 0 }
+        }
+        guard prefix != old.length || prefix != new.length else { return }
+        storage.replaceCharacters(in: NSRange(location: prefix, length: old.length - prefix),
+            with: content.attributedSubstring(from: NSRange(location: prefix, length: new.length - prefix)))
+    }
+
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: TranscriptTextView, context: Context) -> CGSize? {
         let proposed = proposal.width ?? 600
-        let available = max(1, proposed.isFinite ? proposed : 600)
+        let available = max(1, floor(proposed.isFinite ? proposed : 600))
         if context.coordinator.measuredWidth == available { return context.coordinator.measuredSize }
         let width: CGFloat
         if markdown { width = available }
@@ -138,6 +181,7 @@ struct SelectableTranscriptText: NSViewRepresentable {
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
     final class Coordinator: NSObject, NSTextViewDelegate {
+        var rendered: NSAttributedString?
         var source: String?
         var attributed: NSAttributedString?
         var measuredWidth: CGFloat?
@@ -151,25 +195,17 @@ struct SelectableTranscriptText: NSViewRepresentable {
     }
     static func render(_ text: String, markdown: Bool) -> NSAttributedString {
         if markdown { return NativeMarkdown.document(text) }
-        return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor(WorkbenchTheme.ink)])
+        return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSTheme.text])
     }
 
 }
 private struct TranscriptSelectionKey: EnvironmentKey {
     static let defaultValue: TranscriptSelection? = nil
 }
-private struct ReplyStreamingKey: EnvironmentKey {
-    static let defaultValue = false
-}
 extension EnvironmentValues {
     var transcriptSelection: TranscriptSelection? {
         get { self[TranscriptSelectionKey.self] }
         set { self[TranscriptSelectionKey.self] = newValue }
-    }
-    /// True inside the reply that is still being written.
-    var replyStreaming: Bool {
-        get { self[ReplyStreamingKey.self] }
-        set { self[ReplyStreamingKey.self] = newValue }
     }
 }
 #endif

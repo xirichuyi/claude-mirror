@@ -26,6 +26,9 @@ struct PromptEditor: NSViewRepresentable {
         let scroll = NSTextView.scrollableTextView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
+        // An always-visible legacy scroller showed as a grey bar inside the empty input.
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
         let original = scroll.documentView as! NSTextView
         let view = PasteAwareTextView(frame: original.frame, textContainer: original.textContainer)
         view.minSize = original.minSize; view.maxSize = original.maxSize
@@ -121,7 +124,7 @@ final class PasteAwareTextView: NSTextView {
     func measureContentHeight() {
         guard let layoutManager, let textContainer else { return }
         layoutManager.ensureLayout(for: textContainer)
-        let height = min(200, max(40, ceil(layoutManager.usedRect(for: textContainer).height + textContainerInset.height * 2)))
+        let height = min(180, max(32, ceil(layoutManager.usedRect(for: textContainer).height + textContainerInset.height * 2)))
         guard abs(height - lastContentHeight) > 0.5 else { return }
         lastContentHeight = height
         DispatchQueue.main.async { [weak self] in self?.onContentHeight?(height) }
@@ -195,15 +198,34 @@ final class PasteAwareTextView: NSTextView {
         }
     }
 
-    override func paste(_ sender: Any?) {
-        let board = NSPasteboard.general
-        // Text wins when both exist, so copied rich text is not uploaded as a picture.
-        if board.string(forType: .string) == nil, let image = NSImage(pasteboard: board), let tiff = image.tiffRepresentation,
-           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-            onPasteImage?(png)
-            return
+    // AppKit uses these types to enable Paste before dispatching the action.
+    // A plain-text NSTextView otherwise rejects image-only clipboards.
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + [.fileURL, .png, .tiff]
+    }
+
+    override func readSelection(from board: NSPasteboard) -> Bool {
+        let files = fileURLs(board)
+        if !files.isEmpty, let onDropFiles {
+            onDropFiles(files)
+            return true
         }
-        super.paste(sender)
+        // Keep rich text with an embedded image as text, preserving normal paste.
+        if board.string(forType: .string) != nil {
+            return super.readSelection(from: board)
+        }
+        if let onPasteImage {
+            if let png = board.data(forType: .png), NSBitmapImageRep(data: png) != nil {
+                onPasteImage(png)
+                return true
+            }
+            if let image = NSImage(pasteboard: board), let tiff = image.tiffRepresentation,
+               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                onPasteImage(png)
+                return true
+            }
+        }
+        return super.readSelection(from: board)
     }
 }
 #endif

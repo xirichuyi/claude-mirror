@@ -18,6 +18,11 @@ public sealed class RemoteAgent : IDisposable
     private bool channelClosed;
     public string Home { get; private set; } = "~";
     public string Digest { get; private set; } = "";
+    /// <summary>The agent's hello reply: claude path, persistence warning, Node version.</summary>
+    public JsonNode? Hello { get; private set; }
+    public HostProfile? Profile { get; private set; }
+    /// <summary>SSH is up even when the agent could not start (for example Node.js is missing).</summary>
+    public bool SshConnected => ssh?.IsConnected == true && !lifetime.IsCancellationRequested;
     public event Action<string>? Disconnected;
     public bool Connected => ssh?.IsConnected == true && writer is not null && !lifetime.IsCancellationRequested && !channelClosed;
 
@@ -34,6 +39,15 @@ public sealed class RemoteAgent : IDisposable
         ssh.KeepAliveInterval = TimeSpan.FromSeconds(15);
         ssh.HostKeyReceived += (_, e) => e.CanTrust = verifyHost("SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(e.HostKey)).TrimEnd('=')).GetAwaiter().GetResult();
         await Task.Run(() => ssh.Connect());
+        Profile = profile;
+        await StartAgentAsync(resourceDirectory);
+    }
+
+    /// <summary>Starts the remote agent over the existing SSH connection. Safe to call again after one-click setup.</summary>
+    public async Task StartAgentAsync(string resourceDirectory)
+    {
+        if (ssh is null || !ssh.IsConnected) throw new IOException("请先连接服务器");
+        command?.Dispose(); writer = null; channelClosed = false; Hello = null;
         var manifest = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(resourceDirectory, "manifest.json")))!;
         Digest = manifest["bundleDigest"]!.GetValue<string>();
         var digest = manifest["agentDigest"]!.GetValue<string>();
@@ -46,20 +60,29 @@ public sealed class RemoteAgent : IDisposable
             await executing.WaitAsync(TimeSpan.FromSeconds(30));
             if (install.ExitStatus != 0) throw new IOException(install.Error);
         }
+        // Prefer the Node.js that one-click setup installs; report a missing or old Node instead of failing obscurely.
         var script = "PATH=\"$PATH:$HOME/.local/bin:$HOME/.volta/bin:/usr/local/bin:/opt/homebrew/bin\"; " +
-            "if ! command -v node >/dev/null; then for N in \"$HOME\"/.nvm/versions/node/*/bin/node \"$HOME\"/.local/share/fnm/node-versions/*/installation/bin/node; do [ ! -x \"$N\" ] || PATH=\"$(dirname \"$N\"):$PATH\"; done; fi; export PATH; " +
+            "M=\"$HOME/.local/share/claude-mirror/node/bin\"; if [ -x \"$M/node\" ]; then PATH=\"$M:$PATH\"; " +
+            "elif ! command -v node >/dev/null; then for N in \"$HOME\"/.nvm/versions/node/*/bin/node \"$HOME\"/.local/share/fnm/node-versions/*/installation/bin/node; do [ ! -x \"$N\" ] || PATH=\"$(dirname \"$N\"):$PATH\"; done; fi; export PATH; " +
+            "command -v node >/dev/null 2>&1 || { echo __RCC_NO_NODE__; exit 0; }; " +
+            "V=\"$(node --version 2>/dev/null)\"; V=\"${V#v}\"; J=\"${V%%.*}\"; R=\"${V#*.}\"; R=\"${R%%.*}\"; " +
+            "case \"$J$R\" in *[!0-9]*|\"\") ;; *) if [ \"$J\" -lt 18 ] || { [ \"$J\" -eq 18 ] && [ \"$R\" -lt 14 ]; }; then echo \"__RCC_OLD_NODE__ v$V\"; exit 0; fi ;; esac; " +
             $"exec node \"{remote}/remote-agent.cjs\"";
         command = ssh.CreateCommand("bash -lc " + Protocol.Quote(script));
         var execution = command.ExecuteAsync(lifetime.Token);
         writer = new StreamWriter(command.CreateInputStream(), new UTF8Encoding(false)) { AutoFlush = true };
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        RemoteSetupException? setupFailure = null;
+        var channel = command!;
         _ = Task.Run(async () =>
         {
             try
             {
-                using var reader = new StreamReader(command.OutputStream);
+                using var reader = new StreamReader(channel.OutputStream);
                 while (await reader.ReadLineAsync(lifetime.Token) is { } line)
                 {
+                    if (line == "__RCC_NO_NODE__") { setupFailure = new RemoteSetupException(false); ready.TrySetException(setupFailure); continue; }
+                    if (line.StartsWith("__RCC_OLD_NODE__ ")) { setupFailure = new RemoteSetupException(true, line["__RCC_OLD_NODE__ ".Length..]); ready.TrySetException(setupFailure); continue; }
                     if (!line.StartsWith('{')) continue;
                     var message = JsonNode.Parse(line)!.AsObject();
                     if (message["rcc"]?.GetValue<string>() == "ready") { ready.TrySetResult(); continue; }
@@ -81,15 +104,54 @@ public sealed class RemoteAgent : IDisposable
                 ready.TrySetException(e);
                 foreach (var request in requests.Values) request.TrySetException(e);
                 requests.Clear();
-                if (!lifetime.IsCancellationRequested) Disconnected?.Invoke(e.Message);
+                // A missing Node.js is reported by ConnectAsync as a setup step, not as a lost connection.
+                if (!lifetime.IsCancellationRequested && setupFailure is null && channel == command) Disconnected?.Invoke(e.Message);
             }
         });
         await ready.Task.WaitAsync(TimeSpan.FromSeconds(30));
         var hello = await CallAsync("file", new { operation = "hello" });
         Home = hello["home"]!.GetValue<string>();
-        if (hello["nodeSupported"]?.GetValue<bool>() != true) throw new IOException("远端需要 Node.js 18.14 或更新版本");
+        if (hello["nodeSupported"]?.GetValue<bool>() != true) { channelClosed = true; throw new RemoteSetupException(true, hello["node"]?.GetValue<string>()); }
+        Hello = hello;
         await CallAsync("task", new { operation = "install", digest = Digest, payload = manifest["bundlePayload"]!.GetValue<string>() });
     }
+    /// <summary>Proves a key logs in on its own, pinning the host fingerprint already trusted for this host.</summary>
+    public static async Task VerifyKeyLoginAsync(HostProfile profile, string expectedFingerprint)
+    {
+        using var key = new PrivateKeyFile(profile.KeyFile!);
+        using var probe = new SshClient(new ConnectionInfo(profile.Host, profile.Port, profile.User, new PrivateKeyAuthenticationMethod(profile.User, key)) { Timeout = TimeSpan.FromSeconds(20) });
+        probe.HostKeyReceived += (_, e) => e.CanTrust = "SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(e.HostKey)).TrimEnd('=') == expectedFingerprint;
+        await Task.Run(() => { probe.Connect(); probe.Disconnect(); });
+    }
+
+    /// <summary>Whether Claude Code is installed and logged in on the server.</summary>
+    public Task<JsonNode> ClaudeStatusAsync() => CallAsync("file", new { operation = "claudeStatus" });
+
+    /// <summary>Runs the bundled install-claude-remote.sh over SSH, streaming merged output lines. Returns its exit status.</summary>
+    public async Task<int> InstallAsync(string resourceDirectory, Action<string> output, CancellationToken token)
+    {
+        if (ssh is null || !ssh.IsConnected) throw new IOException("请先连接服务器");
+        var installer = await File.ReadAllBytesAsync(Path.Combine(resourceDirectory, "install-claude-remote.sh"), token);
+        using var run = ssh.CreateCommand(RemoteInstaller.Command);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
+        var executing = run.ExecuteAsync(linked.Token);
+        using (var input = run.CreateInputStream()) await input.WriteAsync(installer, token);
+        using (var reader = new StreamReader(run.OutputStream))
+            while (await reader.ReadLineAsync(linked.Token) is { } line) output(line);
+        await executing;
+        return run.ExitStatus is int code ? code : -1;
+    }
+
+    /// <summary>Runs a short script over SSH and returns its standard output.</summary>
+    public async Task<string> RunScriptAsync(string script)
+    {
+        if (ssh is null || !ssh.IsConnected) throw new IOException("请先连接服务器");
+        using var run = ssh.CreateCommand("sh -c " + Protocol.Quote(script));
+        await run.ExecuteAsync(lifetime.Token).WaitAsync(TimeSpan.FromSeconds(30));
+        if (run.ExitStatus != 0) throw new IOException(string.IsNullOrWhiteSpace(run.Error) ? "远端命令失败" : run.Error);
+        return run.Result;
+    }
+
     public async Task<JsonNode> CallAsync(string operation, object parameters)
     {
         var id = Interlocked.Increment(ref sequence);

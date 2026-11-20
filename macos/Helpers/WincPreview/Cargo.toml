@@ -1,0 +1,9 @@
+[package]
+name = "winc-preview-bridge"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+winc-preview = { path = "../../../vendor/winc-preview/crates/winc-preview" }
+serde_json = "1"
+png = "0.18"

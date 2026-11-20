@@ -10,6 +10,8 @@ const output = path.resolve(process.argv[2] || path.join(__dirname, '../Resource
 fs.mkdirSync(output, { recursive: true });
 const agent = fs.readFileSync(path.join(source, 'remote-agent.cjs'));
 fs.writeFileSync(path.join(output, 'remote-agent.cjs'), agent);
+// The app runs this over its own SSH connection for one-click server setup.
+fs.copyFileSync(path.resolve(__dirname, '../../scripts/install-claude-remote.sh'), path.join(output, 'install-claude-remote.sh'));
 const bundle = taskBundle();
 fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify({
   agentDigest: createHash('sha256').update(agent).digest('hex'),

@@ -64,6 +64,8 @@ public sealed class LocalState
     public List<HostProfile> Hosts { get; set; } = [];
     public Dictionary<string, string> Fingerprints { get; set; } = [];
     public Dictionary<string, string> Tasks { get; set; } = [];
+    /// <summary>Hosts whose user chose "不再询问" for password-free login.</summary>
+    public HashSet<string> DeclinedKeyLogin { get; set; } = [];
     public LocalState(string folder)
     {
         Directory.CreateDirectory(folder); file = Path.Combine(folder, "state.json");
@@ -72,10 +74,11 @@ public sealed class LocalState
         Hosts = saved?["hosts"]?.Deserialize<List<HostProfile>>() ?? [];
         Fingerprints = saved?["fingerprints"]?.Deserialize<Dictionary<string, string>>() ?? [];
         Tasks = saved?["tasks"]?.Deserialize<Dictionary<string, string>>() ?? [];
+        DeclinedKeyLogin = saved?["declinedKeyLogin"]?.Deserialize<HashSet<string>>() ?? [];
     }
     public void Save()
     {
-        File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(new { hosts = Hosts, fingerprints = Fingerprints, tasks = Tasks }));
+        File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(new { hosts = Hosts, fingerprints = Fingerprints, tasks = Tasks, declinedKeyLogin = DeclinedKeyLogin }));
         File.Move(file + ".tmp", file, true);
     }
     public static string HostKey(HostProfile h) => $"{h.User}@{h.Host}:{h.Port}";

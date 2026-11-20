@@ -147,3 +147,14 @@ test('workers leave the SSH login through systemd-run only when lingering keeps 
   assert.equal(persistenceWarning({ killUserProcesses: true, systemdScope: true }), null);
   assert.match(persistenceWarning({ killUserProcesses: true, systemdScope: false }), /loginctl enable-linger/);
 });
+
+test('claude auth status is classified without nagging users whose setup cannot be seen', () => {
+  const { parseAuthStatus } = require('../src/remote-agent.cjs');
+  assert.equal(parseAuthStatus({ code: 0, stdout: '{"loggedIn":true,"authMethod":"claude.ai"}' }, {}), 'loggedIn');
+  assert.equal(parseAuthStatus({ code: 1, stdout: '{"loggedIn":false}' }, {}), 'loggedOut');
+  assert.equal(parseAuthStatus({ code: 0, stdout: 'Logged in as someone' }, {}), 'loggedIn');
+  assert.equal(parseAuthStatus({ code: 1, stdout: '', stderr: 'Not logged in. Run claude auth login' }, {}), 'loggedOut');
+  assert.equal(parseAuthStatus({ code: 1, stdout: '', stderr: "error: unknown command 'auth'" }, {}), 'unknown');
+  assert.equal(parseAuthStatus({ code: 1, stdout: '', stderr: 'Not logged in' }, { ANTHROPIC_API_KEY: 'x' }), 'loggedIn');
+  assert.equal(parseAuthStatus({ code: -1, stdout: '', stderr: '' }, {}), 'unknown');
+});

@@ -25,15 +25,17 @@
 
 ### 安装 DMG
 
-1. 从发布页下载 `claude-mirror-0.21.2-macOS-arm64.dmg`。
+1. 从[发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载最新的 `claude-mirror-<版本号>-macOS-arm64.dmg`。
 2. 打开 DMG，将 **claude-mirror.app** 拖入 **Applications**。
-3. 从应用程序启动「镜像 Claude」，添加 SSH 主机。
+3. 从应用程序启动 claude-mirror，首次使用时添加服务器；已有记录时恢复上次打开的聊天及其主机。
 
-本机使用 DMG 无需安装 Node.js、Swift 或 Xcode；远端仍需要 Node.js 和 Claude Code。发布页附 SHA-256 校验文件。
+第一次使用请看 **[入门指南](docs/getting-started.md)**：从准备服务器、首次打开被 macOS 拦截，到登录 Claude，每一步都有说明。
+
+本机使用 DMG 无需安装 Node.js、Swift 或 Xcode。服务器只需要能用 SSH 登录：连接后应用会检查环境，缺少 Claude Code 或 Node.js 时可以一键安装（装在用户目录，不需要管理员权限），Claude 未登录时会引导你在终端完成登录。发布页附 SHA-256 校验文件。
 
 **应用内更新**：从 v0.21.0 起接入 Sparkle，每次启动检查新版，也可在“账号 → 设置 → 关于”检查更新。确认后在应用内下载、验证签名、安装并重启，不用手动替换 DMG。退出前保存输入草稿和已上传附件，远端任务继续运行；未保存的文件编辑会先提示。v0.20.0 及更早版本需要最后手动安装一次 v0.21.0。更新包及更新源使用 Ed25519 签名；当前应用仍未经过 Apple 公证。
 
-当前构建为 ad-hoc 签名，尚未通过 Apple Developer ID 签名和 Apple 公证。macOS 可能阻止首次启动；核对下载来源后，可在「系统设置 → 隐私与安全性」中允许本次打开。不要关闭全局 Gatekeeper。
+**首次打开被拦截**：当前构建为 ad-hoc 签名，尚未通过 Apple Developer ID 签名和公证，macOS 会在第一次打开时阻止。核对下载来源后：在提示框点“完成” → 打开「系统设置 → 隐私与安全性」→ 在底部“已阻止 claude-mirror”旁点“仍要打开”并输入密码 → 再次打开应用并点“打开”。只需一次，不要关闭全局 Gatekeeper。
 
 ## 界面预览
 
@@ -56,7 +58,7 @@
 
 | 范围 | 当前实现 |
 | --- | --- |
-| 多主机 | 保存服务器、显示名称、切换机器、按机器区分历史和任务状态；右键机器可重命名 |
+| 多主机 | 保存、编辑、切换与移除连接，按机器区分历史和任务状态；移除连接保留聊天与远端文件 |
 | SSH | 系统配置与 Agent、密码、指定私钥文件；用户名与端口；首次连接确认主机指纹 |
 | 项目与历史 | 按服务器和工作目录组织会话，先读取索引，按需加载正文和更早消息 |
 | 聊天 | 流式回复、Markdown、代码块、思考与工具记录、停止、排队、审批和结构化提问 |
@@ -72,7 +74,7 @@ macOS 文件预览优先显示本地缓存，再校验远端版本；同时打�
 
 ## SSH 连接与认证
 
-打开左上角机器菜单，选择「添加机器」。
+打开左上角机器菜单，选择「添加服务器…」。已有连接可在「管理主机…」中编辑或删除。
 
 1. **主机名称**：例如“开发服务器”，仅用于显示；可留空，留空显示地址。
 2. **SSH 主机**：IP、域名、SSH config 别名，或 `user@host`。也兼容 `ssh my-server` 的别名输入方式。
@@ -347,7 +349,7 @@ Windows 新客户端启动时在后台检查同一稳定版本，也可从“更
 
 ## 来源与许可
 
-项目曾名 RemoteCC、Claudock，现统一为镜像 Claude（Claude Mirror），保留原有提交历史与用户数据兼容路径。使用官方 Claude Agent SDK；Markdown 渲染使用 MarkdownUI，其依赖许可随应用打包在 `Resources/ThirdParty`。AgentBox 是交互设计参考之一，本项目没有将其整个客户端直接移植。
+项目曾名 RemoteCC、Claudock，现统一为镜像 Claude（Claude Mirror），保留原有提交历史与用户数据兼容路径。使用官方 Claude Agent SDK；Markdown 渲染使用 MarkdownUI，其依赖许可随应用打包在 `Resources/ThirdParty`。AgentBox 是交互设计参考之一，本项目没有将其整个客户端直接移植。界面配色、卡片布局尺寸和动效时长改编自 [winc](https://github.com/DEEIX-AI/Winc)（Apache-2.0，Copyright 2026 Chenyme and DEEIX AI），主题已改名并映射到本项目的界面；许可证全文随应用打包在 `Resources/ThirdParty/winc-LICENSE.txt`。代码高亮为独立实现，沿用相同的九类词法颜色。
 
 项目代码采用 MIT 许可，见 [LICENSE](LICENSE)。第三方依赖遵循各自许可。镜像 Claude 名称和标识不表示获得 Anthropic 官方授权。
 
@@ -389,3 +391,9 @@ macOS 的「对话选项 → 高级选项 → 上下文缓存」可选择远端�
 例如 cache-tax 通过模型 fork 请求续热，会消耗 token，要求 Claude 进程持续运行。它默认的 50 分钟续热周期与本项目 15 分钟闲置休眠不兼容，不能直接安装后就当作保活已生效。本项目未自动安装或启用它，也不会为缓存续热让所有会话无限常驻。
 
 参考：[Claude Code 提示缓存](https://code.claude.com/docs/en/prompt-caching) · [Mods 运行环境](https://code.claude.com/docs/en/plugins/mods/overview#where-mods-run) · [cache-tax](https://github.com/karanb192/cache-tax)。
+
+## macOS 开发文档
+
+- [构建与验证](macos/README.md)
+- [代码组织、公共组件与动画规范](docs/macos-code-style.md)
+- [v0.23.2 改动与发布记录](docs/releases/v0.23.2.md)

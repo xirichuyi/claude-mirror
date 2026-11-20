@@ -5,7 +5,7 @@ import RemoteCCCore
 /// Project/session controls use the resident owner, never a disposable inspector for mutations.
 struct ClaudeToolsView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    private func dismiss() { model.presentation = nil }
     let sessionID: String
     let section: SessionToolSection
     @StateObject private var state = SessionToolsStore()
@@ -28,15 +28,17 @@ struct ClaudeToolsView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 TextField("搜索名称或说明", text: $search).textFieldStyle(WorkbenchTextFieldStyle())
-                Button("刷新") { revision += 1 }.disabled(busy || !model.isConnected)
+                Button { revision += 1 } label: {
+                    ZStack {
+                        WorkbenchIcon(symbol: "arrow.clockwise").opacity(busy ? 0 : 1)
+                        if busy { ProgressView().controlSize(.small) }
+                    }
+                }.buttonStyle(WorkbenchIconButtonStyle()).help("刷新").accessibilityLabel("刷新")
+                    .disabled(busy || !model.isConnected)
             }
-            if busy { ProgressView("正在读取远端…") }
-            if let message { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
-            if session?.remoteOwner == nil {
-                Text("可查看项目环境；重载和连接控制需先建立实时会话。").font(.caption).foregroundStyle(.secondary)
-            }
+            if let message { Text(message).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled) }
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if section == .config { configuration }
                     else if section == .status {
                         if let session {
@@ -55,7 +57,7 @@ struct ClaudeToolsView: View {
                     } else {
                         if section == .skills || section == .plugins { reloadButton }
                         if items.isEmpty && !busy && message == nil {
-                            InterfaceState(title: search.isEmpty ? "暂无相关项目" : "没有匹配结果", detail: search.isEmpty ? "远端尚未报告此类项目，可刷新重新读取。" : "清除搜索或试试其他关键词。", symbol: "square.stack")
+                            InterfaceState(title: search.isEmpty ? "暂无相关项目" : "没有匹配结果", detail: "", symbol: "square.stack")
                         }
                         ForEach(items, id: \.self) { item in itemView(item) }
                     }
@@ -85,10 +87,10 @@ struct ClaudeToolsView: View {
                 Text(itemTitle(item))
                     .font(.subheadline.weight(.semibold)).textSelection(.enabled)
                 Spacer()
-                if let status = item["status"]?.string { Text(status).font(.caption).foregroundStyle(.secondary) }
+                if let status = item["status"]?.string { Text(status).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted) }
             }
-            if let description = item["description"]?.string { Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(3).help(description).textSelection(.enabled) }
-            if let error = item["error"]?.string { Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
+            if let description = item["description"]?.string { Text(description).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(3).help(description).textSelection(.enabled) }
+            if let error = item["error"]?.string { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.warning).textSelection(.enabled) }
             if section == .commands || section == .skills, let name = item["name"]?.string {
                 HStack {
                     Text("/" + name + (item["argumentHint"]?.string.map { " " + $0 } ?? "")).font(.caption.monospaced())
@@ -103,20 +105,21 @@ struct ClaudeToolsView: View {
                     let enabled = item["status"]?.string != "disabled"
                     Button(enabled ? "禁用" : "启用") { manage("toggleMcp", name: name, enabled: !enabled) }
                         .disabled(!canManage || !actions.contains("toggleMcp"))
-                    Text("仅当前会话").font(.caption).foregroundStyle(.secondary)
+                    Text("仅当前会话").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                 }
             }
             if section == .tasks, item["status"]?.string == "running", let id = item["id"]?.string {
                 Button("停止任务") { stopTask(id) }.disabled(busy || !model.isConnected)
             }
             DisclosureGroup("详细信息") { CodeBlock(text: item.text(pretty: true)) }
-        }.padding(12).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+        }.padding(.vertical, 10).padding(.horizontal, 8)
+            .overlay(alignment: .bottom) { WorkbenchTheme.separator.frame(height: 1) }
     }
 
     private var configuration: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("编辑远端 Claude Code 实际使用的文件，保存沿用编辑器的冲突检查。文件不存在时会明确提示。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             ForEach([("项目记忆", "CLAUDE.md"), ("项目本地记忆", "CLAUDE.local.md"),
                      ("用户记忆", "~/.claude/CLAUDE.md"), ("项目设置 / 权限 / Hooks", ".claude/settings.json"),
                      ("项目本地设置", ".claude/settings.local.json"), ("用户设置 / 权限 / Hooks", "~/.claude/settings.json"),
@@ -124,7 +127,7 @@ struct ClaudeToolsView: View {
                 Button(title) { dismiss(); model.open(path) }.buttonStyle(.link)
             }
             Text("Hooks、权限和 MCP 配置的生效时机由远端 Claude 决定；需要时重新建立会话。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             Button("重载输出样式") { manage("reloadOutputStyles") }
                 .disabled(!canManage || !actions.contains("reloadOutputStyles"))
             Link("Claude Code 官方功能说明", destination: URL(string: "https://code.claude.com/docs/en/desktop")!)

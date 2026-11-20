@@ -35,7 +35,7 @@ extension Theme {
         }
         .blockquote { configuration in
             configuration.label
-                .markdownTextStyle { ForegroundColor(.secondary) }
+                .markdownTextStyle { ForegroundColor(WorkbenchTheme.inkMuted) }
                 .padding(.leading, 14)
                 .overlay(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2)
@@ -49,7 +49,7 @@ extension Theme {
         }
         .taskListMarker { configuration in
             Image(systemName: configuration.isCompleted ? "checkmark.square.fill" : "square")
-                .foregroundStyle(configuration.isCompleted ? WorkbenchTheme.accent : Color.secondary)
+                .foregroundStyle(configuration.isCompleted ? WorkbenchTheme.accent : WorkbenchTheme.inkMuted)
                 .font(.body)
                 .relativeFrame(minWidth: .em(1.5), alignment: .trailing)
         }

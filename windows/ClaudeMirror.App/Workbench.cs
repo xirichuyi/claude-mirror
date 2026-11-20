@@ -178,7 +178,8 @@ public sealed partial class MainWindow
         welcomeIcon.Source=new BitmapImage(new Uri("ms-appx:///Assets/BrandIcon.png"));
         welcomeHeading.Children.Add(welcomeIcon);welcomeHeading.Children.Add(homeTitle);
         homeHint.Foreground = muted;
-        home.Children.Add(welcomeHeading); home.Children.Add(homeHint); home.Children.Add(homeActions);
+        homeHint.TextWrapping = TextWrapping.Wrap;
+        home.Children.Add(welcomeHeading); home.Children.Add(homeHint); home.Children.Add(healthPanel); home.Children.Add(homeActions);
         At(area,home,1);
         var composeArea = new StackPanel { MaxWidth = 800, Spacing = 8, Margin = new Thickness(20,6,20,14) };
         composer.Child = composeArea; At(area,composer,2);
@@ -277,17 +278,22 @@ public sealed partial class MainWindow
         home.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         scroll.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
         if(empty) {
-            homeTitle.Text = online ? "今天，想完成什么？" : "连接服务器";
+            homeTitle.Text = online ? "今天，想完成什么？" : host == null ? "开始使用" : agent?.SshConnected == true ? "设置服务器" : "连接服务器";
             home.VerticalAlignment=online?VerticalAlignment.Center:VerticalAlignment.Top;
             home.Margin=online?new Thickness(16,12,16,36):new Thickness(32,64,32,16);
             home.Spacing=online?24:16;
             welcomeHeading.HorizontalAlignment=homeActions.HorizontalAlignment=online?HorizontalAlignment.Center:HorizontalAlignment.Left;
             welcomeIcon.Visibility=online?Visibility.Visible:Visibility.Collapsed;
-            homeHint.Text="使用服务器上的 Claude Code。";homeHint.Visibility=online?Visibility.Collapsed:Visibility.Visible;
+            homeHint.Text = host == null
+                ? "在这台电脑上使用服务器里的 Claude Code：代码和 Claude 都在服务器上运行，这里负责对话和审批。\n\n1. 准备一台能用 SSH 登录的 Linux 或 macOS 服务器\n2. 添加服务器：填写地址和密码\n3. 自动检查环境：缺少 Claude Code 或 Node.js 时一键安装，然后登录 Claude"
+                : agent?.SshConnected == true ? "SSH 已连接，按下面的提示完成设置。" : "使用服务器上的 Claude Code。";
+            homeHint.Visibility=online?Visibility.Collapsed:Visibility.Visible;
             homeActions.Children.Clear();
             if(!online) {
                 var add = ActionButton(host == null ? "添加服务器" : "重新连接","\uE710",()=>ConnectDialogAsync(host),true);
-                add.Background=ink;add.Foreground=canvas;add.HorizontalAlignment=HorizontalAlignment.Left;homeActions.Children.Add(add);
+                add.Background=ink;add.Foreground=canvas;add.HorizontalAlignment=HorizontalAlignment.Left;
+                if(agent?.SshConnected != true) homeActions.Children.Add(add);
+                if(host == null) homeActions.Children.Add(new HyperlinkButton { Content = "没有服务器？查看入门指南", NavigateUri = GettingStartedUrl });
             } else {
                 var suggestions = new StackPanel { Orientation=Orientation.Horizontal,Spacing=6 };
                 foreach(var (name,glyph,text) in new[]{("了解项目","\uE8B7","请梳理这个项目的目录结构、技术栈和主要入口。"),("检查代码","\uE721","请检查当前项目，找出影响使用的问题并给出改进建议。"),("实现功能","\uE943","我想实现一个新功能：")}) {

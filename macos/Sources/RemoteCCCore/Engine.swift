@@ -30,9 +30,10 @@ public final class ChatEngine {
     public let files: RemoteFiles
     /// Fires at most once per frame; the UI reads current state afterwards.
     public var onChange: (() -> Void)?
-    /// Fires instead of `onChange` when everything since the last notification only added reply text,
-    /// so observers outside the transcript can skip the update. Falls back to `onChange` when unset.
-    public var onReplyText: (() -> Void)?
+    public var onTranscriptChange: ((Set<String>) -> Void)?
+    private var transcriptChanges = Set<String>()
+    private var transcriptNotification: Task<Void, Never>?
+    private var stopRequests = Set<String>()
     public var onError: ((String) -> Void)?
 
     private let store: ChatStore
@@ -44,7 +45,6 @@ public final class ChatEngine {
     private var capabilityRequests: [String: Task<Capabilities, Error>] = [:]
     private var historyLoads: [String: Task<Void, Error>] = [:]
     private var changeQueued = false
-    private var onlyReplyTextQueued = true
     private var dirty = Set<String>()
     private var saveQueued = false
 
@@ -73,37 +73,47 @@ public final class ChatEngine {
     public func session(_ id: String) -> ChatSession? { sessions.first { $0.id == id } }
     public func isRunning(_ id: String) -> Bool { running.contains(id) }
 
-    private func notify(replyText: Bool = false) {
-        if !replyText { onlyReplyTextQueued = false }
+    public enum TaskConnection: Equatable { case none, offline, restoring, connected, failed }
+
+    /// A subscribed socket is not enough: wait for the first remote snapshot.
+    public func taskConnection(_ id: String) -> TaskConnection {
+        guard let session = session(id), session.remoteTask != nil || session.remoteOwner != nil else { return .none }
+        guard connectionState(session.config).status == .connected else { return .offline }
+        if watchers[id]?.previous != nil { return .connected }
+        if session.transportError != nil { return .failed }
+        return .restoring
+    }
+
+    private func notify(transcript: String? = nil) {
+        if let transcript, onTranscriptChange != nil {
+            transcriptChanges.insert(transcript)
+            guard transcriptNotification == nil else { return }
+            // Token bursts do not need a full text layout on every display frame.
+            transcriptNotification = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                guard let self else { return }
+                self.transcriptNotification = nil
+                let ids = self.transcriptChanges
+                self.transcriptChanges.removeAll(keepingCapacity: true)
+                if !ids.isEmpty { self.onTranscriptChange?(ids) }
+            }
+            return
+        }
         guard !changeQueued else { return }
         changeQueued = true
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 16_000_000)
             guard let self else { return }
-            let onlyReplyText = self.onlyReplyTextQueued
-            self.changeQueued = false; self.onlyReplyTextQueued = true
-            if onlyReplyText, let onReplyText = self.onReplyText { onReplyText() } else { self.onChange?() }
+            self.changeQueued = false
+            // Status, approvals and completed turns never wait behind streamed text.
+            self.onChange?()
         }
-    }
-
-    /// True when a snapshot changed nothing but the text and thinking blocks of the reply being streamed.
-    /// Tool blocks stay in the comparison: the file panel and the composer read them.
-    static func onlyReplyTextChanged(from old: ChatSession, to new: ChatSession, message target: Int) -> Bool {
-        func comparable(_ session: ChatSession) -> ChatSession {
-            var session = session, reply = session.messages[target]
-            reply.blocks = reply.blocks?.filter { $0.type != "text" && $0.type != "thinking" }
-            // A snapshot only ever replaces this one message, so the others need no comparison.
-            session.messages = [reply]
-            session.remoteTask?.version = 0; session.remoteOwner?.version = 0
-            return session
-        }
-        return comparable(old) == comparable(new)
     }
 
     /// `immediate` is for approvals, turn ends and anything that must survive a crash.
-    private func changed(_ id: String?, immediate: Bool = true, replyText: Bool = false) {
+    private func changed(_ id: String?, immediate: Bool = true, transcriptOnly: Bool = false) {
         if let id { dirty.insert(id) }
-        notify(replyText: replyText)
+        notify(transcript: transcriptOnly ? id : nil)
         if immediate { flushSaves() }
         else if !saveQueued {
             saveQueued = true
@@ -131,6 +141,20 @@ public final class ChatEngine {
         notify()
     }
 
+    public func hydrateAsync(_ id: String) async throws {
+        guard try sessions[index(id)].localMessagesLoaded == false else { return }
+        let messages = try await store.messagesAsync(id)
+        let position = try index(id)
+        // Sending/resuming may have hydrated and modified this session during the read.
+        guard sessions[position].localMessagesLoaded == false else { return }
+        sessions[position].messages = messages
+        sessions[position].localMessagesLoaded = true
+        if sessions[position].status == "stopped", let last = messages.indices.last, messages[last].role == "assistant" {
+            sessions[position].messages[last].interrupted = true
+        }
+        notify()
+    }
+
     // MARK: Connection
 
     public func updateConnection(_ config: ConnectionConfig, _ state: ConnectionState) {
@@ -141,6 +165,20 @@ public final class ChatEngine {
         }
         notify()
     }
+    /// Replace connection settings without changing conversation IDs or project paths.
+    public func replaceMachine(_ original: ConnectionConfig, with replacement: ConnectionConfig) throws {
+        let replacement = try replacement.validated()
+        for index in sessions.indices where sessions[index].config.key == original.key {
+            sessions[index].host = replacement.host
+            sessions[index].port = replacement.port
+            dirty.insert(sessions[index].id)
+        }
+        files.invalidate(original)
+        projectStates[original.key] = nil
+        capabilityCache.removeAll()
+        changed(nil)
+    }
+
     public func connectionState(_ config: ConnectionConfig) -> ConnectionState { connectionStates[config.key] ?? ConnectionState() }
 
     // MARK: Conversation management
@@ -354,7 +392,7 @@ public final class ChatEngine {
     }
 
     private func attachOnce(_ id: String) async throws {
-        try hydrate(id)
+        try await hydrateAsync(id)
         let position = try index(id)
         let session = sessions[position]
         guard session.remoteTask != nil || session.remoteOwner != nil, watchers[id] == nil else { return }
@@ -427,7 +465,10 @@ public final class ChatEngine {
         let version = state["version"]?.int ?? 0
         guard version >= ownerVersion else { return }
         let done = state["done"]?.isTruthy == true
-        let status = state["status"]?.string ?? "working"
+        let reportedStatus = state["status"]?.string ?? "working"
+        // A closed worker cannot still generate a reply, even if an older worker
+        // persisted a stale busy state while shutting down.
+        let status = done && ["working", "connecting", "permission", "stopping", "detached"].contains(reportedStatus) ? "stopped" : reportedStatus
         let messageId = state["message"]?["id"]?.string
         // A queued new turn must not be overwritten by the previous turn's idle snapshot.
         if let task, messageId != task.messageId {
@@ -453,8 +494,9 @@ public final class ChatEngine {
             return
         }
         guard let target = sessions[position].messages.firstIndex(where: { $0.id == messageId }), let message = state["message"] else { throw RemoteError("远端任务与本地消息不匹配") }
-        let previous = sessions[position]
+        let previousMetadata = sessions[position].transcriptIndependentState
         sessions[position].messages[target] = try message.decode(ChatMessage.self)
+        if done && status == "stopped" { sessions[position].messages[target].interrupted = true }
         sessions[position].status = status
         sessions[position].permissions = (try? state["permissions"]?.decode([PermissionRequest].self)) ?? []
         if let value = state["remoteSessionId"]?.string { sessions[position].remoteSessionId = value }
@@ -489,8 +531,8 @@ public final class ChatEngine {
             Task { _ = try? await agents.call(config, "task", ["operation": "acknowledge", "taskId": .string(ownerId)]) }
         }
         sessions[position].transportError = nil
-        let immediate = turnEnded || !sessions[position].permissions.isEmpty
-        changed(id, immediate: immediate, replyText: !immediate && Self.onlyReplyTextChanged(from: previous, to: sessions[position], message: target))
+        changed(id, immediate: turnEnded || !sessions[position].permissions.isEmpty,
+            transcriptOnly: !turnEnded && previousMetadata == sessions[position].transcriptIndependentState)
         if turnEnded, task != nil, sessions[position].queuePaused != true { drainQueue(id) }
     }
 
@@ -551,8 +593,33 @@ public final class ChatEngine {
     }
 
     public func stop(_ id: String) async throws {
-        guard sessions[try index(id)].remoteTask != nil else { return }
+        guard stopRequests.insert(id).inserted else { return }
+        defer { stopRequests.remove(id) }
+        let session = sessions[try index(id)]
+        // A resident owner can resume work after the locally submitted turn ended.
+        // Restored owner-only sessions must use the same stop command path.
+        guard session.remoteTask != nil || session.remoteOwner != nil else { return }
+        let owner = session.remoteOwner?.id ?? session.remoteTask?.id
+        let message = session.messages.last?.id
         _ = try await command(id, kind: "stop")
+        if try await waitForStop(id, owner: owner, message: message) { return }
+        // Older resident workers may acknowledge an interrupt without ending the
+        // turn. Close only that owner; never kill unrelated Claude processes.
+        _ = try await command(id, kind: "close")
+        guard try await waitForStop(id, owner: owner, message: message) else {
+            throw RemoteError("远端尚未确认停止，请重新连接后检查任务状态")
+        }
+    }
+
+    private func waitForStop(_ id: String, owner: String?, message: String?) async throws -> Bool {
+        for _ in 0..<30 {
+            guard let current = session(id), current.isBusy,
+                  currentOwnerId(id) == owner, current.messages.last?.id == message else { return true }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard let current = session(id), current.isBusy,
+              currentOwnerId(id) == owner, current.messages.last?.id == message else { return true }
+        return false
     }
 
     /// Worker validates the answer; a rejected form comes back as an error here.

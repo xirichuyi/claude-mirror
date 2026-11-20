@@ -355,6 +355,35 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         return try RemoteProcess(executable: executable, arguments: ["-T", "-S", socket, "-o", "BatchMode=yes", "-o", "ProxyCommand=false"] + portArguments(config) + [config.host, command])
     }
 
+    /// Runs a short script over the existing connection and returns its output.
+    public func runScript(_ config: ConnectionConfig, script: String, timeout: UInt64 = 30) async throws -> String {
+        let (socket, status) = withLock { (entries[config.key]?.socket, entries[config.key]?.state.status) }
+        guard let socket, status == .connected else { throw RemoteError("请先连接 SSH 服务器") }
+        return try await runRemote(config, socket: socket, command: "sh -c " + shellQuote(script), timeout: timeout)
+    }
+
+    /// Proves a configuration can log in on its own: a fresh connection, no prompts, no shared master.
+    public func verifyLogin(_ config: ConnectionConfig) async throws {
+        try await runSSH(["-T", "-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=15"]
+                         + Self.authenticationArguments(config) + portArguments(config) + [config.host, "true"], timeout: 25)
+    }
+
+    /// Uses new settings (for example a login key) for every later reconnect of this machine.
+    public func updateConfig(_ config: ConnectionConfig) {
+        withLock {
+            if desired[config.key] != nil { desired[config.key] = config }
+            entries[config.key]?.config = config
+        }
+    }
+
+    /// A Terminal command that opens an interactive session on the server, reusing this
+    /// app's connection when there is one so password logins are not asked again.
+    public func terminalCommand(_ config: ConnectionConfig, remoteCommand: String) -> String {
+        let socket = withLock { entries[config.key]?.state.status == .connected ? entries[config.key]?.socket : nil }
+        let options = socket.map { ["-S", $0, "-o", "ControlMaster=no"] } ?? Self.authenticationArguments(config)
+        return ([executable, "-t"] + options + portArguments(config) + [config.host, remoteCommand]).map(shellQuote).joined(separator: " ")
+    }
+
     /// Probe the remote endpoint, not just the local ControlMaster socket.
     /// Machines are checked concurrently so an unreachable host cannot delay another.
     public func checkConnections() async {

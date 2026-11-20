@@ -4,6 +4,38 @@ import XCTest
 @testable import RemoteCC
 
 final class TranscriptSelectionTests: XCTestCase {
+    @MainActor private func normalized(_ value: NSAttributedString) -> NSAttributedString {
+        let storage = NSTextStorage(attributedString: value)
+        storage.fixAttributes(in: NSRange(location: 0, length: storage.length))
+        return storage
+    }
+
+    @MainActor func testLongMarkdownKeepsCompletedChunksStableWhileAppending() {
+        let source = String(repeating: "完整段落 **强调** 和 `code`。\n\n", count: 600)
+        let before = NativeMarkdown.blocks(source)
+        let after = NativeMarkdown.blocks(source + "新增的最后一段")
+        XCTAssertGreaterThan(before.count, 1)
+        XCTAssertTrue(before[0].content.isEqual(to: after[0].content))
+        let document = NativeMarkdown.document(source + "新增的最后一段").string
+        XCTAssertEqual(document.components(separatedBy: "完整段落").count - 1, 600)
+        XCTAssertTrue(document.hasSuffix("新增的最后一段"))
+    }
+
+    @MainActor func testStreamingSuffixPreservesTextAndRestylesChangedMarkdown() {
+        let initial = NSAttributedString(string: "旧段落 👨‍👩‍👧‍👦\n新增", attributes: [.foregroundColor: NSColor.labelColor])
+        let storage = NSTextStorage(attributedString: initial)
+        let appended = NSAttributedString(string: initial.string + "内容 😀", attributes: [.foregroundColor: NSColor.labelColor])
+        SelectableTranscriptText.replaceChangedSuffix(in: storage, with: appended, previous: initial)
+        XCTAssertTrue(storage.isEqual(to: normalized(appended)))
+        let restyled = NSMutableAttributedString(attributedString: appended)
+        restyled.addAttribute(.font, value: NSFont.boldSystemFont(ofSize: 14), range: NSRange(location: 0, length: 3))
+        SelectableTranscriptText.replaceChangedSuffix(in: storage, with: restyled, previous: appended)
+        XCTAssertTrue(storage.isEqual(to: normalized(restyled)))
+        let shortened = NSAttributedString(string: "变短")
+        SelectableTranscriptText.replaceChangedSuffix(in: storage, with: shortened, previous: restyled)
+        XCTAssertTrue(storage.isEqual(to: normalized(shortened)))
+    }
+
     @MainActor func testMarkdownProducesOneSelectableDocumentWithHeadingsTableAndLinks() {
         _ = NSApplication.shared
         let text = SelectableTranscriptText.render("## 标题\n\n第一段\n\n第二段 [文件](/tmp/test.txt)\n\n| 列 | 值 |\n| --- | --- |\n| A | B |", markdown: true)

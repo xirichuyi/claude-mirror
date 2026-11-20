@@ -23,6 +23,76 @@ enum DemoData {
         ]
         return [chat, ChatSession(config: config, name: "整理项目文档"), ChatSession(config: ConnectionConfig(host: "dev-server", directory: "/workspace/api-service"), name: "添加分页查询")]
     }
+
+    private static func decode<T: Decodable>(_ value: [String: Any]) -> T {
+        try! JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: value))
+    }
+    private static let root = "/workspace/web-app"
+    private static func entry(_ relative: String, directory: Bool = false, size: Int = 1200) -> FileEntry {
+        decode(["path": root + "/" + relative, "name": (relative as NSString).lastPathComponent, "size": size, "directory": directory])
+    }
+
+    static let authSource = """
+    import { Request, Response } from 'express';
+    import { verifyPassword } from './crypto';
+    import { users } from './db';
+
+    // Rejects missing credentials before touching the database.
+    export async function login(request: Request, response: Response) {
+      const { email, password } = request.body ?? {};
+      if (!email || !password) {
+        return response.status(400).json({ error: 'Missing credentials' });
+      }
+      try {
+        const user = await users.findByEmail(email);
+        if (!user || !(await verifyPassword(password, user.hash))) {
+          return response.status(401).json({ error: 'Invalid email or password' });
+        }
+        return response.json({ id: user.id, name: user.name });
+      } catch (error) {
+        console.error('login failed', error);
+        return response.status(500).json({ error: 'Internal error' });
+      }
+    }
+    """
+
+    /// The file panel scene: a tree with Git states, two open files and a diff.
+    @MainActor static func seed(_ workspace: Workspace) {
+        let rows: [(entry: FileEntry, depth: Int, expanded: Bool, git: String?)] = [
+            (entry("src", directory: true), 0, true, nil),
+            (entry("src/routes", directory: true), 1, false, nil),
+            (entry("src/auth.ts"), 1, false, "M"),
+            (entry("src/crypto.ts"), 1, false, nil),
+            (entry("src/server.ts"), 1, false, nil),
+            (entry("test", directory: true), 0, true, nil),
+            (entry("test/auth.test.ts"), 1, false, "A"),
+            (entry(".env.example"), 0, false, nil),
+            (entry("Dockerfile"), 0, false, nil),
+            (entry("package.json"), 0, false, nil),
+            (entry("package-lock.json"), 0, false, nil),
+            (entry("README.md"), 0, false, "M"),
+            (entry("tsconfig.json"), 0, false, nil),
+        ]
+        let auth: FilePreview = decode(["path": root + "/src/auth.ts", "name": "auth.ts", "size": authSource.utf8.count, "kind": "text", "text": authSource, "revision": "demo"])
+        let readme: FilePreview = decode(["path": root + "/README.md", "name": "README.md", "size": 420, "kind": "text", "text": "# web-app\n\nLogin service.\n", "revision": "demo"])
+        let diff = """
+        diff --git a/src/auth.ts b/src/auth.ts
+        @@ -5,6 +5,9 @@ import { users } from './db';
+         export async function login(request: Request, response: Response) {
+        -  const { email, password } = request.body;
+        +  const { email, password } = request.body ?? {};
+        +  if (!email || !password) {
+        +    return response.status(400).json({ error: 'Missing credentials' });
+        +  }
+           try {
+        """
+        let git: GitStatus = decode(["repository": true, "branch": "main", "files": [
+            ["status": " M", "path": root + "/src/auth.ts", "relative": "src/auth.ts"],
+            ["status": "A ", "path": root + "/test/auth.test.ts", "relative": "test/auth.test.ts"],
+            ["status": " M", "path": root + "/README.md", "relative": "README.md"],
+        ]])
+        workspace.seedPreview(root: root, rows: rows, files: [auth, readme], diff: (root + "/src/auth.ts", diff), active: auth.path, git: git)
+    }
 }
 
 /// Demo-only transcript for layout checks: `MIRROR_SCENE=markdown` (or `markdown-files` with the file
@@ -91,7 +161,7 @@ enum DemoStream {
 
     static let reply: String = {
         let code = (1...40).map { "export async function handler\($0)(request: Request, response: Response) {\n  const parsed = schema.safeParse(request.body);\n  if (!parsed.success) return response.status(400).json({ error: 'Missing credentials' });\n  return response.json({ ok: true, index: \($0) });\n}" }.joined(separator: "\n")
-        let section = { (index: Int) in "## \(index). 改动说明\n\n这一部分覆盖了 **接口校验**、*错误码统一* 和令牌刷新流程，`src/auth/session.ts` 的改动最大。下面的段落用于拉长回复，方便观察流式输出时的跟随滚动是否连续。校验层统一使用同一份 schema，错误信息带上请求编号，方便在日志里对应到具体的一次调用；刷新令牌改为十四天滑动过期，重复使用同一个令牌会吊销整条链，避免泄露之后被长期利用。这一段故意写得比较长，窗口变窄或者打开右侧面板时它会重新换行，可以用来检查阅读位置是否保持不动。\n\n- 第 \(index) 节：缺少凭据时返回 `400`\n- 验证失败时返回 `401`\n- 服务异常时返回 `500`，不暴露内部错误\n\n| 接口 | 方法 | 新行为 |\n| --- | --- | --- |\n| `/api/login` | POST | 返回结构化 JSON 错误 |\n| `/api/refresh` | POST | 14 天滑动过期 |\n\n" }
+        let section = { (index: Int) in "## \(index). 改动说明\n\n这一部分覆盖了 **接口校验**、*错误码统一* 和令牌刷新流程，`src/auth/session.ts` 的改动最大。下面的段落用于拉长回复，方便观察流式输出时的跟随滚动是否连续。\n\n- 缺少凭据时返回 `400`\n- 验证失败时返回 `401`\n- 服务异常时返回 `500`，不暴露内部错误\n\n| 接口 | 方法 | 新行为 |\n| --- | --- | --- |\n| `/api/login` | POST | 返回结构化 JSON 错误 |\n| `/api/refresh` | POST | 14 天滑动过期 |\n\n" }
         return "# 登录模块重构总结\n\n" + (1...4).map(section).joined() + "```typescript\n" + code + "\n```\n\n" + (5...8).map(section).joined() + "> 上线前请先在预发环境验证迁移脚本。\n"
     }()
 
@@ -99,13 +169,11 @@ enum DemoStream {
     static func start(_ engine: ChatEngine, session id: String, step: Int = 24, interval: TimeInterval = 0.04, finished: @escaping () -> Void = {}) {
         let characters = Array(reply)
         var sent = 0, version = 0
-        // One message updated in place, like a real turn: only its text changes between snapshots.
-        var message = ChatMessage(id: messageId, role: "assistant")
         Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { timer in
             MainActor.assumeIsolated {
                 sent = min(characters.count, sent + step); version += 1
                 let done = sent == characters.count
-                message.blocks = [Block(type: "text", text: String(characters[..<sent]))]
+                let message = ChatMessage(id: messageId, role: "assistant", blocks: [Block(type: "text", text: String(characters[..<sent]))])
                 guard let encoded = try? JSONEncoder().encode(message), let json = try? JSONDecoder().decode(JSON.self, from: encoded) else { return }
                 try? engine.applyDemoSnapshot(id, state: ["version": .number(Double(version)), "status": .string(done ? "idle" : "working"), "message": json])
                 if done { timer.invalidate(); finished() }

@@ -7,15 +7,11 @@ struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showAllProjects = false
     @State private var searchExpanded = false
-    @State private var recentExpanded = false
     @FocusState private var searchFocused: Bool
 
-    private typealias Group = (key: String, sessions: [ChatSession])
-
-    // `body` runs for every streamed chunk, so the session list is sorted once per pass.
-    private func grouped(_ sessions: [ChatSession]) -> [Group] {
+    private var groups: [(key: String, sessions: [ChatSession])] {
         let filter = model.searchText.lowercased()
-        let visible = sessions.filter { ($0.archived ?? false) == model.showArchived }.filter {
+        let visible = model.machineSessions.filter { ($0.archived ?? false) == model.showArchived }.filter {
             filter.isEmpty || "\($0.name) \($0.host) \($0.directory) \($0.historySummary ?? "")".lowercased().contains(filter)
         }
         var order: [String] = [], grouped: [String: [ChatSession]] = [:]
@@ -26,14 +22,7 @@ struct SidebarView: View {
         return order.map { ($0, grouped[$0]!) }.filter { !model.projectMissing($0.1[0]) }
     }
 
-    private func unavailable(_ sessions: [ChatSession]) -> [ChatSession] {
-        sessions.filter {
-            model.projectMissing($0) && ($0.archived ?? false) == model.showArchived &&
-            (model.searchText.isEmpty || ($0.name + " " + $0.directory).localizedCaseInsensitiveContains(model.searchText))
-        }
-    }
-
-    private func visible(_ groups: [Group]) -> [Group] {
+    private var visibleGroups: [(key: String, sessions: [ChatSession])] {
         if showAllProjects || !model.searchText.isEmpty { return groups }
         var result = Array(groups.prefix(6))
         if let active = groups.first(where: { $0.sessions.contains(where: { $0.id == model.activeId }) }), !result.contains(where: { $0.key == active.key }) { result.append(active) }
@@ -41,101 +30,62 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        let sessions = model.machineSessions
-        let groups = grouped(sessions)
-        let visibleGroups = visible(groups)
-        let unavailableSessions = unavailable(sessions)
-        return VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                HStack(spacing: 4) {
-                    MachineSwitcher()
-                    Spacer()
-                    Button { model.showActivity = true } label: {
-                        Image(systemName: "bell")
-                            .overlay(alignment: .topTrailing) {
-                                if !model.attentionSessions.isEmpty { Circle().fill(WorkbenchTheme.accent).frame(width: 5, height: 5).offset(x: 3, y: -2) }
-                            }
-                    }.buttonStyle(QuietButtonStyle()).help("所有机器的任务").accessibilityLabel("所有机器的任务")
-                    Button {
-                        if searchExpanded { closeSearch() }
-                        else { searchExpanded = true }
-                    } label: { Image(systemName: "magnifyingglass") }
-                        .buttonStyle(QuietButtonStyle()).help("搜索对话")
-                        .accessibilityLabel("搜索对话")
-                }
-                HStack(spacing: 4) {
-                    Button { model.newConversation() } label: {
-                        HStack {
-                            Label("新建对话", systemImage: "square.and.pencil")
-                            Spacer()
-                            Text("⌘ N").font(.caption).opacity(0.65)
-                        }
-                    }
-                    .buttonStyle(QuietButtonStyle()).help("新对话（⌘N）").disabled(model.currentConfig == nil)
-                    HistorySyncButton()
-                }
-                if searchExpanded {
-                    HStack(spacing: 7) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    if searchExpanded {
                         TextField("搜索对话", text: $model.searchText)
                             .textFieldStyle(.plain).focused($searchFocused)
                             .task { await Task.yield(); searchFocused = true }
                             .onExitCommand { closeSearch() }
-                        Button { closeSearch() } label: { Image(systemName: "xmark") }
-                            .buttonStyle(.plain).help("关闭搜索").accessibilityLabel("关闭搜索")
+                    } else {
+                        Text(model.showArchived ? "已归档" : "项目").font(.system(size: 13, weight: .semibold))
                     }
-                    .font(.callout).padding(9)
-                    .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
-                }
+                    Spacer(minLength: 0)
+                }.padding(.horizontal, 12).frame(height: 32)
+                HStack(spacing: 2) {
+                    Button { model.newConversation() } label: { WorkbenchIcon(symbol: "square.and.pencil") }
+                        .help("新建对话（⌘N）").accessibilityLabel("新建对话").disabled(model.currentConfig == nil)
+                    Button { model.openProjectPicker() } label: { WorkbenchIcon(symbol: "folder.badge.plus") }
+                        .help("打开或新建项目").accessibilityLabel("打开或新建项目").disabled(!model.isConnected)
+                    HistorySyncButton()
+                    Spacer(minLength: 0)
+                    Button { if searchExpanded { closeSearch() } else { searchExpanded = true } } label: {
+                        WorkbenchIcon(symbol: searchExpanded ? "xmark" : "magnifyingglass")
+                    }.help(searchExpanded ? "关闭搜索" : "搜索对话").accessibilityLabel(searchExpanded ? "关闭搜索" : "搜索对话")
+                }.buttonStyle(WorkbenchIconButtonStyle(size: 24))
+                    .padding(.horizontal, 8).frame(height: 28)
             }
-            .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 12)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
+                LazyVStack(alignment: .leading, spacing: 1) {
                 if !groups.isEmpty {
-                    Section(model.showArchived ? "已归档 · 项目" : "项目") {
+                    Section {
                         ForEach(Array(visibleGroups.enumerated()), id: \.element.key) { index, group in
                             ProjectGroup(sessions: group.sessions, searching: !model.searchText.isEmpty, initiallyExpanded: index < 2)
                         }
                         if model.searchText.isEmpty && (showAllProjects || groups.count > visibleGroups.count) {
                             Button(showAllProjects ? "收起项目" : "更多项目（\(groups.count - visibleGroups.count)）") { showAllProjects.toggle() }
-                                .buttonStyle(.borderless).foregroundStyle(.secondary).font(.callout)
-                                .padding(.vertical, 6).listRowSeparator(.hidden).selectionDisabled()
-                        }
-                    }
-                    if model.searchText.isEmpty && !model.showArchived {
-                        Section {
-                        DisclosureGroup("最近对话", isExpanded: $recentExpanded) {
-                            ProjectGroup(sessions: Array(sessions.filter { $0.archived != true && !model.projectMissing($0) }.sorted { $0.updatedAt > $1.updatedAt }.prefix(8)), searching: false, flat: true)
-                        }.listRowSeparator(.hidden)
+                                .buttonStyle(.borderless).foregroundStyle(WorkbenchTheme.inkMuted).font(.system(size: 12))
+                                .padding(.leading, 22).frame(height: 24)
                         }
                     }
                 }
-                if !unavailableSessions.isEmpty {
-                    Section("目录已移除 · 历史对话") {
-                        ProjectGroup(sessions: unavailableSessions, searching: !model.searchText.isEmpty, flat: true)
-                    }
-                }
-                }.padding(.horizontal, 10).padding(.vertical, 8)
+                }.padding(.horizontal, 6).padding(.bottom, 8)
 
             }
             .id(model.currentConfig?.key ?? "no-machine")
             .frame(maxHeight: .infinity)
             .overlay(alignment: .topLeading) {
-                if groups.isEmpty && unavailableSessions.isEmpty {
+                if groups.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(model.searchText.isEmpty ? (model.showArchived ? "还没有归档的对话" : "暂无历史对话") : "没有找到匹配的对话")
-                        Text(model.searchText.isEmpty ? "连接后自动同步这台机器的对话" : "试试其他关键词")
-                            .foregroundStyle(.tertiary)
                     }
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(WorkbenchTheme.inkMuted)
                     .padding(.horizontal, 20).padding(.top, 20).allowsHitTesting(false)
                 }
             }
-            ServerFooter()
-            Divider().padding(.horizontal, 12)
-            AccountQuotaView(store: model.accountStore)
         }
-        .background { FrostedBackground() }
+        .background(WorkbenchTheme.sidebar)
         .foregroundStyle(WorkbenchTheme.sidebarInk)
     }
 
