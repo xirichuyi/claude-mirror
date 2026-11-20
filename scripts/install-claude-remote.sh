@@ -180,7 +180,8 @@ setup_runner() {
   if as_runner test -s "$home/.claude/.credentials.json"; then
     echo "$runner is already logged in to Claude."
   elif [ "$copy_login" = yes ]; then
-    as_runner sh -c 'umask 077 && mkdir -p "$HOME/.claude" && cat > "$HOME/.claude/.credentials.json"' < "$HOME/.claude/.credentials.json"
+    # A new file, so an existing empty one cannot keep looser permissions.
+    as_runner sh -c 'umask 077 && mkdir -p "$HOME/.claude" && cat > "$HOME/.claude/.credentials-new" && chmod 600 "$HOME/.claude/.credentials-new" && mv -f "$HOME/.claude/.credentials-new" "$HOME/.claude/.credentials.json"' < "$HOME/.claude/.credentials.json"
     echo "Copied root's Claude login file to $runner (that one file, mode 600)."
   else
     echo "Log in once as $runner:  runuser -u $runner -- $home/.local/bin/claude auth login"
