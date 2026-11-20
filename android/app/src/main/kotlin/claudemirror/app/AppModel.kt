@@ -87,7 +87,11 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         secrets.write(host.id, secret)
         _hosts.value = if (previous == null) _hosts.value + host else _hosts.value.map { if (it.id == host.id) host else it }
         hostStore.save(_hosts.value)
-        if (previous != null) { engine.detach(previous); pool.close(previous) }
+        if (previous != null) {
+            engine.detach(previous)
+            pool.close(previous)
+            if (previous.host != host.host || previous.port != host.port || previous.user != host.user) engine.endpointChanged(host.id)
+        }
     }
 
     fun deleteHost(host: HostConfig) {

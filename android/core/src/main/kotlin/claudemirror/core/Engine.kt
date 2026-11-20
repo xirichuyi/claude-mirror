@@ -421,6 +421,26 @@ class Engine(
         }.joinAll()
     }
 
+    /**
+     * The server entry now points at another machine or account. What ran on the old one
+     * stays there: nothing unfinished is sent to the new one, and it is set up from scratch.
+     */
+    fun endpointChanged(host: String) {
+        installs.remove(host)
+        for (session in state.value.filter { it.hostId == host }) {
+            watchers.remove(session.id)?.kill()
+            val reply = session.remoteTask?.messageId
+            update(session.id) {
+                it.copy(
+                    messages = it.messages.map { message -> if (message.id == reply) message.copy(interrupted = true) else message },
+                    status = if (it.isBusy) "stopped" else it.status, permissions = emptyList(), transportError = null,
+                    remoteTask = null, remoteOwner = null, remoteSessionId = null,
+                    queuePaused = it.queuePaused || it.queue.isNotEmpty(),
+                )
+            }
+        }
+    }
+
     /** Stops following this server's replies; they keep running there. */
     fun detach(host: HostConfig) {
         for (session in state.value) {
