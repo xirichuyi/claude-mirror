@@ -35,7 +35,7 @@ function snapshot() {
     status: session.status, permissions: session.permissions, message: session.messages.at(-1),
     remoteSessionId: session.remoteSessionId, model: session.model, preferences: session.preferences,
     capabilities: session.capabilities, tools: session.tools, plugins: session.plugins,
-    terminalCommands: session.terminalCommands, usage: session.usage, tasks: session.tasks, forkPending: session.forkPending });
+    terminalCommands: session.terminalCommands, usage: session.usage, context: session.context, tasks: session.tasks, forkPending: session.forkPending });
 }
 session.tasks = []; // Background task membership belongs to this SDK process.
 const service = new ChatService({ load: () => [session], save: snapshot });
@@ -77,6 +77,40 @@ async function monitorQuota() {
     query.close();
   }
 }
+// Messages handed to a running turn. The CLI reads one at the turn's next step, or
+// runs it as the following turn when the current one ends first.
+const steers = new Set<string>();
+function steerBlock(id) { return run.message.blocks.find(block => block.type === 'user' && block.id === id); }
+function steerProgress(event) {
+  const id = event.type === 'command_lifecycle' ? event.command_uuid : event.type === 'user' && event.isReplay ? event.uuid : null;
+  if (!steers.has(id) || event.state === 'queued') return;
+  steers.delete(id);
+  const block = steerBlock(id);
+  if (!block) return;
+  delete block.pending;
+  if (event.state === 'cancelled') { block.cancelled = true; return; }
+  // Claude has read it now: everything above this point was written before it.
+  run.message.blocks.splice(run.message.blocks.indexOf(block), 1);
+  run.message.blocks.push(block);
+}
+async function interrupt() {
+  const pending = [...steers];
+  steers.clear();
+  for (const id of pending) { const block = steerBlock(id); if (block) { delete block.pending; block.cancelled = true; } }
+  // Without cancelQueued the CLI would run the queued messages right after the interrupt.
+  const receipt = await query.interrupt({ cancelQueued: true });
+  const survivors = (receipt?.still_queued || pending).filter(id => pending.includes(id));
+  if (typeof query.cancelAsyncMessage === 'function') await Promise.allSettled(survivors.map(id => query.cancelAsyncMessage(id)));
+}
+let contextRead;
+function refreshContext() {
+  if (contextRead || ended || typeof query?.getContextUsage !== 'function') return;
+  contextRead = query.getContextUsage({ detail: 'summary' }).then(usage => {
+    if (!(usage?.maxTokens > 0)) return;
+    session.context = { usedTokens: usage.totalTokens, maxTokens: usage.maxTokens };
+    snapshot();
+  }, () => { /* Older CLIs lack this control; the client hides the meter. */ }).finally(() => { contextRead = null; });
+}
 const rewind = require('./checkpoint-control.cjs').checkpointControl(() => query, () => service.runs.has(session.id) || session.tasks?.some(task => task.status === 'running'));
 async function control(command) {
   idle.touch();
@@ -92,11 +126,22 @@ async function control(command) {
     input.push(command.prompt, command.message.id, session.remoteSessionId);
     return {};
   }
+  if (command.kind === 'steer') {
+    if (steers.has(command.id) || steerBlock(command.id)) return {}; // Replay after an uncertain transport ACK.
+    if (!service.runs.has(session.id) || run.stopped) throw new Error('当前回复已结束');
+    if (typeof command.id !== 'string' || typeof command.text !== 'string' || typeof command.prompt !== 'string' || !command.prompt.trim()) throw new Error('无效的插队消息');
+    run.message.blocks.push({ type: 'user', id: command.id, text: command.text, pending: true,
+      ...(command.attachments?.length ? { attachments: command.attachments } : {}) });
+    steers.add(command.id);
+    input.push(command.prompt, command.id, session.remoteSessionId, 'next');
+    snapshot();
+    return {};
+  }
   if (command.kind === 'stop') {
     if (service.runs.has(session.id)) {
       run.stopped = true; session.status = 'stopping'; snapshot();
       for (const permission of [...session.permissions]) service.respond(session.id, permission.id, { allow: false });
-      await query.interrupt();
+      await interrupt();
     } else if (['working', 'connecting', 'permission', 'stopping'].includes(session.status)) {
       // A late SDK event can leave a stale busy label after the turn finished.
       // Acknowledge stop with a fresh terminal snapshot, not a silent no-op.
@@ -209,8 +254,11 @@ try { commandWatcher = fs.watch(path.join(folder, 'commands'), runCommands); com
   session.capabilities = await workerCatalogue(); snapshot();
   for await (const event of query) {
     if (service.runs.has(session.id)) {
+      steerProgress(event);
       service.consumeEvent(session, event, run);
-      if (event.type === 'result') service.finish(session, run, true);
+      // A steer the CLI has not started yet runs as the next turn of this same reply.
+      if (event.type === 'result' && (run.stopped || !steers.size)) { service.finish(session, run, true); refreshContext(); }
+      else if (event.type === 'system' && event.subtype === 'compact_boundary') refreshContext();
     } else if (event.type === 'system' && event.subtype === 'commands_changed') {
       session.capabilities.commands = event.commands; snapshot();
     } else if (event.type === 'system' && (event.task_id || event.subtype === 'background_tasks_changed')) {
