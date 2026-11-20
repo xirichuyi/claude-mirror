@@ -33,6 +33,7 @@ public sealed partial class MainWindow : Window
     private bool busy;
     private MessageView? reply;
     private readonly SendQueue queue = new();
+    private bool sending;
     private sealed record ModelChoice(string Value, string Label);
     private static SolidColorBrush Brush(byte r, byte g, byte b) => new(Windows.UI.Color.FromArgb(255, r, g, b));
 
@@ -227,7 +228,7 @@ public sealed partial class MainWindow : Window
     }
     private async Task SendTextAsync(string text)
     {
-        var remote = RequireAgent(); busy = true; AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
+        var remote = RequireAgent(); busy = true; sending = true; AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
         var message = new { id = Guid.NewGuid().ToString(), role = "assistant", blocks = Array.Empty<object>() };
         try
         {
@@ -245,7 +246,8 @@ public sealed partial class MainWindow : Window
                 await remote.TaskCommandAsync(taskId, new { kind = "send", prompt = text, message });
             }
         }
-        catch { busy = false; RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
+        catch { busy = false; queue.Pause(); RenderQueue(); RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
+        finally { sending = false; }
     }
     private Task WatchCurrentAsync()
     {
@@ -255,7 +257,9 @@ public sealed partial class MainWindow : Window
     private void OnState(string watched, JsonObject state) => DispatcherQueue.TryEnqueue(async () =>
     {
         if (taskId != watched) return;
-        var value = state["status"]?.GetValue<string>(); bool wasBusy = busy; busy = value is "working" or "connecting" or "permission" or "stopping";
+        var value = state["status"]?.GetValue<string>(); bool wasBusy = busy;
+        // The model and permission commands sent before a prompt publish idle snapshots; those must not release the next queued prompt.
+        busy = sending || value is "working" or "connecting" or "permission" or "stopping";
         reply ??= AddMessage(""); reply.Show(state["message"], busy);
         // A reply that failed or was stopped keeps the queue until the user says to go on.
         if (wasBusy && !busy && (state["message"]?["error"] is not null || state["message"]?["interrupted"]?.GetValue<bool>() == true)) queue.Pause();
