@@ -116,15 +116,16 @@ import RemoteCCCore
             value.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: value.length))
             prose.append(value)
         }
-        func walk(_ node: UnsafeMutablePointer<cmark_node>, depth: Int = 0, quote: Bool = false, prefix: String = "", tight: Bool = false) {
-            let kind = type(node), indent = CGFloat(depth) * 20 + (quote ? 16 : 0)
+        func walk(_ node: UnsafeMutablePointer<cmark_node>, depth: Int = 0, quote: NSTextBlock? = nil, prefix: String = "", tight: Bool = false) {
+            let kind = type(node), indent = CGFloat(depth) * 20
             switch kind {
             case "paragraph", "heading":
                 let level = kind == "heading" ? Int(cmark_node_get_heading_level(node)) : 0
                 let size: CGFloat = level == 1 ? 23 : level == 2 ? 19 : level > 0 ? 16 : 13
                 var attrs = attributes(size: size, bold: level > 0)
-                if quote { attrs[.foregroundColor] = NSTheme.textMuted }
+                if quote != nil { attrs[.foregroundColor] = NSTheme.textMuted }
                 let p = style(indent: indent)
+                if let quote { p.textBlocks = [quote] }
                 if !prefix.isEmpty {
                     // Indent the marker a little so a list reads as a list, not as loose paragraphs.
                     p.firstLineHeadIndent = max(0, indent - 14)
@@ -146,7 +147,15 @@ import RemoteCCCore
                     }
                     number += 1
                 }
-            case "block_quote": for child in children(node) { walk(child, depth: depth, quote: true) }
+            case "block_quote":
+                // One text block for the whole quote draws a continuous bar down its left side.
+                // The bar is only drawn when the block has a width and a colour on every edge.
+                let bar = NSTextBlock()
+                bar.setValue(100, type: .percentageValueType, for: .width)
+                bar.setWidth(3, type: .absoluteValueType, for: .border, edge: .minX)
+                bar.setBorderColor(.tertiaryLabelColor)
+                bar.setWidth(12, type: .absoluteValueType, for: .padding, edge: .minX)
+                for child in children(node) { walk(child, depth: depth, quote: quote ?? bar) }
             case "code_block":
                 flush()
                 let language = cmark_node_get_fence_info(node).map { String(cString: $0).split(separator: " ").first.map(String.init) ?? "" } ?? ""
