@@ -136,8 +136,11 @@ class Engine(
         return item
     }
 
-    fun cancelQueued(id: String, item: String) = update(id) { it.copy(queue = it.queue.filter { queued -> queued.id != item }) }
-    fun clearQueue(id: String) = update(id) { it.copy(queue = emptyList()) }
+    /** The hold belongs to the messages that were waiting when the server moved; it ends with the last of them. */
+    private fun ChatSession.withQueue(queue: List<QueuedMessage>) = copy(queue = queue, queueHeld = queueHeld && queue.isNotEmpty())
+
+    fun cancelQueued(id: String, item: String) = update(id) { it.withQueue(it.queue.filter { queued -> queued.id != item }) }
+    fun clearQueue(id: String) = update(id) { it.withQueue(emptyList()) }
 
     fun resumeQueue(id: String) {
         update(id) { it.copy(queuePaused = false, queueHeld = false) }
@@ -163,7 +166,7 @@ class Engine(
         val session = require(id)
         val queued = session.queue.firstOrNull { it.id == item } ?: return
         if (session.remoteTask == null) return resumeQueue(id)
-        update(id) { it.copy(queue = it.queue.filter { other -> other.id != item }) }
+        update(id) { it.withQueue(it.queue.filter { other -> other.id != item }) }
         try {
             command(session, "steer", commandId = queued.id) { put("id", queued.id); put("text", queued.text); put("prompt", queued.text) }
         } catch (error: RemoteException) {

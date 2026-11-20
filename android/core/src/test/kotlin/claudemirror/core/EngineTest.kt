@@ -294,6 +294,27 @@ class EngineTest {
         until("the held message is sent") { agent.starts().size == 3 }
         assertEquals("queued", agent.starts().last()["request"]!!.jsonObject["prompt"].string())
         assertFalse(current(session.id).queueHeld)
+    }
+
+    @Test fun `discarding the held messages ends the hold`() = engineTest {
+        val (session, task) = started()
+        agent.emit(task.id, state(task, 1, "working"))
+        until("working") { current(session.id).status == "working" }
+        engine.submit(session.id, "for the old machine")
+        engine.detach(testHost)
+        engine.endpointChanged(testHost.id)
+        assertTrue(current(session.id).queueHeld)
+        engine.clearQueue(session.id)
+        assertFalse(current(session.id).queueHeld)
+
+        // A message queued on the new machine goes out by itself again.
+        engine.send(session.id, "new machine")
+        val next = current(session.id).remoteTask!!
+        until("the new worker is followed") { agent.follows(next.id) }
+        engine.submit(session.id, "follow-up")
+        agent.emit(next.id, state(next, 1, "idle", "hello", ""","done":true"""))
+        until("the follow-up is sent") { agent.starts().size == 3 }
+        assertEquals("follow-up", agent.starts().last()["request"]!!.jsonObject["prompt"].string())
         assertEquals(2, agent.calls.count { it.operation == "installed" })
         assertEquals("new machine", agent.starts()[1]["request"]!!.jsonObject["prompt"].string())
         assertNull(agent.starts()[1]["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"])
