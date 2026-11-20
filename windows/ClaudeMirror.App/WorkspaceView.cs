@@ -218,7 +218,7 @@ public sealed partial class MainWindow
         }
         finally { try { File.Delete(file); } catch (IOException) { } }
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(6) };
-        bar.Children.Add(BackToChat());
+        bar.Children.Add(BackToChat()); bar.Children.Add(ActionButton("下载", "\uE896", () => SaveCopyAsync(path), true));
         bar.Children.Add(new TextBlock { Text = path, FontSize = 12, Foreground = muted, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
         OpenToolTab("pdf:" + path, Path.GetFileName(path), ToolArea(bar, new ScrollViewer { Content = pages, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto }));
     }

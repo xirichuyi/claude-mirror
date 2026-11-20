@@ -398,10 +398,13 @@ public sealed partial class MainWindow : Window
             File.Delete(file); content = new Image { Source = bitmap, MaxWidth = 700, MaxHeight = 500 };
         }
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = Path.GetFileName(path), Content = new ScrollViewer { Content = content, MaxHeight = 500 }, PrimaryButtonText = "下载", CloseButtonText = "关闭" };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-        {
-            var picker = new FileSavePicker { SuggestedFileName = Path.GetFileName(path) }; picker.FileTypeChoices.Add("文件", new List<string> { Path.GetExtension(path) is { Length: > 0 } ext ? ext : ".bin" });
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); var file = await picker.PickSaveFileAsync(); if (file is not null) await remote.DownloadAsync(path, file.Path);
-        }
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary) await SaveCopyAsync(path);
+    }
+    /// Downloads a server file to a place the user picks.
+    private async Task SaveCopyAsync(string path)
+    {
+        var remote = RequireAgent();
+        var picker = new FileSavePicker { SuggestedFileName = Path.GetFileName(path) }; picker.FileTypeChoices.Add("文件", new List<string> { Path.GetExtension(path) is { Length: > 0 } ext ? ext : ".bin" });
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); var file = await picker.PickSaveFileAsync(); if (file is not null) await remote.DownloadAsync(path, file.Path);
     }
 }
