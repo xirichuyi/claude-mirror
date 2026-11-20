@@ -15,8 +15,9 @@ struct AccountStatusSheet: View {
             if !model.isConnected {
                 Text("连接机器后显示登录账号。").font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
             } else if let status = store.status {
+                let rows = AccountSummary.rows(status)
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(AccountSummary.rows(status), id: \.title) { row in
+                    ForEach(rows, id: \.title) { row in
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(row.title).foregroundStyle(WorkbenchTheme.inkMuted).frame(width: 96, alignment: .leading)
                             Text(row.value).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -26,6 +27,14 @@ struct AccountStatusSheet: View {
                 }
                 if let error = status["accountError"]?.string {
                     Text(error).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled)
+                } else if rows.isEmpty {
+                    Text("远端没有返回登录账号。").font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
+                }
+            } else if let failure = store.failure, !store.refreshing {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("无法读取账户信息").font(.callout)
+                    Text(failure).font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).textSelection(.enabled)
+                    Button("重试") { Task { await store.refresh() } }.buttonStyle(WorkbenchButtonStyle())
                 }
             } else {
                 ProgressView("正在读取…").controlSize(.small)

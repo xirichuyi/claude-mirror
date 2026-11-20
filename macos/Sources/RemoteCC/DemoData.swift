@@ -11,6 +11,7 @@ final class DemoLauncher: RemoteLauncher, @unchecked Sendable {
 
 enum DemoData {
     static let config = ConnectionConfig(host: "dev-server", directory: "/workspace/web-app", name: "开发服务器")
+    static let account: JSON = ["account": ["email": "dev@example.com", "organization": "Example Team", "subscriptionType": "max", "apiProvider": "firstParty"], "version": "2.1.312"]
     static func sessions() -> [ChatSession] {
         var chat = ChatSession(config: config, name: "检查登录接口")
         chat.messages = [
