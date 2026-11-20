@@ -3,7 +3,8 @@ using System.Text.Json.Nodes;
 
 namespace ClaudeMirror.Core;
 
-public sealed record HostProfile(string Name, string Host, int Port, string User, string? KeyFile = null);
+/// <param name="ProxyJump">One jump host as <c>user@host[:port]</c>; it logs in with <paramref name="JumpKeyFile"/> (the host's own key file when null).</param>
+public sealed record HostProfile(string Name, string Host, int Port, string User, string? KeyFile = null, string? ProxyJump = null, string? JumpKeyFile = null);
 public sealed record Conversation(string Name, string Directory, string? SessionId, string? Reference)
 {
     public override string ToString() => Name;

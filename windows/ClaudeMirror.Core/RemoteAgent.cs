@@ -7,7 +7,8 @@ namespace ClaudeMirror.Core;
 
 public sealed class RemoteAgent : IDisposable
 {
-    private SshClient? ssh;
+    private SshClient? ssh, jump;
+    private ForwardedPortLocal? tunnel;
     private SshCommand? command;
     private StreamWriter? writer;
     private readonly SemaphoreSlim writeLock = new(1);
@@ -26,8 +27,9 @@ public sealed class RemoteAgent : IDisposable
     public event Action<string>? Disconnected;
     public bool Connected => (attached || ssh?.IsConnected == true) && writer is not null && !lifetime.IsCancellationRequested && !channelClosed;
 
+    /// <param name="verifyJump">Decides whether the jump host's fingerprint is trusted; required when the profile has a jump host.</param>
     public async Task ConnectAsync(HostProfile profile, string password, string keyPassphrase,
-        string resourceDirectory, Func<string, Task<bool>> verifyHost)
+        string resourceDirectory, Func<string, Task<bool>> verifyHost, Func<HostProfile, string, Task<bool>>? verifyJump = null)
     {
         if (profile.Port is < 1 or > 65535 || string.IsNullOrWhiteSpace(profile.Host) || string.IsNullOrWhiteSpace(profile.User))
             throw new ArgumentException("请填写主机、用户名和有效端口");
@@ -35,9 +37,26 @@ public sealed class RemoteAgent : IDisposable
         AuthenticationMethod auth = privateKey is null
             ? new PasswordAuthenticationMethod(profile.User, password)
             : new PrivateKeyAuthenticationMethod(profile.User, privateKey);
-        ssh = new SshClient(new ConnectionInfo(profile.Host, profile.Port, profile.User, auth) { Timeout = TimeSpan.FromSeconds(20) });
+        static string Fingerprint(byte[] key) => "SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(key)).TrimEnd('=');
+        string address = profile.Host; int port = profile.Port;
+        if (!string.IsNullOrWhiteSpace(profile.ProxyJump))
+        {
+            // The jump host only relays TCP: the connection to the target is still encrypted end to end and checked against the target's own fingerprint.
+            if (verifyJump is null) throw new ArgumentException("需要确认跳板机指纹");
+            var hop = SshConfig.Jump(profile.ProxyJump, profile.User, profile.JumpKeyFile ?? profile.KeyFile);
+            if (string.IsNullOrWhiteSpace(hop.KeyFile)) throw new ArgumentException("跳板机需要用私钥文件登录");
+            using var hopKey = new PrivateKeyFile(hop.KeyFile, keyPassphrase);
+            jump = new SshClient(new ConnectionInfo(hop.Host, hop.Port, hop.User, new PrivateKeyAuthenticationMethod(hop.User, hopKey)) { Timeout = TimeSpan.FromSeconds(20) });
+            jump.KeepAliveInterval = TimeSpan.FromSeconds(15);
+            jump.HostKeyReceived += (_, e) => e.CanTrust = verifyJump(hop, Fingerprint(e.HostKey)).GetAwaiter().GetResult();
+            await Task.Run(() => jump.Connect());
+            tunnel = new ForwardedPortLocal("127.0.0.1", 0, profile.Host, (uint)profile.Port);
+            jump.AddForwardedPort(tunnel); tunnel.Start();
+            address = "127.0.0.1"; port = (int)tunnel.BoundPort;
+        }
+        ssh = new SshClient(new ConnectionInfo(address, port, profile.User, auth) { Timeout = TimeSpan.FromSeconds(20) });
         ssh.KeepAliveInterval = TimeSpan.FromSeconds(15);
-        ssh.HostKeyReceived += (_, e) => e.CanTrust = verifyHost("SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(e.HostKey)).TrimEnd('=')).GetAwaiter().GetResult();
+        ssh.HostKeyReceived += (_, e) => e.CanTrust = verifyHost(Fingerprint(e.HostKey)).GetAwaiter().GetResult();
         await Task.Run(() => ssh.Connect());
         Profile = profile;
         await StartAgentAsync(resourceDirectory);
@@ -238,7 +257,7 @@ public sealed class RemoteAgent : IDisposable
     }
     public void Dispose()
     {
-        lifetime.Cancel(); writer?.Dispose(); command?.Dispose(); ssh?.Dispose();
+        lifetime.Cancel(); writer?.Dispose(); command?.Dispose(); ssh?.Dispose(); tunnel?.Dispose(); jump?.Dispose();
         foreach (var request in requests.Values) request.TrySetCanceled(); requests.Clear(); watches.Clear();
     }
 }

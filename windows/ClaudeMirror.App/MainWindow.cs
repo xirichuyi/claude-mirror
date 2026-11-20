@@ -103,13 +103,33 @@ public sealed partial class MainWindow : Window
             note.Text = mode.SelectedIndex == 0 ? "密码只用于这次连接，不会保存。连接成功后可以一键设置免密登录。首次连接会请你确认服务器指纹。" : "使用所选私钥登录，私钥不会上传。首次连接会请你确认服务器指纹。";
         }
         mode.SelectionChanged += (_, _) => UpdateMode(); UpdateMode();
+        var jump = new TextBox { Header = "跳板机（可选）", Text = existing?.ProxyJump ?? "", PlaceholderText = "例如 ops@gate.example.com:22" };
+        var jumpKey = new TextBox { Header = "跳板机私钥（留空则使用上面的私钥）", Text = existing?.JumpKeyFile ?? "" };
+        var pickJumpKey = Button("选择跳板机私钥", async () => { var file = await PickAsync(); if (file is not null) jumpKey.Text = file; });
         var advanced = new StackPanel { Spacing = 14 };
-        foreach (var element in new UIElement[] { name, user, port }) advanced.Children.Add(element);
-        var expander = new Expander { Header = "高级选项：名称、用户名、端口", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            IsExpanded = existing is not null && (existing.Port != 22 || existing.Name != existing.Host) };
+        foreach (var element in new UIElement[] { name, user, port, jump, jumpKey, pickJumpKey }) advanced.Children.Add(element);
+        var expander = new Expander { Header = "高级选项：名称、用户名、端口、跳板机", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            IsExpanded = existing is not null && (existing.Port != 22 || existing.Name != existing.Host || existing.ProxyJump is not null) };
+        var configured = existing is null ? ConfiguredHosts() : [];
+        var import = new ComboBox { Header = "从 SSH 配置导入", PlaceholderText = "选择 ~/.ssh/config 里的主机", ItemsSource = configured.Select(entry => entry.Alias).ToList(), HorizontalAlignment = HorizontalAlignment.Stretch, Visibility = configured.Count > 0 ? Visibility.Visible : Visibility.Collapsed };
+        import.SelectionChanged += (_, _) =>
+        {
+            if (import.SelectedIndex < 0) return;
+            var entry = configured[import.SelectedIndex];
+            name.Text = entry.Alias; address.Text = entry.User is null ? entry.Host : entry.User + "@" + entry.Host; port.Value = entry.Port;
+            key.Text = entry.KeyFile ?? ""; mode.SelectedIndex = entry.KeyFile is null ? 0 : 1; jump.Text = ""; jumpKey.Text = "";
+            if (entry.ProxyJump is not null)
+                try
+                {
+                    var hop = SshConfig.Jump(entry.ProxyJump, entry.User ?? "", entry.KeyFile, configured);
+                    jump.Text = SshConfig.JumpSpec(hop); jumpKey.Text = hop.KeyFile == entry.KeyFile ? "" : hop.KeyFile ?? "";
+                }
+                catch (ArgumentException) { jump.Text = entry.ProxyJump; }
+            expander.IsExpanded = entry.Port != 22 || entry.ProxyJump is not null;
+        };
         var panel = new StackPanel { Spacing = 14 };
         panel.Children.Add(new TextBlock { Text = "填写服务器地址和登录方式。Claude Code 和项目都在服务器上运行，本机只负责显示和操作。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
-        foreach (var element in new UIElement[] { address, mode, password, key, pick, phrase, note, expander }) panel.Children.Add(element);
+        foreach (var element in new UIElement[] { import, address, mode, password, key, pick, phrase, note, expander }) panel.Children.Add(element);
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = existing == null ? "添加服务器" : "连接服务器", Content = new ScrollViewer { Content = panel }, Background = canvas, PrimaryButtonText = "连接", CloseButtonText = "取消" };
         (string User, string Host) Target()
         {
@@ -127,13 +147,16 @@ public sealed partial class MainWindow : Window
         mode.SelectionChanged += (_,_) => Validate(); port.ValueChanged += (_,_) => Validate(); Validate();
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         var (login, server) = Target();
-        var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? server : name.Text.Trim(), server, (int)port.Value, login, mode.SelectedIndex == 1 ? key.Text : null);
+        var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? server : name.Text.Trim(), server, (int)port.Value, login, mode.SelectedIndex == 1 ? key.Text : null,
+            string.IsNullOrWhiteSpace(jump.Text) ? null : jump.Text.Trim(), string.IsNullOrWhiteSpace(jump.Text) || string.IsNullOrWhiteSpace(jumpKey.Text) ? null : jumpKey.Text.Trim());
+        if (profile.ProxyJump is not null && string.IsNullOrWhiteSpace(SshConfig.Jump(profile.ProxyJump, login, profile.JumpKeyFile ?? profile.KeyFile).KeyFile))
+            throw new IOException("跳板机需要用私钥文件登录，请在高级选项里选择跳板机私钥");
         agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
         reconnecting?.Cancel();
         next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
         RemoteSetupException? setup = null;
         var usedPassword = mode.SelectedIndex == 0;
-        try { await next.ConnectAsync(profile, password.Password, phrase.Password, ServerResources, fingerprint => ConfirmHostAsync(profile, fingerprint)); }
+        try { await next.ConnectAsync(profile, password.Password, phrase.Password, ServerResources, fingerprint => ConfirmHostAsync(profile, fingerprint), ConfirmHostAsync); }
         catch (RemoteSetupException e) { setup = e; }
         catch (Exception e) { next.Dispose(); RefreshWorkbench(); throw new IOException(ConnectionAdvice.Explain(e.Message), e); }
         finally { password.Password = ""; phrase.Password = ""; }
