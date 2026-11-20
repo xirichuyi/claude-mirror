@@ -289,6 +289,13 @@ public sealed partial class MainWindow : Window
         var remote = RequireAgent(); var path = new TextBox { Text = directory.Text }; var entries = new StackPanel { Spacing = 4 };
         var panel = new StackPanel { Spacing = 12 }; panel.Children.Add(path); panel.Children.Add(new ScrollViewer { Content = entries, MaxHeight = 400 });
         ContentDialog? browser = null; string? previewPath = null;
+        // The window's status line is behind this dialog, so a failed create, rename or delete is reported here.
+        var problem = new TextBlock { Foreground = danger, FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed }; panel.Children.Add(problem);
+        async Task Guard(Func<Task> action)
+        {
+            try { problem.Visibility = Visibility.Collapsed; await action(); }
+            catch (Exception e) { problem.Text = e.Message; problem.Visibility = Visibility.Visible; }
+        }
         async Task Load()
         {
             var result = await remote.CallAsync("file", new { operation = "list", path = path.Text, @base = directory.Text });
@@ -296,20 +303,63 @@ public sealed partial class MainWindow : Window
             entries.Children.Add(Button("↑ 上一级", async () => { path.Text = path.Text.TrimEnd('/')[..Math.Max(0, path.Text.TrimEnd('/').LastIndexOf('/'))]; if (path.Text.Length == 0) path.Text = "/"; await Load(); }));
             foreach (var entry in result["entries"]!.AsArray())
             {
-                var item = entry!.DeepClone(); entries.Children.Add(Button(item["name"]!.GetValue<string>(), async () =>
+                var item = entry!.DeepClone();
+                bool folder = item["directory"]?.GetValue<bool>() == true || item["type"]?.GetValue<string>() == "directory";
+                var row = Button(item["name"]!.GetValue<string>(), async () =>
                 {
-                    if (item["directory"]?.GetValue<bool>() == true || item["type"]?.GetValue<string>() == "directory") { path.Text = item["path"]!.GetValue<string>(); await Load(); }
+                    if (folder) { path.Text = item["path"]!.GetValue<string>(); await Load(); }
                     else { previewPath = item["path"]!.GetValue<string>(); browser!.Hide(); }
-                }));
+                });
+                row.ContextFlyout = EntryMenu(remote, row, item["path"]!.GetValue<string>(), item["name"]!.GetValue<string>(), folder, Load, Guard);
+                entries.Children.Add(row);
             }
         }
-        panel.Children.Add(Button("前往", Load)); await Load();
+        var create = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        create.Children.Add(Button("前往", Load));
+        foreach (var makeFolder in new[] { false, true })
+        {
+            var name = new TextBox { PlaceholderText = makeFolder ? "文件夹名称" : "文件名称", Width = 220 };
+            var add = Button(makeFolder ? "新建文件夹" : "新建文件", () => Task.CompletedTask);
+            var flyout = new Flyout();
+            flyout.Content = new StackPanel { Spacing = 8, Children = { name, Button("创建", () => { flyout.Hide(); return Guard(async () =>
+            {
+                await remote.CallAsync("file", new { operation = "create", directory = path.Text, name = name.Text.Trim(), folder = makeFolder });
+                name.Text = ""; await Load();
+            }); }) } };
+            add.Flyout = flyout; create.Children.Add(add);
+        }
+        panel.Children.Add(create); await Load();
         browser = new ContentDialog { XamlRoot = root.XamlRoot, Title = "远端文件", Content = panel, PrimaryButtonText = "设为工作目录", CloseButtonText = "关闭" };
         if (await browser.ShowAsync() == ContentDialogResult.Primary)
         {
             await NewConversationAsync(); directory.Text = path.Text; await RefreshCapabilitiesAsync();
         }
         if (previewPath is not null) await PreviewAsync(previewPath);
+    }
+    /// Rename and delete for one entry of the remote file browser. Deleting asks again inside the menu, because a second dialog cannot open over the browser.
+    private MenuFlyout EntryMenu(RemoteAgent remote, FrameworkElement anchor, string path, string name, bool folder, Func<Task> reload, Func<Func<Task>, Task> guard)
+    {
+        var menu = new MenuFlyout();
+        var renamed = new TextBox { Text = name, Width = 240 };
+        var rename = new Flyout();
+        rename.Content = new StackPanel { Spacing = 8, Children = { renamed, Button("重命名", () => { rename.Hide(); return guard(async () =>
+        {
+            if (openFiles.Any(file => file.Path == path || file.Path.StartsWith(path + "/", StringComparison.Ordinal))) throw new IOException("请先关闭这个文件的标签，再重命名");
+            await remote.CallAsync("file", new { operation = "rename", path, name = renamed.Text.Trim() });
+            await reload();
+        }); }) } };
+        var start = new MenuFlyoutItem { Text = "重命名…", Icon = new FontIcon { Glyph = "\uE8AC" } };
+        start.Click += (_, _) => rename.ShowAt(anchor);
+        menu.Items.Add(start);
+        var delete = new MenuFlyoutSubItem { Text = "删除", Icon = new FontIcon { Glyph = "\uE74D" } };
+        delete.Items.Add(MenuItem(folder ? $"确认删除文件夹“{name}”及其全部内容" : $"确认删除“{name}”", "\uE74D", () => guard(async () =>
+        {
+            if (openFiles.Any(file => file.Dirty && (file.Path == path || file.Path.StartsWith(path + "/", StringComparison.Ordinal)))) throw new IOException("这个文件有未保存的更改，请先保存或关闭它的标签");
+            await remote.CallAsync("file", new { operation = "remove", path, recursive = folder });
+            await reload();
+        })));
+        menu.Items.Add(delete);
+        return menu;
     }
     private async Task PreviewAsync(string path)
     {
