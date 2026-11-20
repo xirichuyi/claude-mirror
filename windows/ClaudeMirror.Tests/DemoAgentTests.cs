@@ -34,4 +34,17 @@ public class DemoAgentTests
         var error = await Assert.ThrowsAsync<IOException>(() => agent.CallAsync("file", new { operation = "remove", path = "/x" }));
         Assert.Contains("演示模式", error.Message);
     }
+
+    [Theory]
+    [InlineData(DemoAgent.PermissionTaskId, "permission", 1)]
+    [InlineData(DemoAgent.FinishedTaskId, "idle", 0)]
+    public async Task EveryDemoSceneHasATaskState(string task, string status, int permissions)
+    {
+        using var agent = await new DemoAgent().ConnectAsync(Host);
+        var received = new TaskCompletionSource<JsonObject>();
+        await agent.WatchAsync(task, state => received.TrySetResult(state));
+        var state = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(status, state["status"]!.GetValue<string>());
+        Assert.Equal(permissions, state["permissions"]!.AsArray().Count);
+    }
 }

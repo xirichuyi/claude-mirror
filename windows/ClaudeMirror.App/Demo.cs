@@ -8,7 +8,7 @@ using Windows.Storage.Streams;
 namespace ClaudeMirror.App;
 
 /// Demo scenes: the real window on fixture data, with no SSH. Used for screenshots.
-///   CLAUDE_MIRROR_DEMO      home | chat
+///   CLAUDE_MIRROR_DEMO      home | chat | permission | finished
 ///   CLAUDE_MIRROR_THEME     light | dark
 ///   CLAUDE_MIRROR_SIZE      for example 1280x800
 ///   CLAUDE_MIRROR_SCROLL    transcript offset in pixels; default is the newest message
@@ -64,8 +64,10 @@ public sealed partial class MainWindow
         await AfterAgentStartedAsync(demo);
         await RefreshHealthAsync();
         if (scene == "home") return;
-        local.Tasks[LocalState.HostKey(profile) + "|s-auth"] = DemoAgent.TaskId;
+        local.Tasks[LocalState.HostKey(profile) + "|s-auth"] = scene switch { "permission" => DemoAgent.PermissionTaskId, "finished" => DemoAgent.FinishedTaskId, _ => DemoAgent.TaskId };
         await SelectAsync(history[0]);
+        if (scene != "permission") return;
+        queue.Add("推送之后顺便开一个 PR"); queue.Add("再把 CHANGELOG 更新一下"); RenderQueue();
     }
 
     private async Task SaveSnapshotAsync(string path)

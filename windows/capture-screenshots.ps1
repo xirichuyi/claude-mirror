@@ -8,7 +8,9 @@ $shots = @(
     @{ Name = 'home'; Scene = 'home' },
     @{ Name = 'chat'; Scene = 'chat' },
     @{ Name = 'chat-top'; Scene = 'chat'; Scroll = '0' },
-    @{ Name = 'chat-narrow'; Scene = 'chat'; Size = '760x820' }
+    @{ Name = 'chat-narrow'; Scene = 'chat'; Size = '760x820' },
+    @{ Name = 'permission'; Scene = 'permission' },
+    @{ Name = 'finished'; Scene = 'finished' }
 )
 try {
     foreach ($shot in $shots) {

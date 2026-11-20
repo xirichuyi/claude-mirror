@@ -198,7 +198,7 @@ public sealed partial class MainWindow
         var toolbar = new Grid(); toolbar.ColumnDefinitions.Add(new ColumnDefinition()); toolbar.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
 
         commandMenu=PickerAction(false);modelMenu=PickerAction(true);UpdatePickerTitle();
-        toolbar.Children.Add(Row(ActionButton("附件","\uE723",UploadAsync),commandMenu));
+        toolbar.Children.Add(Row(ActionButton("附件","\uE723",UploadAsync),commandMenu,PermissionPicker()));
         send = ActionButton("发送","\uE74A",SendAsync); send.Background = ink; send.Foreground = canvas; send.CornerRadius = new CornerRadius(18);
         stop = ActionButton("停止","\uE71A",StopAsync);
         var actions = Row(modelMenu,stop,send); Grid.SetColumn(actions,1); toolbar.Children.Add(actions); input.Children.Add(toolbar);

@@ -202,4 +202,37 @@ public sealed partial class MainWindow
             Background = surface, BorderBrush = amber, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 12, 6, 12)
         };
     }
+
+    private static readonly (string Value, string Label, string Hint)[] PermissionModes =
+    [
+        ("default", "默认权限", "每次操作前询问"), ("plan", "计划", "只制定计划，不修改文件"),
+        ("acceptEdits", "自动编辑", "自动接受文件编辑"), ("dontAsk", "拒绝未授权", "未授权的操作直接拒绝")
+    ];
+    private string permissionMode = "default";
+    private Button permissionMenu = null!;
+
+    /// The permission mode for this conversation; a change reaches a running task at once.
+    private Button PermissionPicker()
+    {
+        permissionMenu = ActionButton("权限模式", "\uE72E", () => Task.CompletedTask, true);
+        var menu = new MenuFlyout();
+        foreach (var mode in PermissionModes)
+        {
+            var choice = new MenuFlyoutItem { Text = mode.Label + " · " + mode.Hint };
+            choice.Click += async (_, _) => await RunAsync(async () =>
+            {
+                if (taskId is not null && agent?.Connected == true)
+                    await agent.TaskCommandAsync(taskId, new { kind = "control", action = "permission", value = mode.Value });
+                permissionMode = mode.Value; UpdatePermissionTitle();
+            });
+            menu.Items.Add(choice);
+        }
+        permissionMenu.Flyout = menu; UpdatePermissionTitle();
+        return permissionMenu;
+    }
+    private void UpdatePermissionTitle()
+    {
+        var label = PermissionModes.First(mode => mode.Value == permissionMode).Label;
+        permissionMenu.Content = Row(new FontIcon { Glyph = "\uE72E", FontSize = 13 }, new TextBlock { Text = label }, new FontIcon { Glyph = "\uE70D", FontSize = 10 });
+    }
 }

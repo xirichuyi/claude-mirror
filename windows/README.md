@@ -24,7 +24,11 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 - 密码登录成功后可一键设置免密登录（使用 Windows 自带的 ssh-keygen 生成专用密钥）。
 - 首次确认主机指纹，指纹变更拒绝连接；SSH keepalive。
 - 项目分组、分页同步历史索引、选中后读取消息。
-- 新会话、历史续聊、远端持久任务、停止、工具权限确认与 AskUserQuestion 回答。
+- 新会话、历史续聊、远端持久任务、停止。
+- 对话：工具调用显示为可展开的卡片（命令、文件、diff、任务清单、输出和运行状态），思考过程可折叠；代码块保留长行、横向滚动，超过 380 像素在块内滚动；历史消息里的工具结果并入对应的工具卡片。
+- 权限请求显示在输入框上方的卡片里：直接看到命令或 diff，可以选择问题的选项、应用远端建议的权限规则、拒绝时附上修改意见；输入框工具栏可切换权限模式。
+- 回复进行中发送的消息进入队列，回复结束后依次发送；回复失败或被停止时队列暂停，由你决定是否继续。
+- 回复结束后可以复制整条回复，或预览并回退这条回复改动的文件（需要远端任务仍在运行）。
 - 远端模型/命令列表；命令填入输入框，发送后由远端处理。
 - 远端目录浏览，文本/图片预览和下载，选择文件/拖放上传；附件按内容哈希存入远端缓存，相同内容复用路径。
 - 会话 ID 和远端任务 ID 保存在 LocalAppData/claude-mirror，可在重连选择历史会话时重新订阅。
@@ -33,7 +37,7 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 
 聊天和 Markdown 文件共用原生渲染器，支持标题、引用、表格、列表、任务标记、链接、行内代码和带语言名的围栏代码块。打开“远端文件”，选择文本文件即可在聊天右侧打开标签。使用“编辑”和 Ctrl+S 保存；保存遇到版本冲突时保留草稿。完整预览和编辑上限为 1 MB，窄窗口可用“返回对话”切换。
 
-复杂命令的专用交互卡片、文件删除、自动重连、SSH config/ProxyJump/agent、反向访问和可视化 usage 尚未移植。私钥需要手动选择，不自动读取 macOS 配置。目录切换请新建会话，运行中的任务仍使用原目录。
+跨消息连续选择文本（目前只能在一段文字内选择，或复制整条回复）、表单类交互（elicitation）、文件删除、自动重连、SSH config/ProxyJump/agent、反向访问和可视化 usage 尚未移植。私钥需要手动选择，不自动读取 macOS 配置。目录切换请新建会话，运行中的任务仍使用原目录。
 
 原生 Windows 窗口交互须在 Windows 实机验收；macOS 只能验证共享 C# 核心和远端协议。CI 提供 Windows 编译、测试和自包含 x64 ZIP 工件。安装程序和客户端当前均未签名。
 
@@ -45,7 +49,7 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 
 ### 演示场景和截图
 
-不连接服务器也可以打开真实窗口：设置 `CLAUDE_MIRROR_DEMO=home` 或 `chat` 后启动，界面使用内置的演示数据，不读写已保存的主机。可选 `CLAUDE_MIRROR_THEME=light|dark`、`CLAUDE_MIRROR_SIZE=1280x860`、`CLAUDE_MIRROR_SCROLL=0`；设置 `CLAUDE_MIRROR_SNAPSHOT=路径.png` 会把窗口内容保存为图片后退出。
+不连接服务器也可以打开真实窗口：设置 `CLAUDE_MIRROR_DEMO=home`、`chat`、`permission` 或 `finished` 后启动，界面使用内置的演示数据，不读写已保存的主机。可选 `CLAUDE_MIRROR_THEME=light|dark`、`CLAUDE_MIRROR_SIZE=1280x860`、`CLAUDE_MIRROR_SCROLL=0`；设置 `CLAUDE_MIRROR_SNAPSHOT=路径.png` 会把窗口内容保存为图片后退出。
 
 ```powershell
 ./windows/capture-screenshots.ps1 windows/dist/claude-mirror/claude-mirror.exe windows/dist/screenshots

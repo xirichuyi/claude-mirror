@@ -9,7 +9,8 @@ namespace ClaudeMirror.Core;
 /// Used by the demo scenes (screenshots) and by tests.</summary>
 public sealed class DemoAgent
 {
-    public const string TaskId = "00000000-0000-4000-8000-000000000001";
+    /// <summary>A reply that is still streaming, one waiting for a permission answer, and one that has finished.</summary>
+    public const string TaskId = "00000000-0000-4000-8000-000000000001", PermissionTaskId = "00000000-0000-4000-8000-000000000002", FinishedTaskId = "00000000-0000-4000-8000-000000000003";
     private readonly JsonObject fixtures;
     /// <summary>Every request received, as "op.operation", for tests.</summary>
     public List<string> Requests { get; } = [];

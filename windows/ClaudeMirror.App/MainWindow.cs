@@ -211,12 +211,13 @@ public sealed partial class MainWindow : Window
             {
                 taskId = Guid.NewGuid().ToString(); taskKey = LocalState.HostKey(host!) + "|" + (conversation?.SessionId ?? taskId);
                 local.Tasks[taskKey] = taskId; local.Save();
-                await remote.CallAsync("task", new { operation = "start", taskId, digest = remote.Digest, request = new { session = new { id = Guid.NewGuid().ToString(), host = host!.Host, directory = directory.Text, name = "Windows 对话", remoteSessionId = conversation?.SessionId, messages = new[] { message }, permissions = Array.Empty<object>(), preferences = new { selectedModel = selectedModel?.Value ?? "" } }, prompt = text } });
+                await remote.CallAsync("task", new { operation = "start", taskId, digest = remote.Digest, request = new { session = new { id = Guid.NewGuid().ToString(), host = host!.Host, directory = directory.Text, name = "Windows 对话", remoteSessionId = conversation?.SessionId, messages = new[] { message }, permissions = Array.Empty<object>(), preferences = new { selectedModel = selectedModel?.Value ?? "", permissionMode } }, prompt = text } });
                 await WatchCurrentAsync();
             }
             else
             {
                 await remote.TaskCommandAsync(taskId, new { kind = "control", action = "model", value = selectedModel?.Value ?? "" });
+                await remote.TaskCommandAsync(taskId, new { kind = "control", action = "permission", value = permissionMode });
                 await remote.TaskCommandAsync(taskId, new { kind = "send", prompt = text, message });
             }
         }
