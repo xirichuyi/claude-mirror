@@ -296,6 +296,27 @@ class EngineTest {
         assertFalse(current(session.id).queueHeld)
     }
 
+    @Test fun `a held message the worker would not take is still held`() = engineTest {
+        val (session, task) = started()
+        agent.emit(task.id, state(task, 1, "working"))
+        until("working") { current(session.id).status == "working" }
+        engine.submit(session.id, "for the old machine")
+        engine.detach(testHost)
+        engine.endpointChanged(testHost.id)
+        engine.send(session.id, "new machine")
+        val next = current(session.id).remoteTask!!
+        until("the new worker is followed") { agent.follows(next.id) }
+
+        agent.onCommand = { json("""{"ok":false,"error":"未知会话请求"}""") }
+        assertTrue(runCatching { engine.steer(session.id, current(session.id).queue.single().id) }.isFailure)
+        assertEquals(listOf("for the old machine"), current(session.id).queue.map { it.text })
+        assertTrue(current(session.id).queueHeld)
+        agent.emit(next.id, state(next, 1, "idle", "hello", ""","done":true"""))
+        until("the reply ends") { current(session.id).remoteTask == null }
+        delay(200)
+        assertEquals(2, agent.starts().size)
+    }
+
     @Test fun `discarding the held messages ends the hold`() = engineTest {
         val (session, task) = started()
         agent.emit(task.id, state(task, 1, "working"))

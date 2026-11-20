@@ -173,7 +173,8 @@ class Engine(
             // The acknowledgement can be lost after the worker took the message; the transcript then shows it.
             val delivered = session(id)?.messages?.any { message -> message.blocks.orEmpty().any { it.type == "user" && it.id == queued.id && it.cancelled != true } } == true
             if (delivered) return
-            update(id) { it.copy(queue = listOf(queued) + it.queue, queuePaused = it.queuePaused || !error.confirmed) }
+            // Back where it was, including a hold it was under.
+            update(id) { it.copy(queue = listOf(queued) + it.queue, queuePaused = it.queuePaused || !error.confirmed, queueHeld = it.queueHeld || session.queueHeld) }
             throw error
         }
     }
