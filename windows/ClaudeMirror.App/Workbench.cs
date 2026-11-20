@@ -113,7 +113,7 @@ public sealed partial class MainWindow
     }
     private void BuildWorkbench()
     {
-        ApplyTheme(); root.ActualThemeChanged += (_,_) => ApplyTheme();
+        ApplySavedTheme(); ApplyTheme(); root.ActualThemeChanged += (_,_) => ApplyTheme();
         root.Background = canvas;
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
         root.ColumnDefinitions.Add(new ColumnDefinition());
@@ -214,7 +214,7 @@ public sealed partial class MainWindow
         var changes=ActionButton("Git 变更","\uE8F1",ChangesAsync,true);
         var findInFiles=ActionButton("在文件中搜索","\uE721",SearchFilesAsync,true);
         var quick=ActionButton("快速打开文件（Ctrl+P）","\uE8E5",QuickOpenAsync,true);
-        more.Flyout=new Flyout { Content=new StackPanel {Children={ActionButton("状态：用量、MCP、后台任务","\uE9D9",StatusAsync,true),changes,findInFiles,quick,project,editors,tunnels,update}} };
+        more.Flyout=new Flyout { Content=new StackPanel {Children={ActionButton("设置","\uE713",SettingsAsync,true),ActionButton("状态：用量、MCP、后台任务","\uE9D9",StatusAsync,true),changes,findInFiles,quick,project,editors,tunnels,update}} };
         var quickKey=new KeyboardAccelerator { Key=VirtualKey.P, Modifiers=VirtualKeyModifiers.Control };
         quickKey.Invoked+=async (_,e)=>{ e.Handled=true; await RunAsync(QuickOpenAsync); };
         var findKey=new KeyboardAccelerator { Key=VirtualKey.F, Modifiers=VirtualKeyModifiers.Control|VirtualKeyModifiers.Shift };

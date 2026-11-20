@@ -18,9 +18,12 @@ public class SessionsTests
         Sessions.Rename(state, Host + "|s1", "  登录流程  ");
         Sessions.SetPinned(state, Host + "|s3", true);
         Sessions.SetArchived(state, Host + "|s2", true);
+        state.Theme = "dark";
         state.Save();
 
         var saved = new LocalState(folder);
+        Assert.Equal("dark", saved.Theme);
+        Assert.Equal("system", State().Theme);
         var entries = Sessions.Visible(History, saved, Host);
         Assert.Equal(["登录流程", "首页优化"], entries.Select(entry => entry.Conversation.Name));
         Assert.True(entries[1].Pinned);
