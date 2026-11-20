@@ -129,7 +129,8 @@ public sealed partial class MainWindow : Window
         var (login, server) = Target();
         var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? server : name.Text.Trim(), server, (int)port.Value, login, mode.SelectedIndex == 1 ? key.Text : null);
         agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
-        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => { if (agent == next) { status.Text = ConnectionAdvice.Explain(error); busy = false; RefreshWorkbench(); } });
+        reconnecting?.Cancel();
+        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
         RemoteSetupException? setup = null;
         var usedPassword = mode.SelectedIndex == 0;
         try { await next.ConnectAsync(profile, password.Password, phrase.Password, ServerResources, fingerprint => ConfirmHostAsync(profile, fingerprint)); }
