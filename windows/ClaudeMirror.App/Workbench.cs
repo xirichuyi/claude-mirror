@@ -226,28 +226,32 @@ public sealed partial class MainWindow
         railPanel.Visibility = sidebarOpen ? Visibility.Visible : Visibility.Collapsed;
         root.ColumnDefinitions[0].Width = new GridLength(sidebarOpen ? 240 : 0);
     }
+    private bool showArchived;
+    private string HostKeyOrEmpty => host == null ? "" : LocalState.HostKey(host);
+    private bool IsCurrent(Conversation c) => conversation is not null && (c.SessionId ?? c.Reference) == (conversation.SessionId ?? conversation.Reference) && c.Directory == conversation.Directory;
+
     private void RenderHistory()
     {
         projects.Children.Clear();
-        var list = history.Where(c => (c.Name+" "+c.Directory).Contains(search.Text,StringComparison.OrdinalIgnoreCase)).ToList();
+        var list = Sessions.Visible(history,local,HostKeyOrEmpty,search.Text);
+        var archive = Sessions.Visible(history,local,HostKeyOrEmpty,search.Text,true);
         projects.Children.Add(new TextBlock { Text = list.Count > 0 ? "项目" : search.Text.Length > 0 ? "没有找到匹配的对话" : "暂无历史对话", Foreground = muted, FontSize = 13 });
         if(history.Count == 0 && host == null) projects.Children.Add(new TextBlock { Text = "连接后自动同步这台机器的对话", Foreground = muted, FontSize = 12 });
+        var pinned = list.Where(entry => entry.Pinned).ToList();
+        if(pinned.Count > 0)
+        {
+            projects.Children.Insert(0,new TextBlock { Text="已固定", Foreground=muted, FontSize=13 });
+            for(int i=0;i<pinned.Count;i++) projects.Children.Insert(i+1,ConversationRow(pinned[i],"\uE718"));
+        }
         int index = 0;
-        foreach(var group in list.GroupBy(c=>c.Directory))
+        foreach(var group in Sessions.Projects(list))
         {
             var items = new StackPanel { Spacing = 2 };
-            items.Children.Add(ActionButton("新建对话","\uE710",async () => { directory.Text = group.Key; await NewConversationAsync(); },true));
-            foreach(var c in group)
-            {
-                var row = Button(c.Name,() => SelectAsync(c));
-                row.Content = new TextBlock {Text=c.Name,TextTrimming=TextTrimming.CharacterEllipsis};
-                row.HorizontalAlignment = HorizontalAlignment.Stretch; row.HorizontalContentAlignment = HorizontalAlignment.Left;
-                row.Background = c == conversation ? bubble : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-                row.BorderThickness = new Thickness(0); ToolTipService.SetToolTip(row,c.Name); items.Children.Add(row);
-            }
-            var path = group.Key; var groupId = (host == null ? "" : LocalState.HostKey(host)) + "|" + path;
+            var path = group.Directory; var groupId = HostKeyOrEmpty + "|" + path;
+            items.Children.Add(ActionButton("新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); },true));
+            foreach(var entry in group.Entries) items.Children.Add(ConversationRow(entry,null));
             var folder = ShortDirectory(path);
-            bool expanded = search.Text.Length>0 || (openGroups.TryGetValue(groupId,out var remembered) ? remembered : index < 2 || group.Any(c=>c==conversation));
+            bool expanded = search.Text.Length>0 || (openGroups.TryGetValue(groupId,out var remembered) ? remembered : index < 2 || group.Entries.Any(entry=>IsCurrent(entry.Conversation)));
             index++;
             var arrow = new FontIcon { FontSize=11 };
             void SetExpanded(bool value) { expanded=value;arrow.Glyph=value?"\uE70D":"\uE76C";items.Visibility=value?Visibility.Visible:Visibility.Collapsed; }
@@ -256,15 +260,21 @@ public sealed partial class MainWindow
             section.HorizontalContentAlignment=HorizontalAlignment.Left;section.HorizontalAlignment=HorizontalAlignment.Stretch;
             section.Background=new SolidColorBrush(Microsoft.UI.Colors.Transparent);section.BorderThickness=new Thickness(0);
             AutomationProperties.SetName(section,path);ToolTipService.SetToolTip(section,path);items.Margin=new Thickness(12,0,0,0);
+            var menu=new MenuFlyout();
+            menu.Items.Add(MenuItem("在此目录新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); }));
+            menu.Items.Add(MenuItem("把此项目的历史移到废纸篓…","\uE74D",() => TrashProjectAsync(path)));
+            section.ContextFlyout=menu;
             SetExpanded(expanded);projects.Children.Add(section);projects.Children.Add(items);
         }
         if(list.Count > 0 && search.Text.Length == 0) {
             projects.Children.Add(new TextBlock { Text="最近对话", Foreground=muted, FontSize=13, Margin=new Thickness(4,12,0,0) });
-            foreach(var c in list.Take(6)) {
-                var item=ActionButton(c.Name,"\uE81C",()=>SelectAsync(c),true);
-                item.HorizontalContentAlignment=HorizontalAlignment.Left;
-                projects.Children.Add(item);
-            }
+            foreach(var entry in list.Take(6)) projects.Children.Add(ConversationRow(entry,"\uE81C"));
+        }
+        if(archive.Count > 0)
+        {
+            var toggle=ActionButton(showArchived?$"隐藏已归档（{archive.Count}）":$"显示已归档（{archive.Count}）","\uE7B8",()=>{ showArchived=!showArchived; RenderHistory(); return Task.CompletedTask; },true);
+            toggle.Margin=new Thickness(0,12,0,0); projects.Children.Add(toggle);
+            if(showArchived) foreach(var entry in archive) projects.Children.Add(ConversationRow(entry,"\uE7B8"));
         }
     }
     private void RefreshWorkbench()
