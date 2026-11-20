@@ -1,4 +1,5 @@
 using ClaudeMirror.Core;
+using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -98,8 +99,27 @@ public sealed partial class MainWindow
             PrimaryButtonText = "移到废纸篓", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        var result = await remote.CallAsync("history", new { operation = "trashProject", directory = path });
-        if (conversation?.Directory == path) await NewConversationAsync();
+        bool open = conversation?.Directory == path || (taskId is not null && directory.Text == path);
+        if (open) await ConfirmLeavingQueueAsync();
+        // The server refuses while a worker for this directory is alive, and a worker stays alive after its reply. Close the idle ones first.
+        var prefix = LocalState.HostKey(host!) + "|";
+        var workers = history.Where(c => c.Directory == path && c.SessionId is not null && local.Tasks.ContainsKey(prefix + c.SessionId)).Select(c => local.Tasks[prefix + c.SessionId!]).ToHashSet();
+        if (open && taskId is not null) workers.Add(taskId);
+        foreach (var worker in workers)
+        {
+            try { await remote.TaskCommandAsync(worker, new { kind = "close" }); } catch (IOException) { } // Already gone.
+            foreach (var key in local.Tasks.Where(pair => pair.Value == worker).Select(pair => pair.Key).ToList()) local.Tasks.Remove(key);
+            if (taskId == worker) taskId = null;
+        }
+        if (workers.Count > 0) local.Save();
+        JsonNode result;
+        try { result = await remote.CallAsync("history", new { operation = "trashProject", directory = path }); }
+        catch (IOException) when (workers.Count > 0)
+        {
+            // A closed worker needs a moment to exit.
+            await Task.Delay(1500); result = await remote.CallAsync("history", new { operation = "trashProject", directory = path });
+        }
+        if (open) { queue.Clear(); await NewConversationAsync(); }
         await RefreshHistoryAsync();
         status.Text = $"已移走 {result["count"]?.GetValue<int>() ?? 0} 条对话记录";
     }
