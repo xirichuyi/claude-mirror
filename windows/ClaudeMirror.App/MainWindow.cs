@@ -33,6 +33,7 @@ public sealed partial class MainWindow : Window
     private bool busy;
     private MessageView? reply;
     private readonly SendQueue queue = new();
+    private bool sending;
     private sealed record ModelChoice(string Value, string Label);
     private static SolidColorBrush Brush(byte r, byte g, byte b) => new(Windows.UI.Color.FromArgb(255, r, g, b));
 
@@ -116,12 +117,14 @@ public sealed partial class MainWindow : Window
         {
             if (import.SelectedIndex < 0) return;
             var entry = configured[import.SelectedIndex];
-            name.Text = entry.Alias; address.Text = entry.User is null ? entry.Host : entry.User + "@" + entry.Host; port.Value = entry.Port;
+            // OpenSSH logs in as the local account when the config names no user, for the host and for its jump host alike.
+            var account = entry.User ?? Environment.UserName;
+            name.Text = entry.Alias; address.Text = account + "@" + entry.Host; port.Value = entry.Port;
             key.Text = entry.KeyFile ?? ""; mode.SelectedIndex = entry.KeyFile is null ? 0 : 1; jump.Text = ""; jumpKey.Text = "";
             if (entry.ProxyJump is not null)
                 try
                 {
-                    var hop = SshConfig.Jump(entry.ProxyJump, entry.User ?? "", entry.KeyFile, configured);
+                    var hop = SshConfig.Jump(entry.ProxyJump, Environment.UserName, entry.KeyFile, configured);
                     jump.Text = SshConfig.JumpSpec(hop); jumpKey.Text = hop.KeyFile == entry.KeyFile ? "" : hop.KeyFile ?? "";
                 }
                 catch (ArgumentException) { jump.Text = entry.ProxyJump; }
@@ -188,13 +191,27 @@ public sealed partial class MainWindow : Window
     private async Task NewConversationAsync()
     {
         if (busy) throw new IOException("请先停止当前回复");
+        await ConfirmLeavingQueueAsync();
         conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); queue.Clear(); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
+    }
+    /// Queued prompts belong to the open conversation. Leaving it asks first; declining keeps the conversation and stops the caller.
+    private async Task ConfirmLeavingQueueAsync()
+    {
+        if (queue.Items.Count == 0) return;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = root.XamlRoot, Title = "还有未发送的消息", Content = $"队列里有 {queue.Items.Count} 条消息还没有发送，离开这个对话会丢弃它们。",
+            PrimaryButtonText = "丢弃并离开", CloseButtonText = "留在这里", DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) throw new IOException("已保留当前对话和未发送的消息");
     }
     private async Task SelectAsync(Conversation selected)
     {
         if (busy) throw new IOException("请先停止当前回复");
-        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; queue.Clear(); RenderQueue(); RenderPermissions(null, null);
+        // Reopening the same conversation keeps its queued prompts.
+        if (!IsCurrent(selected)) { await ConfirmLeavingQueueAsync(); queue.Clear(); }
+        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; RenderQueue(); RenderPermissions(null, null);
         RefreshWorkbench(); RenderHistory();
         var page = await RequireAgent().CallAsync("history", new { operation = "messages", reference = selected.Reference });
         foreach (var message in History.Messages(page["records"] as JsonArray)) AddMessage("", Presentation.Text(message["role"]) == "user").Show(message);
@@ -227,7 +244,7 @@ public sealed partial class MainWindow : Window
     }
     private async Task SendTextAsync(string text)
     {
-        var remote = RequireAgent(); busy = true; AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
+        var remote = RequireAgent(); busy = true; sending = true; AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
         var message = new { id = Guid.NewGuid().ToString(), role = "assistant", blocks = Array.Empty<object>() };
         try
         {
@@ -245,7 +262,8 @@ public sealed partial class MainWindow : Window
                 await remote.TaskCommandAsync(taskId, new { kind = "send", prompt = text, message });
             }
         }
-        catch { busy = false; RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
+        catch { busy = false; queue.Pause(); RenderQueue(); RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
+        finally { sending = false; }
     }
     private Task WatchCurrentAsync()
     {
@@ -255,7 +273,9 @@ public sealed partial class MainWindow : Window
     private void OnState(string watched, JsonObject state) => DispatcherQueue.TryEnqueue(async () =>
     {
         if (taskId != watched) return;
-        var value = state["status"]?.GetValue<string>(); bool wasBusy = busy; busy = value is "working" or "connecting" or "permission" or "stopping";
+        var value = state["status"]?.GetValue<string>(); bool wasBusy = busy;
+        // The model and permission commands sent before a prompt publish idle snapshots; those must not release the next queued prompt.
+        busy = sending || value is "working" or "connecting" or "permission" or "stopping";
         reply ??= AddMessage(""); reply.Show(state["message"], busy);
         // A reply that failed or was stopped keeps the queue until the user says to go on.
         if (wasBusy && !busy && (state["message"]?["error"] is not null || state["message"]?["interrupted"]?.GetValue<bool>() == true)) queue.Pause();

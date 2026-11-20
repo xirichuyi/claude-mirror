@@ -44,7 +44,8 @@ public sealed partial class MainWindow
         if (busy) throw new IOException("请先停止当前回复");
         if (taskId is null) throw new IOException("这个对话的远端任务已结束，无法回退文件");
         var remote = RequireAgent(); var task = taskId;
-        var preview = await remote.TaskCommandAsync(task, new { kind = "control", action = "rewind", value = new { checkpoint, preview = true } });
+        // A control command answers { ok, value }; the preview is the value.
+        var preview = (await remote.TaskCommandAsync(task, new { kind = "control", action = "rewind", value = new { checkpoint, preview = true } }))["value"] ?? new JsonObject();
         var changed = (preview["filesChanged"] as JsonArray ?? []).Select(file => Presentation.Text(file)).Where(file => file is not null).ToList();
         bool possible = preview["canRewind"] is JsonValue can && can.TryGetValue<bool>(out var yes) && yes;
         var panel = new StackPanel { Spacing = 6 };

@@ -30,6 +30,13 @@ public class SshConfigTests
     }
 
     [Fact]
+    public void TrailingCommentsAreNotPartOfTheValue()
+    {
+        var entry = Assert.Single(SshConfig.Parse("Host dev # my box\n  HostName 10.0.0.9 # lab\n  Port 2222 # dev\n  User me#1\n  IdentityFile \"/keys/a #1\" # quoted", "/home/me"));
+        Assert.Equal(("dev", "10.0.0.9", 2222, "me#1", "/keys/a #1"), (entry.Alias, entry.Host, entry.Port, entry.User, entry.KeyFile));
+    }
+
+    [Fact]
     public void JumpHostsAreReadFromAddressesAndAliases()
     {
         var plain = SshConfig.Jump("ops@gate.example.com:2200", "me", "/keys/id");
