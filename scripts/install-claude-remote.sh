@@ -144,7 +144,7 @@ setup_runner() {
   home=$(getent passwd "$runner" | cut -d: -f6)
   [ "$(id -u "$runner")" -gt 0 ] && [[ "$home" = /* ]] && [ "$home" != / ] && [ "$home" != /root ] || { echo "Account $runner is not usable." >&2; return 1; }
   # Files in the runner's home are written by the runner itself, never by root.
-  as_runner() { runuser -u "$runner" -- env HOME="$home" PATH="$home/.local/bin:/usr/local/bin:/usr/bin:/bin" "$@"; }
+  as_runner() { runuser -u "$runner" -- env -i HOME="$home" PATH="$home/.local/bin:/usr/local/bin:/usr/bin:/bin" "$@"; }
 
   if as_runner test -x "$home/.local/bin/claude"; then
     echo "Claude Code already installed for $runner."
