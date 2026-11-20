@@ -131,7 +131,8 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
             for (permission in session.permissions) {
                 PermissionCard(permission) { answer -> model.respond(sessionId, permission.id, answer) }
             }
-            Queue(session, model, onEdit = { item -> draft = item; })
+            // Editing a queued message must not throw away what is already being written.
+            Queue(session, model, onEdit = { item -> draft = if (draft.isBlank()) item else draft.trimEnd() + "\n" + item })
             Composer(
                 session, draft, onDraft = { draft = it },
                 onSend = { steer -> if (model.submit(sessionId, draft, steer)) draft = "" },
