@@ -9,7 +9,15 @@ import RemoteCCCore
     func register(_ view: TranscriptTextView) { views.add(view) }
     private var ordered: [TranscriptTextView] {
         views.allObjects.filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
-            .sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
+            .sorted { shown($0).maxY > shown($1).maxY }
+    }
+    /// Where a view shows in the window. Code and tables scroll inside their own scroller, so only the
+    /// part that scroller shows counts; the full frame of a scrolled code block reaches above the text before it.
+    private func shown(_ view: NSView) -> NSRect {
+        let rect = view.convert(view.bounds, to: nil)
+        guard let inner = view.enclosingScrollView, inner.enclosingScrollView != nil else { return rect }
+        let visible = rect.intersection(inner.contentView.convert(inner.contentView.bounds, to: nil))
+        return visible.isEmpty ? rect : visible
     }
     func clear() { for view in ordered { view.setSelectedRange(NSRange(location: 0, length: 0)) } }
     func select(from origin: TranscriptTextView, anchor: Int, to point: NSPoint) {
@@ -29,7 +37,7 @@ import RemoteCCCore
         }
     }
     private func distance(_ view: NSView, _ point: NSPoint) -> CGFloat {
-        let rect = view.convert(view.bounds, to: nil)
+        let rect = shown(view)
         return max(0, rect.minY - point.y, point.y - rect.maxY)
     }
     var selectedText: String {
