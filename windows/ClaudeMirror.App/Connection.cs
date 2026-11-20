@@ -14,7 +14,10 @@ public sealed partial class MainWindow
     private void OnDisconnected(RemoteAgent lost, string error)
     {
         if (agent != lost) return;
-        busy = false; status.Text = ConnectionAdvice.Explain(error); RefreshWorkbench();
+        busy = false; status.Text = ConnectionAdvice.Explain(error);
+        // What happened to the reply is unknown from here on, so queued prompts wait for the user.
+        if (queue.Items.Count > 0) { queue.Pause(); RenderQueue(); }
+        RefreshWorkbench();
         if (host is { KeyFile: { Length: > 0 } } profile) _ = ReconnectAsync(profile);
     }
 
