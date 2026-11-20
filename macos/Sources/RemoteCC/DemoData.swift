@@ -18,9 +18,13 @@ enum DemoData {
             ChatMessage(role: "assistant", blocks: [
                 Block(type: "tool", name: "Read", input: ["file_path": "/workspace/web-app/src/auth.ts"], status: "done"),
                 Block(type: "tool", name: "Bash", input: ["command": "npm test", "description": "运行测试"], status: "done", output: "12 tests passed"),
+                Block(type: "user", text: "顺便把超时也测一下。", id: "steer-1"),
                 Block(type: "text", text: "已补充登录接口的错误处理。\n\n- 缺少凭据时返回 `400`\n- 验证失败时返回 `401`\n- 服务异常时返回 `500`，不暴露内部错误\n\n```typescript\nif (!email || !password) {\n  return response.status(400).json({ error: 'Missing credentials' });\n}\n```\n\n新增的边界测试已通过。")
             ])
         ]
+        chat.context = ContextUsage(usedTokens: 128_400, maxTokens: 1_000_000)
+        chat.queue = [decode(["id": "queued-1", "text": "测试通过后更新 README 的接口说明。", "attachments": [[String: Any]]()])]
+        chat.queuePaused = true
         return [chat, ChatSession(config: config, name: "整理项目文档"), ChatSession(config: ConnectionConfig(host: "dev-server", directory: "/workspace/api-service"), name: "添加分页查询")]
     }
 
