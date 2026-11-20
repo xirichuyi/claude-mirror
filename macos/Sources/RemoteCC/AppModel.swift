@@ -164,6 +164,11 @@ final class AppModel: ObservableObject {
                 historyStatus = "已同步 3 条对话"
                 transcript.update(active)
                 engine.onChange = { [weak self] in self?.engineChanged() }
+                // Same wiring as a real connection, so the demo shows what a streamed reply costs.
+                engine.onTranscriptChange = { [weak self] ids in
+                    guard let self, let id = self.activeId, ids.contains(id) else { return }
+                    self.transcript.update(self.active)
+                }
                 if streaming {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { DemoStream.start(engine, session: examples[0].id) }
                 }
