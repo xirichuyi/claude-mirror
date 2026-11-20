@@ -10,7 +10,9 @@ function fixture() {
   const bin = path.join(home, '.local/bin'); fs.mkdirSync(bin, { recursive: true });
   const put = (name, body) => fs.writeFileSync(path.join(bin, name), '#!/bin/sh\n' + body + '\n', { mode: 0o755 });
   put('node', 'exit 0');
-  return { home, put, run: () => spawnSync('/bin/bash', [script], { encoding: 'utf8', env: { ...process.env, HOME: home, PATH: bin + ':/usr/bin:/bin' } }), close: () => fs.rmSync(home, { recursive: true, force: true }) };
+  // Never reach the real sudo: the installer may use it to enable lingering.
+  put('sudo', 'exit 1');
+  return { home, put, run: (...options: string[]) => spawnSync('/bin/bash', [script, ...options], { encoding: 'utf8', env: { ...process.env, HOME: home, PATH: bin + ':/usr/bin:/bin' } }), close: () => fs.rmSync(home, { recursive: true, force: true }) };
 }
 test('remote setup preserves existing Claude and never downloads it again', () => {
   const f = fixture(); try {
@@ -50,6 +52,10 @@ case "$1" in show-session) echo ${kill};; show-user) echo no;; enable-linger) ex
     assert.match(fs.readFileSync(log, 'utf8'), /enable-linger/); assert.match(result.stdout, /enabled user lingering/);
     f.put('loginctl', loginctl('yes').replace('enable-linger) exit 0', 'enable-linger) exit 1'));
     result = f.run(); assert.equal(result.status, 0, result.stderr); assert.match(result.stderr, /sudo loginctl enable-linger/);
+    // Passwordless sudo is used when the user's own request is refused.
+    f.put('sudo', `echo "sudo $*" >> '${log}'`);
+    result = f.run(); assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /enabled user lingering/);
+    assert.match(fs.readFileSync(log, 'utf8'), /sudo -n loginctl enable-linger/);
   } finally { f.close(); }
 });
 test('remote setup installs a checksummed user-local Node.js when the system one is too old', () => {
@@ -78,5 +84,35 @@ cp "${dist}/\${url##*/}" "$out"`);
     fs.appendFileSync(path.join(dist, name), 'tampered');
     result = run(); assert.equal(result.status, 3); assert.match(result.stderr, /checksum/);
     assert.equal(fs.existsSync(path.join(f.home, '.local/share/claude-mirror/node')), false);
+  } finally { f.close(); }
+});
+
+test('remote setup checks the Full Access account options before installing anything', { skip: process.getuid?.() === 0 }, () => {
+  const f = fixture(); try {
+    f.put('curl', 'exit 99');
+    for (const [options, message] of [
+      [['--runner', 'claude-runner'], /root SSH login/],
+      [['--runner', 'root'], /Invalid account name/],
+      [['--runner', 'Bad;name'], /Invalid account name/],
+      [['--runner'], /needs an account name/],
+      [['--project', '/opt/app'], /only apply together with --runner/],
+      [['--copy-login'], /only apply together with --runner/],
+      [['--unknown'], /Unknown option/],
+    ] as [string[], RegExp][]) {
+      const result = f.run(...options);
+      assert.equal(result.status, 2, options.join(' '));
+      assert.match(result.stderr, message);
+      assert.doesNotMatch(result.stdout, /Claude Code/, 'nothing may be installed after a rejected option');
+    }
+  } finally { f.close(); }
+});
+test('setup-remote.sh passes the account options to the server as single arguments', () => {
+  const f = fixture(); try {
+    f.put('ssh', 'for value in "$@"; do last=$value; done; printf "%s" "$last"');
+    const result = spawnSync('/bin/sh', [path.resolve('scripts/setup-remote.sh'), '--runner', 'claude-runner', '--project', "/opt/my app/it's", '--copy-login', '-p', '2222', 'root@host'],
+      { encoding: 'utf8', env: { ...process.env, PATH: path.join(f.home, '.local/bin') + ':/usr/bin:/bin' } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `bash -s -- --runner 'claude-runner' --project '/opt/my app/it'\\''s' --copy-login`);
+    assert.equal(spawnSync('/bin/sh', [path.resolve('scripts/setup-remote.sh'), '--runner', 'x'], { encoding: 'utf8' }).status, 2);
   } finally { f.close(); }
 });

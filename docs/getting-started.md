@@ -63,6 +63,7 @@
 | --- | --- |
 | 服务器缺少 Node.js / Node.js 太旧 | 点 **一键安装**。官方 Node.js 会装到你的用户目录，不需要管理员权限，也不影响系统已有版本。 |
 | 服务器还没有安装 Claude Code | 点 **一键安装**，使用 Anthropic 官方安装程序。 |
+| 用 root 登录，想用 Full Access | Claude 不允许 root 使用 Full Access。在本机运行 `sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app root@服务器`，然后在新对话的执行账号里填 `claude-runner`。 |
 | Claude Code 还没有登录 | 点 **在终端登录**，按提示在浏览器里授权，完成后点 **重新检查**。登录信息只保存在服务器上。 |
 | 断开连接后回复会中断 | 服务器在 SSH 断开时会结束后台程序。复制提示里的命令在服务器上运行；没有权限时请管理员运行 `sudo loginctl enable-linger 你的用户名`。 |
 
