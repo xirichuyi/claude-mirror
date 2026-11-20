@@ -32,6 +32,7 @@ public sealed partial class MainWindow : Window
     private string? taskKey;
     private bool busy;
     private MessageView? reply;
+    private readonly SendQueue queue = new();
     private readonly SemaphoreSlim permissionLock = new(1);
     private readonly HashSet<string> approvalDialogs = [];
     private sealed record ModelChoice(string Value, string Label);
@@ -165,16 +166,16 @@ public sealed partial class MainWindow : Window
     private async Task NewConversationAsync()
     {
         if (busy) throw new IOException("请先停止当前回复");
-        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); RefreshWorkbench(); RenderHistory();
+        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); queue.Clear(); RenderQueue(); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
     }
     private async Task SelectAsync(Conversation selected)
     {
         if (busy) throw new IOException("请先停止当前回复");
-        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null;
+        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; queue.Clear(); RenderQueue();
         RefreshWorkbench(); RenderHistory();
         var page = await RequireAgent().CallAsync("history", new { operation = "messages", reference = selected.Reference });
-        foreach (var record in page["records"]!.AsArray()) AddMessage("", record?["type"]?.GetValue<string>() == "user").Show(record?["message"]);
+        foreach (var message in History.Messages(page["records"] as JsonArray)) AddMessage("", Presentation.Text(message["role"]) == "user").Show(message);
         taskKey = LocalState.HostKey(host!) + "|" + selected.SessionId;
         taskId = local.Tasks.GetValueOrDefault(taskKey);
         if (taskId is not null) await WatchCurrentAsync();
@@ -192,10 +193,19 @@ public sealed partial class MainWindow : Window
     }
     private async Task SendAsync()
     {
-        if (busy || string.IsNullOrWhiteSpace(prompt.Text)) return;
+        if (string.IsNullOrWhiteSpace(prompt.Text)) return;
         if (conversation is not null && directory.Text != conversation.Directory)
             throw new IOException("切换工作目录请新建对话");
-        var remote = RequireAgent(); var text = prompt.Text; prompt.Text = ""; busy = true; AddMessage(text, true); reply = AddMessage("正在回复…");
+        RequireAgent();
+        var text = prompt.Text; prompt.Text = "";
+        // The remote task refuses a second prompt while it is replying, so hold it here and send it when the reply ends.
+        if (busy) { queue.Add(text); RenderQueue(); return; }
+        queue.Resume();
+        await SendTextAsync(text);
+    }
+    private async Task SendTextAsync(string text)
+    {
+        var remote = RequireAgent(); busy = true; AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
         var message = new { id = Guid.NewGuid().ToString(), role = "assistant", blocks = Array.Empty<object>() };
         try
         {
@@ -221,9 +231,11 @@ public sealed partial class MainWindow : Window
     }
     private void OnState(string watched, JsonObject state) => DispatcherQueue.TryEnqueue(async () =>
     {
-        if (taskId != watched) return; reply ??= AddMessage(""); reply.Show(state["message"]);
-        if (state["message"]?["error"] is not null) reply.SetError(state["message"]!["error"]!.GetValue<string>());
-        var value = state["status"]?.GetValue<string>(); busy = value is "working" or "connecting" or "permission" or "stopping";
+        if (taskId != watched) return;
+        var value = state["status"]?.GetValue<string>(); bool wasBusy = busy; busy = value is "working" or "connecting" or "permission" or "stopping";
+        reply ??= AddMessage(""); reply.Show(state["message"], busy);
+        // A reply that failed or was stopped keeps the queue until the user says to go on.
+        if (wasBusy && !busy && (state["message"]?["error"] is not null || state["message"]?["interrupted"]?.GetValue<bool>() == true)) queue.Pause();
         status.Text = busy ? "正在回复" : "就绪";
         if (state["remoteSessionId"] is JsonValue session && taskId is not null)
         {
@@ -237,6 +249,8 @@ public sealed partial class MainWindow : Window
             local.Save(); taskId = null; busy = false;
         }
         RefreshWorkbench();
+        if (queue.Next(busy) is { } next) { RenderQueue(); await RunAsync(() => SendTextAsync(next.Text)); return; }
+        RenderQueue();
         foreach (var permission in state["permissions"]?.AsArray() ?? [])
         {
             var id = permission!["id"]!.GetValue<string>(); if (!approvalDialogs.Add(id)) continue;
@@ -282,7 +296,7 @@ public sealed partial class MainWindow : Window
         }
         finally { permissionLock.Release(); }
     }
-    private async Task StopAsync() { if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
+    private async Task StopAsync() { queue.Pause(); RenderQueue(); if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
     private async Task<string?> PickAsync()
     {
         var picker = new FileOpenPicker(); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); picker.FileTypeFilter.Add("*");

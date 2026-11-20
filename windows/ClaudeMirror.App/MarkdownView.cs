@@ -17,9 +17,9 @@ public sealed partial class MainWindow
     private static readonly MarkdownPipeline MarkdownOptions = new MarkdownPipelineBuilder()
         .UsePipeTables().UseTaskLists().UseEmphasisExtras().UseAutoLinks().DisableHtml().Build();
 
-    private StackPanel MarkdownView(string source,string? basePath=null) => RenderBlocks(Markdown.Parse(source, MarkdownOptions),basePath ?? directory.Text);
+    private StackPanel MarkdownView(string source,string? basePath=null,bool follow=false) => RenderBlocks(Markdown.Parse(source, MarkdownOptions),basePath ?? directory.Text,follow);
 
-    private StackPanel RenderBlocks(ContainerBlock blocks,string basePath)
+    private StackPanel RenderBlocks(ContainerBlock blocks,string basePath,bool follow=false)
     {
         var panel = new StackPanel { Spacing = 8 };
         foreach (var block in blocks)
@@ -27,7 +27,7 @@ public sealed partial class MainWindow
             switch (block)
             {
                 case CodeBlock code:
-                    panel.Children.Add(CodePanel(code.Lines.ToString(), (code as FencedCodeBlock)?.Info ?? ""));
+                    panel.Children.Add(CodePanel(code.Lines.ToString(), (code as FencedCodeBlock)?.Info ?? "", follow && ReferenceEquals(block, blocks.LastChild)));
                     break;
                 case LeafBlock { Inline: { } inline }:
                     var text = new TextBlock { Foreground = ink, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FontSize = 15 };
@@ -115,9 +115,11 @@ public sealed partial class MainWindow
     private static readonly HashSet<string> Languages = new(StringComparer.OrdinalIgnoreCase) {
         "js","javascript","jsx","ts","typescript","tsx","json","py","python","sh","bash","zsh","c","cpp","cs","csharp","go","rust","rs","java","swift","ps1","powershell" };
     private static readonly Regex Tokens = new("""(?<comment>//[^\r\n]*|\#[^\r\n]*|/\*[\s\S]*?\*/)|(?<str>"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(?<num>\b\d+(?:\.\d+)?\b)|(?<kw>\b(?:let|var|func|struct|class|enum|import|return|if|else|guard|for|while|await|async|try|throw|const|function|export|from|def|in|with|as|true|false|null|nil|None|self|public|private|static|switch|case|break|continue|new|using|namespace|interface|void)\b)""", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
-    private FrameworkElement CodePanel(string code,string language)
+    private const double CodeHeightLimit = 380;
+    /// Long lines scroll sideways and tall blocks scroll inside a capped box; `follow` keeps the newest lines of a block that is still streaming in view.
+    private FrameworkElement CodePanel(string code,string language,bool follow=false,string? title=null)
     {
-        var text=new TextBlock {FontFamily=new FontFamily("Cascadia Mono, Consolas"),Foreground=ink,FontSize=13,IsTextSelectionEnabled=true,TextWrapping=TextWrapping.Wrap};
+        var text=new TextBlock {FontFamily=new FontFamily("Cascadia Mono, Consolas"),Foreground=ink,FontSize=13,IsTextSelectionEnabled=true,TextWrapping=TextWrapping.NoWrap};
         if(code.Length<80000 && Languages.Contains(language))
         {
             bool dark=root.ActualTheme==ElementTheme.Dark;
@@ -134,10 +136,12 @@ public sealed partial class MainWindow
             if(offset<code.Length)text.Inlines.Add(new Run{Text=code[offset..]});
         } else text.Text=code;
         var header=new Grid();
-        header.Children.Add(new TextBlock {Text=language.Length==0?"代码":language,Foreground=muted,FontSize=12,VerticalAlignment=VerticalAlignment.Center});
+        header.Children.Add(new TextBlock {Text=title ?? (language.Length==0?"代码":language),Foreground=muted,FontSize=12,VerticalAlignment=VerticalAlignment.Center});
         var copy=ActionButton("复制代码","\uE8C8",()=>{var data=new DataPackage();data.SetText(code);Clipboard.SetContent(data);return Task.CompletedTask;});
         copy.HorizontalAlignment=HorizontalAlignment.Right;header.Children.Add(copy);
-        var panel=new StackPanel {Spacing=6};panel.Children.Add(header);panel.Children.Add(text);
+        var box=new ScrollViewer {Content=text,MaxHeight=CodeHeightLimit,HorizontalScrollBarVisibility=ScrollBarVisibility.Auto,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollMode=ScrollMode.Auto,Padding=new Thickness(0,0,0,10)};
+        if(follow) box.Loaded+=(_,_)=>box.ChangeView(null,box.ScrollableHeight,null,true);
+        var panel=new StackPanel {Spacing=6};panel.Children.Add(header);panel.Children.Add(box);
         return new Border {Child=panel,Padding=new Thickness(12),BorderBrush=edge,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8),Background=surface};
     }
 }

@@ -12,7 +12,7 @@ namespace ClaudeMirror.App;
 public sealed partial class MainWindow
 {
     private readonly SolidColorBrush canvas = new(), rail = new(), surface = new(), ink = new(),
-        muted = new(), edge = new(), bubble = new(), sage = new();
+        muted = new(), edge = new(), bubble = new(), sage = new(), danger = new(), amber = new(), added = new(), removed = new();
     private readonly Grid railPanel = new();
     private readonly StackPanel home = new() { Spacing = 16, MaxWidth = 620, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock title = new(), subtitle = new(), connection = new(), homeTitle = new(), homeHint = new();
@@ -82,7 +82,8 @@ public sealed partial class MainWindow
         foreach (var (brush, light, night) in new[] {
             (canvas,0xFAF6F2,0x242424), (rail,0xF0EAE3,0x1C1C1C), (surface,0xF6F1EB,0x2C2C2C),
             (ink,0x272727,0xEAEAEA), (muted,0x645E58,0xBBB6B0), (edge,0xDCD5CE,0x484848),
-            (bubble,0xEDE5DC,0x343434), (sage,0x566746,0xB4C49E) })
+            (bubble,0xEDE5DC,0x343434), (sage,0x566746,0xB4C49E), (danger,0xB3392C,0xF08A7C), (amber,0x9A6A12,0xE3B565),
+            (added,0xDDEBD3,0x2B3A27), (removed,0xF3D9D4,0x44292A) })
         {
             int rgb = dark ? night : light;
             brush.Color = Windows.UI.Color.FromArgb(255,(byte)(rgb >> 16),(byte)(rgb >> 8),(byte)rgb);
@@ -184,6 +185,7 @@ public sealed partial class MainWindow
         var composeArea = new StackPanel { MaxWidth = 800, Spacing = 8, Margin = new Thickness(20,6,20,14) };
         composer.Child = composeArea; At(area,composer,2);
         connection.FontSize = 12; connection.Foreground = sage; composeArea.Children.Add(connection);
+        composeArea.Children.Add(queuePanel);
         var input = new StackPanel { Spacing = 6 }; prompt.MinHeight = 44;
         prompt.BorderThickness = new Thickness(0); prompt.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         foreach(var key in new[]{"TextControlBackground","TextControlBackgroundPointerOver","TextControlBackgroundFocused","TextControlBorderBrush","TextControlBorderBrushPointerOver","TextControlBorderBrushFocused"})
@@ -314,7 +316,8 @@ public sealed partial class MainWindow
     }
     private void UpdateActions()
     {
-        send.IsEnabled = agent?.Connected == true && !busy && !string.IsNullOrWhiteSpace(prompt.Text);
+        send.IsEnabled = agent?.Connected == true && !string.IsNullOrWhiteSpace(prompt.Text);
+        ToolTipService.SetToolTip(send, busy ? "加入队列，当前回复结束后发送" : "发送");
         stop.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
     }
 }
