@@ -185,7 +185,7 @@ public sealed partial class MainWindow
         var composeArea = new StackPanel { MaxWidth = 800, Spacing = 8, Margin = new Thickness(20,6,20,14) };
         composer.Child = composeArea; At(area,composer,2);
         connection.FontSize = 12; connection.Foreground = sage; composeArea.Children.Add(connection);
-        composeArea.Children.Add(queuePanel);
+        composeArea.Children.Add(permissionPanel); composeArea.Children.Add(queuePanel);
         var input = new StackPanel { Spacing = 6 }; prompt.MinHeight = 44;
         prompt.BorderThickness = new Thickness(0); prompt.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         foreach(var key in new[]{"TextControlBackground","TextControlBackgroundPointerOver","TextControlBackgroundFocused","TextControlBorderBrush","TextControlBorderBrushPointerOver","TextControlBorderBrushFocused"})

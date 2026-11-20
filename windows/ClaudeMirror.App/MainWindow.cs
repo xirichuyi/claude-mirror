@@ -33,8 +33,6 @@ public sealed partial class MainWindow : Window
     private bool busy;
     private MessageView? reply;
     private readonly SendQueue queue = new();
-    private readonly SemaphoreSlim permissionLock = new(1);
-    private readonly HashSet<string> approvalDialogs = [];
     private sealed record ModelChoice(string Value, string Label);
     private static SolidColorBrush Brush(byte r, byte g, byte b) => new(Windows.UI.Color.FromArgb(255, r, g, b));
 
@@ -166,13 +164,13 @@ public sealed partial class MainWindow : Window
     private async Task NewConversationAsync()
     {
         if (busy) throw new IOException("请先停止当前回复");
-        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); queue.Clear(); RenderQueue(); RefreshWorkbench(); RenderHistory();
+        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); queue.Clear(); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
     }
     private async Task SelectAsync(Conversation selected)
     {
         if (busy) throw new IOException("请先停止当前回复");
-        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; queue.Clear(); RenderQueue();
+        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; queue.Clear(); RenderQueue(); RenderPermissions(null, null);
         RefreshWorkbench(); RenderHistory();
         var page = await RequireAgent().CallAsync("history", new { operation = "messages", reference = selected.Reference });
         foreach (var message in History.Messages(page["records"] as JsonArray)) AddMessage("", Presentation.Text(message["role"]) == "user").Show(message);
@@ -249,53 +247,10 @@ public sealed partial class MainWindow : Window
             local.Save(); taskId = null; busy = false;
         }
         RefreshWorkbench();
-        if (queue.Next(busy) is { } next) { RenderQueue(); await RunAsync(() => SendTextAsync(next.Text)); return; }
+        if (queue.Next(busy) is { } next) { RenderQueue(); RenderPermissions(watched, null); await RunAsync(() => SendTextAsync(next.Text)); return; }
         RenderQueue();
-        foreach (var permission in state["permissions"]?.AsArray() ?? [])
-        {
-            var id = permission!["id"]!.GetValue<string>(); if (!approvalDialogs.Add(id)) continue;
-            await RunAsync(() => RequestPermissionAsync(watched, permission, id));
-        }
+        RenderPermissions(watched, state["permissions"] as JsonArray);
     });
-    private async Task RequestPermissionAsync(string watched, JsonNode permission, string id)
-    {
-        await permissionLock.WaitAsync();
-        try
-        {
-            if (taskId != watched) return;
-            var fields = new Dictionary<string, TextBox>();
-            var panel = new StackPanel { Spacing = 12 };
-            var elicitation = permission["kind"]?.GetValue<string>() == "elicitation";
-            if (permission["name"]?.GetValue<string>() == "AskUserQuestion")
-            {
-                foreach (var question in permission["input"]?["questions"]?.AsArray() ?? [])
-                {
-                    var label = question!["question"]!.GetValue<string>();
-                    var field = new TextBox { Header = label, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
-                    var options = question["options"]?.AsArray().Select(option => option?["label"]?.GetValue<string>()).ToArray();
-                    if (options?.Length > 0) panel.Children.Add(new TextBlock { Text = string.Join(" / ", options), TextWrapping = TextWrapping.Wrap });
-                    fields[label] = field; panel.Children.Add(field);
-                }
-            }
-            else panel.Children.Add(new TextBlock { Text = permission.ToJsonString(new() { WriteIndented = true }), TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
-            var dialog = new ContentDialog
-            {
-                XamlRoot = root.XamlRoot, Title = elicitation ? "此交互暂未支持" : fields.Count > 0 ? "Claude 的问题" : "Claude 请求授权",
-                Content = new ScrollViewer { Content = panel, MaxHeight = 400 },
-                PrimaryButtonText = elicitation ? "" : fields.Count > 0 ? "提交" : "允许本次", CloseButtonText = "取消"
-            };
-            dialog.PrimaryButtonClick += (_, e) =>
-            {
-                if (fields.Values.Any(field => string.IsNullOrWhiteSpace(field.Text))) e.Cancel = true;
-            };
-            var allow = await dialog.ShowAsync() == ContentDialogResult.Primary;
-            if (taskId != watched) return;
-            object answer = elicitation ? new { interaction = new { action = "cancel" } } :
-                new { allow, answers = fields.ToDictionary(pair => pair.Key, pair => pair.Value.Text) };
-            await RequireAgent().TaskCommandAsync(watched, new { kind = "respond", permissionId = id, answer });
-        }
-        finally { permissionLock.Release(); }
-    }
     private async Task StopAsync() { queue.Pause(); RenderQueue(); if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
     private async Task<string?> PickAsync()
     {
