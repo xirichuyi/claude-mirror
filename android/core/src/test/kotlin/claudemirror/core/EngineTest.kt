@@ -215,6 +215,35 @@ class EngineTest {
         }
     }
 
+    @Test fun `a task restarted after the worker went to sleep is also on disk first`() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        var armed = false
+        var saves = 0
+        val store = object : MemoryStore() {
+            // Lets the write of the new prompt through and holds the one with the replacement task.
+            override fun save(session: ChatSession) {
+                if (armed && ++saves == 2) gate.await()
+                super.save(session)
+            }
+        }
+        engineTest(store = store) {
+            val (session, task) = started()
+            agent.emit(task.id, state(task, 1, "idle", "one", ""","resident":true"""))
+            until("the worker stays") { current(session.id).remoteOwner != null && current(session.id).remoteTask == null }
+            delay(1200) // lets the throttled write of that state finish
+            agent.status = json(state(task, 2, "idle", "one", ""","done":true,"hibernated":true,"remoteSessionId":"claude-1""""))
+            armed = true
+            engine.send(session.id, "second")
+            until("a replacement task is chosen") { current(session.id).remoteTask?.let { it.id != task.id } == true }
+            delay(300)
+            assertEquals(1, agent.starts().size)
+            gate.countDown()
+            until("the replacement starts") { agent.starts().size == 2 }
+            assertEquals(agent.starts().last()["taskId"].string(), store.saved[session.id]?.remoteTask?.id)
+            assertEquals("claude-1", agent.starts().last()["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"].string())
+        }
+    }
+
     @Test fun `a conversation that cannot be written is reported and stays usable`() {
         val store = object : MemoryStore() {
             override fun save(session: ChatSession) = throw java.io.IOException("No space left on device")

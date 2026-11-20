@@ -192,12 +192,18 @@ class Engine(
                 remoteTask = RemoteTask(id = owner?.id ?: newId(), prompt = value, messageId = reply.id, continuation = owner != null),
             )
         }
-        // The task ID is on disk before the server hears of it, so a reply started
-        // just before the app is killed can still be found afterwards.
+        dispatch { if (owner != null) continueTurn(id) else attach(id) }
+    }
+
+    /**
+     * Contacts the server once the latest change is on disk. A new task ID is always written
+     * first, so a reply started just before the app is killed can still be found afterwards.
+     */
+    private fun dispatch(contact: suspend () -> Unit) {
         val saved = written
         scope.launch {
             saved?.join()
-            if (owner != null) continueTurn(id) else attach(id)
+            contact()
         }
     }
 
@@ -346,7 +352,7 @@ class Engine(
                         remoteTask = RemoteTask(id = newId(), prompt = task.prompt, messageId = task.messageId),
                     )
                 }
-                scope.launch { attach(id) }
+                dispatch { attach(id) }
             } else {
                 update(id) {
                     it.copy(
