@@ -75,7 +75,8 @@ private struct MarkdownCodeBlock: View {
             .padding(.leading, 12).padding(.trailing, 2).frame(height: 30)
             .background(WorkbenchTheme.hover)
             Rectangle().fill(WorkbenchTheme.separator).frame(height: 1)
-            ScrollView(.horizontal) {
+            // Long blocks scroll inside a cap; short ones keep one axis so wheel events pass on.
+            OverflowScroll(axes: CGFloat(lines) * 19 > 340 ? [.horizontal, .vertical] : .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     if lines > 3 {
                         // Not part of the selection scope, so copied text never carries numbers.
@@ -87,7 +88,8 @@ private struct MarkdownCodeBlock: View {
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: 380, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium, style: .continuous))
