@@ -295,7 +295,7 @@ class EngineTest {
         assertEquals("queued", agent.starts().last()["request"]!!.jsonObject["prompt"].string())
         assertFalse(current(session.id).queueHeld)
         assertEquals(2, agent.calls.count { it.operation == "installed" })
-        assertEquals("new machine", agent.starts().last()["request"]!!.jsonObject["prompt"].string())
-        assertNull(agent.starts().last()["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"])
+        assertEquals("new machine", agent.starts()[1]["request"]!!.jsonObject["prompt"].string())
+        assertNull(agent.starts()[1]["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"])
     }
 }
