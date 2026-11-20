@@ -4,6 +4,15 @@ import SwiftUI
 import RemoteCCCore
 
 /// One selection scope per conversation; text stays native and tool controls remain interactive.
+private struct ReplyStreamingKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// True for the block a reply is still writing, so a capped code block keeps its newest lines in view.
+    var replyStreaming: Bool {
+        get { self[ReplyStreamingKey.self] }
+        set { self[ReplyStreamingKey.self] = newValue }
+    }
+}
+
 @MainActor final class TranscriptSelection: ObservableObject {
     private let views = NSHashTable<TranscriptTextView>.weakObjects()
     func register(_ view: TranscriptTextView) { views.add(view) }

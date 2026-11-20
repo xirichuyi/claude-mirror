@@ -42,6 +42,7 @@ private struct MarkdownCodeBlock: View {
     let selection: TranscriptSelection?
     @State private var copied = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.replyStreaming) private var growing
 
     private var displayed: NSAttributedString {
         // cmark keeps the closing newline for exact copying; don't give it an empty display row.
@@ -76,7 +77,8 @@ private struct MarkdownCodeBlock: View {
             .background(WorkbenchTheme.hover)
             Rectangle().fill(WorkbenchTheme.separator).frame(height: 1)
             // Long blocks scroll inside a cap; short ones keep one axis so wheel events pass on.
-            OverflowScroll(axes: CGFloat(lines) * 19 > 340 ? [.horizontal, .vertical] : .horizontal) {
+            OverflowScroll(axes: CGFloat(lines) * 19 > 340 ? [.horizontal, .vertical] : .horizontal,
+                           anchor: growing ? .bottomLeading : .topLeading) {
                 HStack(alignment: .top, spacing: 12) {
                     if lines > 3 {
                         // Not part of the selection scope, so copied text never carries numbers.

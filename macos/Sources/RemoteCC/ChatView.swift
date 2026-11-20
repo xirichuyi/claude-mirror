@@ -379,8 +379,10 @@ struct MessageRow: View, Equatable {
     private var assistantBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Array((message.blocks ?? []).enumerated()).filter { !isDuplicateError($0.element) }, id: \.offset) { index, block in
-                BlockView(block: block, actions: actions, thinkingActive: busy && sessionStatus == "working" && index == (message.blocks?.count ?? 0) - 1)
+                let writing = busy && index == (message.blocks?.count ?? 0) - 1
+                BlockView(block: block, actions: actions, thinkingActive: writing && sessionStatus == "working")
                     .equatable()
+                    .environment(\.replyStreaming, writing)
             }
             if let issue = message.serviceIssue {
                 VStack(alignment: .leading, spacing: 6) {
