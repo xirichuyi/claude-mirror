@@ -31,7 +31,11 @@ fun fingerprint(key: PublicKey): String {
 }
 
 /** Runs commands over one SSH connection per server. */
-class SshLauncher(private val secret: (HostConfig) -> SshSecret) : Launcher {
+class SshLauncher(
+    /** How long the server may stay silent while the connection is being set up. */
+    private val handshakeTimeoutMs: Int = 20_000,
+    private val secret: (HostConfig) -> SshSecret,
+) : Launcher {
     // Guarded by `clients`. Only map lookups happen under that lock, never network work.
     private val clients = HashMap<String, SSHClient>()
     private val gates = HashMap<String, Any>()
@@ -99,6 +103,8 @@ class SshLauncher(private val secret: (HostConfig) -> SshSecret) : Launcher {
             override fun findExistingAlgorithms(hostname: String, port: Int): List<String> = emptyList()
         })
         client.connectTimeout = 15_000
+        // Without this a server that accepts the connection and then says nothing is waited for forever.
+        client.timeout = handshakeTimeoutMs
         try {
             try { client.connect(host.host, host.port) } catch (error: IOException) {
                 val seen = offered
@@ -119,6 +125,8 @@ class SshLauncher(private val secret: (HostConfig) -> SshSecret) : Launcher {
             } catch (error: IOException) {
                 throw RemoteException("登录失败：${error.message ?: error.javaClass.simpleName}", confirmed = false)
             }
+            // Once logged in, quiet periods are normal; keep-alives notice a dead connection.
+            client.socket.soTimeout = 0
             return client
         } catch (error: Exception) {
             runCatching { client.close() }
