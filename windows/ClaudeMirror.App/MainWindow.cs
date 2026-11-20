@@ -277,6 +277,7 @@ public sealed partial class MainWindow : Window
         // The model and permission commands sent before a prompt publish idle snapshots; those must not release the next queued prompt.
         busy = sending || value is "working" or "connecting" or "permission" or "stopping";
         reply ??= AddMessage(""); reply.Show(state["message"], busy);
+        if (state["tasks"] is JsonArray tasks) backgroundTasks = (JsonArray)tasks.DeepClone();
         // A reply that failed or was stopped keeps the queue until the user says to go on.
         if (wasBusy && !busy && (state["message"]?["error"] is not null || state["message"]?["interrupted"]?.GetValue<bool>() == true)) queue.Pause();
         status.Text = busy ? "正在回复" : "就绪";
