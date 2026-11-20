@@ -92,6 +92,10 @@ public struct Block: Codable, Hashable, Sendable {
     public var children: [ChildTool]?
     public var agentText: String?
     public var level: String?
+    /// "user" blocks: a message handed to Claude while this reply was running.
+    public var attachments: [Attachment]?
+    public var pending: Bool?
+    public var cancelled: Bool?
     public init(type: String, text: String? = nil, id: String? = nil, name: String? = nil, input: JSON? = nil, status: String? = nil, output: String? = nil) {
         self.type = type; self.text = text; self.id = id; self.name = name; self.input = input; self.status = status; self.output = output
     }
@@ -194,6 +198,25 @@ public struct QueuedMessage: Codable, Hashable, Sendable, Identifiable {
     public var attachments: [Attachment]
 }
 
+/// Tokens in the model's context window, as last reported by the remote Claude.
+public struct ContextUsage: Codable, Hashable, Sendable {
+    public var usedTokens: Double
+    public var maxTokens: Double
+    public init(usedTokens: Double, maxTokens: Double) { self.usedTokens = usedTokens; self.maxTokens = maxTokens }
+
+    /// "128k / 1M": whole thousands below a million, one decimal above.
+    public var label: String { Self.compact(usedTokens) + " / " + Self.compact(maxTokens) }
+    public var fraction: Double { maxTokens > 0 ? min(max(usedTokens / maxTokens, 0), 1) : 0 }
+
+    static func compact(_ tokens: Double) -> String {
+        if tokens >= 999_950 {
+            let millions = (tokens / 100_000).rounded() / 10
+            return (millions == millions.rounded() ? String(Int(millions)) : String(millions)) + "M"
+        }
+        return tokens >= 1000 ? String(Int((tokens / 1000).rounded())) + "k" : String(Int(tokens))
+    }
+}
+
 public struct RemoteTask: Codable, Hashable, Sendable {
     public var id: String
     public var prompt: String?
@@ -228,6 +251,7 @@ public struct ChatSession: Codable, Hashable, Sendable, Identifiable {
     public var transportError: String?
     public var model: String?
     public var usage: JSON?
+    public var context: ContextUsage?
     public var tasks: JSON?
     public var tools: JSON?
     public var plugins: JSON?
