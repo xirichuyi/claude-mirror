@@ -326,11 +326,13 @@ public final class ChatEngine {
             _ = try await command(id, kind: "steer", fields: [
                 "id": .string(queued.id), "text": .string(queued.text), "prompt": .string(Self.prompt(queued.text, queued.attachments)),
                 "attachments": try JSON.from(queued.attachments),
-            ], commandId: queued.id)
+            ])
         } catch {
+            guard let current = try? index(id) else { throw error }
+            // Only the acknowledgement was lost: the reply already shows the message.
+            if steered(current, queued.id) { return }
             // The reply ended first, the link dropped, or the remote worker predates
             // steering. The message returns to the head of the queue, never lost.
-            guard let current = try? index(id) else { throw error }
             sessions[current].queue = [queued] + (sessions[current].queue ?? [])
             changed(id)
             if !running.contains(id), sessions[current].queuePaused != true { return drainQueue(id) }
@@ -341,6 +343,10 @@ public final class ChatEngine {
 
     static func prompt(_ text: String, _ attachments: [Attachment]) -> String {
         attachments.isEmpty ? text : text + "\n\n用户附加的远端文件（已上传或在远端选定，可通过 Read 等工具访问，包括图片）：\n" + attachments.map { "- " + JSON.string($0.path).text() }.joined(separator: "\n")
+    }
+
+    private func steered(_ position: Int, _ item: String) -> Bool {
+        sessions[position].messages.contains { $0.blocks?.contains { $0.type == "user" && $0.id == item && $0.cancelled != true } == true }
     }
 
     public func clearQueue(_ id: String) throws {
@@ -560,6 +566,11 @@ public final class ChatEngine {
         let previousMetadata = sessions[position].transcriptIndependentState
         sessions[position].messages[target] = try message.decode(ChatMessage.self)
         if done && status == "stopped" { sessions[position].messages[target].interrupted = true }
+        // A message the reply shows has been delivered, even when the steer request
+        // failed without an answer and put it back in the queue.
+        if let delivered = sessions[position].queue?.filter({ steered(position, $0.id) }).map(\.id), !delivered.isEmpty {
+            sessions[position].queue?.removeAll { delivered.contains($0.id) }
+        }
         sessions[position].status = status
         sessions[position].permissions = (try? state["permissions"]?.decode([PermissionRequest].self)) ?? []
         if let value = state["remoteSessionId"]?.string { sessions[position].remoteSessionId = value }
@@ -613,7 +624,7 @@ public final class ChatEngine {
         guard let owner = session.remoteOwner?.id ?? session.remoteTask?.id else { throw RemoteError("远端会话已经结束") }
         var command = fields
         command["kind"] = .string(kind)
-        let wait = session.remoteOwner != nil || kind == "control" || kind == "send"
+        let wait = session.remoteOwner != nil || ["control", "send", "steer"].contains(kind)
         let response = try await agents.call(session.config, "task", ["operation": "command", "taskId": .string(owner), "commandId": .string(commandId), "command": .object(command), "wait": .bool(wait)], timeout: 60)
         if response["ok"]?.bool == false {
             throw RemoteError(response["error"]?.string ?? "远端操作失败", confirmed: response["uncertain"]?.isTruthy != true)

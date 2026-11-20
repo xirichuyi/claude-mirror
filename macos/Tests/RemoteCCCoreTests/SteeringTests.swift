@@ -67,6 +67,28 @@ final class SteeringTests: XCTestCase {
     }
 
     @MainActor
+    func testSteerWithALostAcknowledgementIsNotSentTwice() async throws {
+        // This worker takes the message but its answer never confirms it.
+        let worker = standInWorker.replacingOccurrences(of: " if(c.kind==='respond')",
+            with: " if(c.kind==='steer'){message.blocks.push({type:'user',id:c.id,text:c.text});write();fs.writeFileSync(file+'.result',JSON.stringify({ok:false,uncertain:true,error:'确认超时'}));fs.renameSync(file,file+'.done');continue;}\n if(c.kind==='respond')")
+        XCTAssertNotEqual(worker, standInWorker)
+        let env = try AgentEnvironment(workerSource: worker); defer { env.cleanup() }
+        let (engine, id) = try await busyEngine(env, store: "lost-ack")
+        try engine.submit(id, text: "later")
+        try engine.submit(id, text: "now")
+        try? await engine.steer(id, item: try XCTUnwrap(engine.session(id)?.queue?.last?.id))
+        try await eventually { engine.session(id)?.messages.last?.blocks?.last?.text == "now" }
+        try await eventually { engine.session(id)?.queue?.map(\.text) == ["later"] }
+
+        // The reply ends and the queue drains: only "later" is sent.
+        try await engine.respond(id, permission: try XCTUnwrap(engine.session(id)?.permissions.first?.id), answer: ["allow": true])
+        try await eventually { engine.session(id)?.messages.last?.blocks?.first?.text == "reply:later" }
+        XCTAssertEqual(engine.session(id)?.messages.filter { $0.role == "user" }.map(\.text), ["first", "later"])
+        try await engine.stop(id); try await engine.remove(id)
+        engine.shutdown()
+    }
+
+    @MainActor
     func testStopShowsAtOnceAndPausesTheQueue() async throws {
         // This worker confirms a stop only after 400 ms, like a slow link.
         let worker = standInWorker.replacingOccurrences(of: "if(c.kind==='stop'){permissions=[];status='stopped';message.interrupted=true;write();}",
