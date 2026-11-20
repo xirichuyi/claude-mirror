@@ -23,7 +23,7 @@ public sealed partial class MainWindow : Window
     private List<ModelChoice> availableModels = [];
     private List<string> availableCommands = [];
     private ModelChoice? selectedModel;
-    private readonly LocalState local = new(Environment.GetEnvironmentVariable("CLAUDE_MIRROR_STATE_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "claude-mirror"));
+    private readonly LocalState local = new(StateFolder());
     private readonly TextBox directory = new() { Text = "~", PlaceholderText = "远端工作目录" };
     private RemoteAgent? agent;
     private HostProfile? host;
@@ -49,6 +49,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => agent?.Dispose();
         StartCheckingUpdates();
         RefreshWorkbench();
+        PrepareDemo();
     }
     private static StackPanel Row(params UIElement[] items)
     {

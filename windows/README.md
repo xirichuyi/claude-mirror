@@ -42,3 +42,13 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 核心单元测试覆盖状态增量、乱序保护、Shell 参数引用和本地状态持久化。已通过 `axi` 实测 SSH 连接、历史索引、文件目录、真实 Claude 回复与会话能力读取。Windows CI 另外检查编译和原生窗口 Loaded 事件，再输出 ZIP。
 
 集成测试默认跳过。维护者可以设置 `MIRROR_SMOKE_HOST`、`MIRROR_SMOKE_PORT`、`MIRROR_SMOKE_USER`、`MIRROR_SMOKE_KEY`、`MIRROR_SMOKE_FINGERPRINT` 和 `MIRROR_SMOKE_RESOURCES` 运行只读连接检查；额外设置 `MIRROR_SMOKE_CHAT=1` 会创建一条测试会话，产生一次模型请求，随后关闭测试任务。私钥和真实主机配置不要提交到仓库。
+
+### 演示场景和截图
+
+不连接服务器也可以打开真实窗口：设置 `CLAUDE_MIRROR_DEMO=home` 或 `chat` 后启动，界面使用内置的演示数据，不读写已保存的主机。可选 `CLAUDE_MIRROR_THEME=light|dark`、`CLAUDE_MIRROR_SIZE=1280x860`、`CLAUDE_MIRROR_SCROLL=0`；设置 `CLAUDE_MIRROR_SNAPSHOT=路径.png` 会把窗口内容保存为图片后退出。
+
+```powershell
+./windows/capture-screenshots.ps1 windows/dist/claude-mirror/claude-mirror.exe windows/dist/screenshots
+```
+
+CI 每次都会生成这些截图，并作为 `claude-mirror-windows-screenshots` 产物上传。
