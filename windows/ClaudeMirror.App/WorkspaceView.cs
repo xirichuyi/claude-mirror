@@ -48,8 +48,11 @@ public sealed partial class MainWindow
             var branch = new TextBox { PlaceholderText = "新分支名，例如 feature/login", Width = 240 };
             var create = Button("创建并在其中新建对话", async () =>
             {
+                // Everything that can refuse the new conversation is settled before the branch and directory exist.
+                if (busy) throw new IOException("请先停止当前回复");
+                await ConfirmLeavingQueueAsync();
                 var made = await remote.CallAsync("file", new { operation = "createWorktree", @base = project, branch = branch.Text.Trim() });
-                await NewConversationAsync(); directory.Text = made["path"]!.GetValue<string>(); await RefreshCapabilitiesAsync();
+                queue.Clear(); await NewConversationAsync(); directory.Text = made["path"]!.GetValue<string>(); await RefreshCapabilitiesAsync();
                 status.Text = "已创建工作区 " + directory.Text;
             });
             var worktree = ActionButton("新建 worktree", "\uE8F4", () => Task.CompletedTask, true);
