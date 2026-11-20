@@ -82,8 +82,10 @@ public sealed partial class MainWindow
             PrimaryButtonText = "移除", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        bool current = IsCurrent(entry.Conversation);
+        if (current) await ConfirmLeavingQueueAsync(); // Declining keeps the conversation, so nothing is hidden yet.
         Sessions.Hide(local, entry.Key); local.Save();
-        if (IsCurrent(entry.Conversation)) await NewConversationAsync(); else RenderHistory();
+        if (current) { queue.Clear(); await NewConversationAsync(); } else RenderHistory();
     }
 
     /// Moves every transcript recorded for this directory to the server's trash; the project's files are not touched.
