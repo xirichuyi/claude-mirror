@@ -238,7 +238,9 @@ public sealed partial class MainWindow
     }
     private bool showArchived;
     private string HostKeyOrEmpty => host == null ? "" : LocalState.HostKey(host);
-    private bool IsCurrent(Conversation c) => conversation is not null && (c.SessionId ?? c.Reference) == (conversation.SessionId ?? conversation.Reference) && c.Directory == conversation.Directory;
+    /// A conversation the server has not given an id yet is only ever itself.
+    private bool IsCurrent(Conversation c) => conversation is not null && c.Directory == conversation.Directory &&
+        ((c.SessionId ?? c.Reference) is { } id ? id == (conversation.SessionId ?? conversation.Reference) : ReferenceEquals(c, conversation));
 
     private void RenderHistory()
     {
@@ -252,6 +254,13 @@ public sealed partial class MainWindow
         {
             projects.Children.Insert(0,new TextBlock { Text="已固定", Foreground=muted, FontSize=13 });
             for(int i=0;i<pinned.Count;i++) projects.Children.Insert(i+1,ConversationRow(pinned[i],"\uE718"));
+        }
+        if(parked.Count > 0)
+        {
+            // Conversations left running, newest first: one click brings each back as it was.
+            int at = 0;
+            projects.Children.Insert(at++,new TextBlock { Text="后台对话", Foreground=muted, FontSize=13 });
+            foreach(var waiting in parked.Values.Reverse()) projects.Children.Insert(at++,ParkedRow(waiting));
         }
         int index = 0;
         foreach(var group in Sessions.Projects(list))

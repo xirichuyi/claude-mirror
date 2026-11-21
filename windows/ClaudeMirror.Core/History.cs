@@ -98,3 +98,20 @@ public sealed class SendQueue
         var item = items[0]; items.RemoveAt(0); return item;
     }
 }
+
+/// <summary>What a task snapshot says about the turn in progress.</summary>
+public static class Turn
+{
+    /// <param name="sending">A prompt is on its way: the control commands sent before it publish idle snapshots that must not count as the end of a reply.</param>
+    public static bool Busy(JsonNode? state, bool sending) =>
+        sending || state?["status"]?.GetValue<string>() is "working" or "connecting" or "permission" or "stopping";
+    public static bool NeedsAnswer(JsonNode? state) =>
+        state?["status"]?.GetValue<string>() == "permission" || state?["permissions"] is JsonArray { Count: > 0 };
+    /// <summary>The reply failed or was stopped, so queued prompts wait for the user.</summary>
+    public static bool Failed(JsonNode? state) =>
+        state?["message"]?["error"] is not null || state?["message"]?["interrupted"]?.GetValue<bool>() == true;
+
+    /// <summary>A label for a conversation that is not on screen, or null when there is nothing to say.</summary>
+    public static string? Label(bool busy, bool needsAnswer, bool paused, int queued, bool unread) =>
+        needsAnswer ? "等你确认" : busy ? (queued > 0 ? $"回复中 · 排队 {queued}" : "回复中") : paused ? $"已暂停 · 排队 {queued}" : unread ? "有新回复" : null;
+}

@@ -17,6 +17,7 @@ public sealed partial class MainWindow
         busy = false; status.Text = ConnectionAdvice.Explain(error);
         // What happened to the reply is unknown from here on, so queued prompts wait for the user.
         if (queue.Items.Count > 0) { queue.Pause(); RenderQueue(); }
+        PauseParked(); RenderHistory();
         RefreshWorkbench();
         if (host is { } profile && (profile.SystemSsh || profile.KeyFile is { Length: > 0 })) _ = ReconnectAsync(profile);
     }
@@ -66,6 +67,7 @@ public sealed partial class MainWindow
             {
                 // Keep the open conversation; a remote task that kept running is watched again.
                 if (taskId is not null) await WatchCurrentAsync();
+                await RewatchParkedAsync(next);
                 await RefreshHistoryAsync(); await RefreshCapabilitiesAsync(); await RefreshHealthAsync();
                 status.Text = "已重新连接";
             });

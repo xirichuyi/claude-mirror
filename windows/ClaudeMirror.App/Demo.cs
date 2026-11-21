@@ -65,6 +65,12 @@ public sealed partial class MainWindow
         await RefreshHealthAsync();
         if (scene == "home") return;
         local.Tasks[LocalState.HostKey(profile) + "|s-auth"] = scene switch { "permission" => DemoAgent.PermissionTaskId, "finished" => DemoAgent.FinishedTaskId, _ => DemoAgent.TaskId };
+        // One conversation left replying in the background, as the sidebar lists it.
+        parked["demo-background"] = new Parked
+        {
+            Conversation = new Conversation("重构上传重试逻辑", history[0].Directory, null, null), TaskId = "demo-background",
+            Queue = new SendQueue(), PermissionMode = "default", ExecutionUser = "", Views = [], Busy = true
+        };
         await SelectAsync(history[0]);
         if (scene != "permission") return;
         queue.Add("推送之后顺便开一个 PR"); queue.Add("再把 CHANGELOG 更新一下"); RenderQueue();

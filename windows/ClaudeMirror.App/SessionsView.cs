@@ -21,7 +21,15 @@ public sealed partial class MainWindow
         var c = entry.Conversation;
         var row = Button(c.Name, () => SelectAsync(c));
         var name = new TextBlock { Text = c.Name, TextTrimming = TextTrimming.CharacterEllipsis };
-        row.Content = glyph is null ? name : Row(new FontIcon { Glyph = glyph, FontSize = 13, Foreground = muted }, name);
+        // A conversation going on in the background says so under its name.
+        FrameworkElement title = name;
+        if (!IsCurrent(c) && ParkedFor(c) is { Label: { } label } waiting)
+        {
+            var lines = new StackPanel(); lines.Children.Add(name);
+            lines.Children.Add(new TextBlock { Text = label, FontSize = 11, Foreground = waiting.Busy && Turn.NeedsAnswer(waiting.State) ? amber : sage });
+            title = lines;
+        }
+        row.Content = glyph is null ? title : Row(new FontIcon { Glyph = glyph, FontSize = 13, Foreground = muted }, title);
         row.HorizontalAlignment = HorizontalAlignment.Stretch; row.HorizontalContentAlignment = HorizontalAlignment.Left;
         row.Background = IsCurrent(c) ? bubble : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         row.BorderThickness = new Thickness(0); ToolTipService.SetToolTip(row, c.Name);
@@ -30,7 +38,7 @@ public sealed partial class MainWindow
         if (!entry.Archived) menu.Items.Add(MenuItem(entry.Pinned ? "取消固定" : "固定", entry.Pinned ? "\uE77A" : "\uE718", () => Mark(() => Sessions.SetPinned(local, entry.Key, !entry.Pinned))));
         menu.Items.Add(MenuItem(entry.Archived ? "取消归档" : "归档", "\uE7B8", () =>
         {
-            if (!entry.Archived && IsCurrent(c) && (busy || queue.Items.Count > 0)) throw new IOException("请先完成或取消此会话中的任务");
+            if (!entry.Archived && Active(c)) throw new IOException("请先完成或取消此会话中的任务");
             return Mark(() => Sessions.SetArchived(local, entry.Key, !entry.Archived));
         }));
         menu.Items.Add(MenuItem("详情", "\uE946", () => DetailsAsync(entry)));
@@ -66,7 +74,7 @@ public sealed partial class MainWindow
         Line("服务器", host is null ? null : $"{host.Name}（{LocalState.HostKey(host)}）");
         Line("工作目录", c.Directory);
         Line("会话 ID", c.SessionId);
-        Line("远端任务", local.Tasks.GetValueOrDefault(entry.Key) is { } task ? task + (IsCurrent(c) && busy ? "（正在回复）" : "") : "没有保留的任务，继续对话时会重新启动");
+        Line("远端任务", local.Tasks.GetValueOrDefault(entry.Key) is { } task ? task + ((IsCurrent(c) ? busy : ParkedFor(c)?.Busy == true) ? "（正在回复）" : "") : "没有保留的任务，继续对话时会重新启动");
         Line("状态", string.Join("、", new[] { entry.Pinned ? "已固定" : null, entry.Archived ? "已归档" : null, local.Names.ContainsKey(entry.Key) ? "已在本机重命名" : null }.Where(mark => mark is not null)));
         Line("继续此对话的命令", c.SessionId is null ? null : $"cd {Protocol.Quote(c.Directory)} && claude --resume {c.SessionId}");
         await new ContentDialog { XamlRoot = root.XamlRoot, Title = "对话详情", Content = new ScrollViewer { Content = panel, MaxHeight = 420 }, CloseButtonText = "关闭" }.ShowAsync();
@@ -75,6 +83,7 @@ public sealed partial class MainWindow
     private async Task RemoveAsync(Sessions.Entry entry)
     {
         if (IsCurrent(entry.Conversation) && busy) throw new IOException("请先停止当前回复，再移除对话");
+        if (!IsCurrent(entry.Conversation) && ParkedFor(entry.Conversation)?.Active == true) throw new IOException("这个对话还在后台回复或有排队的消息，请先打开它并停止");
         var dialog = new ContentDialog
         {
             XamlRoot = root.XamlRoot, Title = "从列表移除对话",
@@ -85,6 +94,7 @@ public sealed partial class MainWindow
         bool current = IsCurrent(entry.Conversation);
         if (current) await ConfirmLeavingQueueAsync(); // Declining keeps the conversation, so nothing is hidden yet.
         Sessions.Hide(local, entry.Key); local.Save();
+        if (!current && ParkedFor(entry.Conversation) is { } idle) await ForgetParkedAsync(idle);
         if (current) { queue.Clear(); await NewConversationAsync(); } else RenderHistory();
     }
 
@@ -92,6 +102,9 @@ public sealed partial class MainWindow
     private async Task TrashProjectAsync(string path)
     {
         if (busy && conversation?.Directory == path) throw new IOException("请先停止此项目的任务");
+        var behind = parked.Values.Where(p => p.Conversation.Directory == path).ToList();
+        if (behind.Any(p => p.Active)) throw new IOException("此项目还有对话在后台回复或排队，请先打开并停止它们");
+        if (behind.Any(p => p.Tasks.Any(item => Presentation.Text(item?["status"]) == "running"))) throw new IOException("此项目还有后台任务在运行，请先在状态页停止它们");
         // Closing the open conversation's worker would also end what it still runs in the background.
         if (taskId is not null && (conversation?.Directory == path || directory.Text == path) && backgroundTasks.Any(item => Presentation.Text(item?["status"]) == "running"))
             throw new IOException("此项目还有后台任务在运行，请先在状态页停止它们");
@@ -110,6 +123,7 @@ public sealed partial class MainWindow
         var prefix = LocalState.HostKey(host!) + "|";
         var workers = history.Where(c => c.Directory == path && c.SessionId is not null && local.Tasks.ContainsKey(prefix + c.SessionId)).Select(c => local.Tasks[prefix + c.SessionId!]).ToHashSet();
         if (open && taskId is not null) workers.Add(taskId);
+        foreach (var p in behind) { if (!p.Done) workers.Add(p.TaskId); parked.Remove(p.TaskId); }
         foreach (var worker in workers)
         {
             try { await remote.TaskCommandAsync(worker, new { kind = "close" }); } catch (IOException) { } // Already gone.

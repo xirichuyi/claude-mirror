@@ -51,16 +51,18 @@ public sealed partial class MainWindow
         health = MachineHealth.Issues(null, connected.Hello, null);
         var key = host is null ? null : LocalState.HostKey(host);
         // Connecting to the same server again keeps the open conversation and its queued prompts, as an automatic reconnect does.
-        bool resumed = key is not null && key == sessionHost && (conversation is not null || taskId is not null || queue.Items.Count > 0);
+        bool resumed = key is not null && key == sessionHost && (conversation is not null || taskId is not null || queue.Items.Count > 0 || parked.Count > 0);
         // Changes, diff, search, PDF and status tabs show the previous server's data, and their buttons would act on this one.
-        if (key != sessionHost) CloseToolTabs();
+        // Background conversations belong to the previous server too; their tasks carry on there.
+        if (key != sessionHost) { CloseToolTabs(); parked.Clear(); }
         sessionHost = key;
         if (resumed)
         {
             if (taskId is not null) await WatchCurrentAsync();
+            await RewatchParkedAsync(connected);
             await RefreshCapabilitiesAsync(); RenderQueue(); RefreshWorkbench();
         }
-        else { queue.Clear(); directory.Text = connected.Home; await NewConversationAsync(); }
+        else { taskId = null; queue.Clear(); directory.Text = connected.Home; await NewConversationAsync(); }
         await RefreshHistoryAsync(); status.Text = "已连接";
         RenderHealth();
     }

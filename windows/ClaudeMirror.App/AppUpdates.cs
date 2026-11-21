@@ -45,7 +45,7 @@ public sealed partial class MainWindow
             if(manual) status.Text="更新检查失败："+ex.Message;
         } finally { updateLock.Release(); }
     }
-    private bool CanRestart() => !(busy || openFiles.Any(f=>f.Dirty || f.Saving) || !string.IsNullOrWhiteSpace(prompt.Text));
+    private bool CanRestart() => !(busy || parked.Values.Any(p => p.Active) || openFiles.Any(f=>f.Dirty || f.Saving) || !string.IsNullOrWhiteSpace(prompt.Text));
     private async Task InstallUpdateAsync()
     {
         if(pendingUpdate is not {} update || stagedInstaller is not {} installer)return;

@@ -32,7 +32,10 @@ public sealed partial class MainWindow : Window
     private string? taskKey;
     private bool busy;
     private MessageView? reply;
-    private readonly SendQueue queue = new();
+    private SendQueue queue = new();
+    private JsonObject? lastState;
+    /// The first prompt of a conversation the server has not named yet.
+    private string? newTitle;
     private bool sending;
     private sealed record ModelChoice(string Value, string Label, bool Auto = false);
     private static SolidColorBrush Brush(byte r, byte g, byte b) => new(Windows.UI.Color.FromArgb(255, r, g, b));
@@ -163,7 +166,7 @@ public sealed partial class MainWindow : Window
         var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? server : name.Text.Trim(), server, double.IsNaN(port.Value) ? 0 : (int)port.Value, login, mode.SelectedIndex == 1 ? key.Text : null,
             system, system && jump.Text.Trim().Length > 0 ? jump.Text.Trim() : null);
         // Queued prompts cannot follow the user to another server.
-        if (host is not null && LocalState.HostKey(host) != LocalState.HostKey(profile)) await ConfirmLeavingQueueAsync();
+        if (host is not null && LocalState.HostKey(host) != LocalState.HostKey(profile)) await ConfirmLeavingQueueAsync(true);
         agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
         reconnecting?.Cancel();
         next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
@@ -211,29 +214,40 @@ public sealed partial class MainWindow : Window
     }
     private async Task NewConversationAsync()
     {
-        if (busy) throw new IOException("请先停止当前回复");
-        await ConfirmLeavingQueueAsync();
-        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); queue.Clear(); UseAccount(null); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
+        await LeaveConversationAsync();
+        UseAccount(null); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
     }
     /// Queued prompts belong to the open conversation. Leaving it asks first; declining keeps the conversation and stops the caller.
-    private async Task ConfirmLeavingQueueAsync()
+    /// <param name="everywhere">Also count the prompts queued in background conversations, as when leaving the server.</param>
+    private async Task ConfirmLeavingQueueAsync(bool everywhere = false)
     {
-        if (queue.Items.Count == 0) return;
+        int count = queue.Items.Count + (everywhere ? parked.Values.Sum(p => p.Queue.Items.Count) : 0);
+        if (count == 0) return;
         var dialog = new ContentDialog
         {
-            XamlRoot = root.XamlRoot, Title = "还有未发送的消息", Content = $"队列里有 {queue.Items.Count} 条消息还没有发送，离开这个对话会丢弃它们。",
+            XamlRoot = root.XamlRoot, Title = "还有未发送的消息", Content = everywhere ? $"有 {count} 条排队的消息还没有发送，换服务器会丢弃它们。正在进行的回复会在原服务器上继续。" : $"队列里有 {count} 条消息还没有发送，离开这个对话会丢弃它们。",
             PrimaryButtonText = "丢弃并离开", CloseButtonText = "留在这里", DefaultButton = ContentDialogButton.Close
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) throw new IOException("已保留当前对话和未发送的消息");
     }
     private async Task SelectAsync(Conversation selected)
     {
-        if (busy) throw new IOException("请先停止当前回复");
-        // Reopening the same conversation keeps its queued prompts.
-        if (!IsCurrent(selected)) { await ConfirmLeavingQueueAsync(); queue.Clear(); }
-        if (!IsCurrent(selected)) UseAccount(selected.Account);
-        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; RenderQueue(); RenderPermissions(null, null);
+        if (IsCurrent(selected))
+        {
+            // Reopening the open conversation reloads it and keeps its queued prompts; while it is replying there is nothing to reload.
+            if (busy || sending) return;
+        }
+        else
+        {
+            var waiting = ParkedFor(selected);
+            if (waiting?.Sending == true) throw new IOException("这个对话正在发送排队的消息，请稍候再打开");
+            await LeaveConversationAsync();
+            // Left running earlier: it comes back as it was, with whatever arrived since.
+            if (waiting is not null && parked.ContainsKey(waiting.TaskId)) { await RestoreAsync(waiting); return; }
+            UseAccount(selected.Account);
+        }
+        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; lastState = null; RenderQueue(); RenderPermissions(null, null);
         RefreshWorkbench(); RenderHistory();
         var page = await RequireAgent().CallAsync("history", new { operation = "messages", reference = selected.Reference, account = selected.Account });
         foreach (var message in History.Messages(page["records"] as JsonArray)) AddMessage("", Presentation.Text(message["role"]) == "user").Show(message);
@@ -266,7 +280,7 @@ public sealed partial class MainWindow : Window
     }
     private async Task SendTextAsync(string text)
     {
-        var remote = RequireAgent(); busy = true; sending = true; AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
+        var remote = RequireAgent(); busy = true; sending = true; if (conversation is null && taskId is null) newTitle = Presentation.FirstLine(text, 40); AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
         var message = new { id = Guid.NewGuid().ToString(), role = "assistant", blocks = Array.Empty<object>() };
         try
         {
@@ -294,19 +308,24 @@ public sealed partial class MainWindow : Window
     }
     private void OnState(string watched, JsonObject state) => DispatcherQueue.TryEnqueue(async () =>
     {
-        if (taskId != watched) return;
-        var value = state["status"]?.GetValue<string>(); bool wasBusy = busy;
+        if (taskId == watched) await ApplyStateAsync(watched, state);
+        // A conversation left running in the background keeps its own state and queue.
+        else if (parked.TryGetValue(watched, out var background)) await BackgroundStateAsync(background, state);
+    });
+    private async Task ApplyStateAsync(string watched, JsonObject state)
+    {
+        bool wasBusy = busy; lastState = state;
         // The model and permission commands sent before a prompt publish idle snapshots; those must not release the next queued prompt.
-        busy = sending || value is "working" or "connecting" or "permission" or "stopping";
+        busy = Turn.Busy(state, sending);
         reply ??= AddMessage(""); reply.Show(state["message"], busy);
         if (state["tasks"] is JsonArray tasks) backgroundTasks = (JsonArray)tasks.DeepClone();
         // A reply that failed or was stopped keeps the queue until the user says to go on.
-        if (wasBusy && !busy && (state["message"]?["error"] is not null || state["message"]?["interrupted"]?.GetValue<bool>() == true)) queue.Pause();
+        if (wasBusy && !busy && Turn.Failed(state)) queue.Pause();
         status.Text = busy ? "正在回复" : "就绪";
         if (state["remoteSessionId"] is JsonValue session && taskId is not null)
         {
             var sessionId = session.GetValue<string>();
-            conversation = new Conversation(conversation?.Name ?? "Windows 对话", directory.Text, sessionId, conversation?.Reference, executionUser.Length > 0 ? executionUser : null);
+            conversation = new Conversation(conversation?.Name ?? newTitle ?? "Windows 对话", directory.Text, sessionId, conversation?.Reference, executionUser.Length > 0 ? executionUser : null);
             local.Tasks[LocalState.HostKey(host!) + "|" + sessionId] = taskId; local.Save();
         }
         if (state["done"]?.GetValue<bool>() == true)
@@ -318,7 +337,7 @@ public sealed partial class MainWindow : Window
         if (queue.Next(busy) is { } next) { RenderQueue(); RenderPermissions(watched, null); await RunAsync(() => SendTextAsync(next.Text)); return; }
         RenderQueue();
         RenderPermissions(watched, state["permissions"] as JsonArray);
-    });
+    }
     private async Task StopAsync() { queue.Pause(); RenderQueue(); if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
     private async Task<string?> PickAsync()
     {

@@ -14,6 +14,7 @@ public sealed class RemoteAgent : IDisposable
     private readonly SemaphoreSlim writeLock = new(1);
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonNode>> requests = new();
     private readonly ConcurrentDictionary<string, Action<JsonObject>> watches = new();
+    private readonly ConcurrentDictionary<string, string> watching = new();
     private readonly CancellationTokenSource lifetime = new();
     private int sequence;
     private bool channelClosed, attached;
@@ -206,21 +207,37 @@ public sealed class RemoteAgent : IDisposable
         try { await (writer ?? throw new IOException("未连接")).WriteLineAsync(System.Text.Json.JsonSerializer.Serialize(value)); }
         finally { writeLock.Release(); }
     }
+    /// <summary>Follows a remote task. Several tasks can be followed at once; watching a task again replaces its earlier watch.</summary>
     public async Task WatchAsync(string task, Action<JsonObject> receive)
     {
-        foreach (var old in watches.Keys)
-        {
-            watches.TryRemove(old, out _);
-            await WriteAsync(new { cancel = "sub:" + old });
-        }
         var subscription = Guid.NewGuid().ToString(); JsonObject? state = null;
         watches[subscription] = packet =>
         {
             if (packet["heartbeat"]?.GetValue<bool>() == true) return;
             state = Protocol.Apply(state, packet); receive((JsonObject)state.DeepClone());
         };
-        await CallAsync("taskWatch", new { taskId = task, subscription });
+        string? earlier = null;
+        watching.AddOrUpdate(task, subscription, (_, old) => { earlier = old; return subscription; });
+        if (earlier is not null) await CancelWatchAsync(earlier);
+        try { await CallAsync("taskWatch", new { taskId = task, subscription }); }
+        catch
+        {
+            watches.TryRemove(subscription, out _);
+            watching.TryRemove(new KeyValuePair<string, string>(task, subscription));
+            throw;
+        }
     }
+    /// <summary>Stops following a task; the task itself keeps running on the server.</summary>
+    public async Task UnwatchAsync(string task)
+    {
+        if (watching.TryRemove(task, out var subscription)) await CancelWatchAsync(subscription);
+    }
+    private async Task CancelWatchAsync(string subscription)
+    {
+        watches.TryRemove(subscription, out _);
+        await WriteAsync(new { cancel = "sub:" + subscription });
+    }
+    public IReadOnlyCollection<string> Watched => watching.Keys.ToList();
     public async Task<JsonNode> TaskCommandAsync(string task, object value)
     {
         var result = await CallAsync("task", new { operation = "command", taskId = task, commandId = Guid.NewGuid().ToString(), command = value, wait = true });
