@@ -23,6 +23,11 @@ public sealed partial class MainWindow
         editorTabs.SelectedItem = tab; showEditor = true; LayoutSplit();
         return tab;
     }
+    private void CloseToolTabs()
+    {
+        foreach (var tab in editorTabs.TabItems.OfType<TabViewItem>().Where(item => item.Tag is string).ToList()) editorTabs.TabItems.Remove(tab);
+        LayoutSplit();
+    }
 
     private Grid ToolArea(FrameworkElement header, FrameworkElement body)
     {
