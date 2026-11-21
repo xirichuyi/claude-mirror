@@ -19,6 +19,18 @@ public class SystemSshTests
         : agent && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLAUDE_MIRROR_TEST_RESOURCES")) ? "Set CLAUDE_MIRROR_TEST_RESOURCES to a prepared server folder for the remote agent tests" : null;
     private static int ServerPort => int.Parse(File.ReadLines(Path.Combine(Path.GetDirectoryName(Config)!, "sshd_config")).First(line => line.StartsWith("Port ")).Split(' ')[1]);
 
+    [Fact]
+    public void TheSameAddressBehindTwoJumpHostsIsTwoServers()
+    {
+        var direct = new HostProfile("a", "10.0.0.5", 22, "root");
+        var first = direct with { SystemSsh = true, Jump = "ops@bastion-a" };
+        var second = direct with { SystemSsh = true, Jump = "ops@bastion-b" };
+        Assert.Equal("root@10.0.0.5:22", LocalState.HostKey(direct)); // Saved state from before jump hosts keeps its key.
+        Assert.Equal(LocalState.HostKey(direct), LocalState.HostKey(direct with { SystemSsh = true }));
+        Assert.NotEqual(LocalState.HostKey(first), LocalState.HostKey(second));
+        Assert.NotEqual(LocalState.HostKey(direct), LocalState.HostKey(first));
+    }
+
     /// The installed OpenSSH client reads every option this app passes. `ssh -G` parses the command line and prints the result without connecting,
     /// so this runs against the real ssh.exe on a Windows build machine.
     [Fact]

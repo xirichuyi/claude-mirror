@@ -107,5 +107,6 @@ public sealed class LocalState
         if (!Accounts.TryGetValue(hostKey, out var known)) Accounts[hostKey] = known = [];
         if (!known.Contains(account)) known.Add(account);
     }
-    public static string HostKey(HostProfile h) => $"{h.User}@{h.Host}:{h.Port}";
+    /// <summary>Identifies a server in saved state. The jump host is part of it: the same private address behind two jump hosts is two servers.</summary>
+    public static string HostKey(HostProfile h) => $"{h.User}@{h.Host}:{h.Port}" + (string.IsNullOrEmpty(h.Jump) ? "" : " via " + h.Jump);
 }
