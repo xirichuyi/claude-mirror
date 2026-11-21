@@ -205,9 +205,11 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
             }
         }
     }
-    // A request Claude is waiting on is brought into view, wherever the reader was.
+    // A request Claude is waiting on is brought into view, wherever the reader was, and stays there.
     val asked = session.permissions.firstOrNull()?.id
-    LaunchedEffect(asked) { if (asked != null) list.scrollToItem(rows.size) }
+    LaunchedEffect(asked) {
+        if (asked != null) { following = true; list.scrollToItem(rows.size) }
+    }
     LazyColumn(modifier.fillMaxWidth().nestedScroll(reader), state = list) {
         items(rows.size, key = { rows[it].first }) { index ->
             val (_, message, part) = rows[index]
