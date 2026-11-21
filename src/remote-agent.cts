@@ -517,8 +517,9 @@ async function transfer(request) {
 
 const CLAUDE_ROOT = () => expand(process.env.CLAUDE_CONFIG_DIR || '~/.claude');
 // A root login may read the transcripts of the account it runs Claude as (request.account).
-// The index for them stays in root's own folder, so nothing is written into the other home.
-const historyScope = new AsyncLocalStorage<{ account: string, home: string }>();
+// The index for them stays in root's own folder. The only thing written into the other home is
+// that account's own trash folder, which is handed to the account.
+const historyScope = new AsyncLocalStorage<{ account: string, home: string, uid?: number, gid?: number }>();
 const PROJECTS = () => { const scope = historyScope.getStore(); return scope ? path.join(scope.home, '.claude', 'projects') : path.join(CLAUDE_ROOT(), 'projects'); };
 const INDEX_DIRECTORY = () => { const scope = historyScope.getStore(); return path.join(CLAUDE_ROOT(), 'remotecc-index', ...(scope ? ['accounts', scope.account] : [])); };
 function accountHistory(account, current = os.userInfo(), lookup = name => execFileSync('getent', ['passwd', name], { encoding: 'utf8', timeout: 5000 })) {
@@ -527,7 +528,7 @@ function accountHistory(account, current = os.userInfo(), lookup = name => execF
   let fields;
   try { fields = lookup(account).trim().split(':'); } catch { throw new Error(`执行账号 ${account} 不存在`); }
   if (fields.length !== 7 || fields[0] !== account || !(Number(fields[2]) > 0) || !path.isAbsolute(fields[5])) throw new Error('执行账号必须是有效的非 root 用户');
-  return { account, home: fields[5] };
+  return { account, home: fields[5], uid: Number(fields[2]), gid: Number(fields[3]) };
 }
 const forAccount = operation => request => request.account ? historyScope.run(accountHistory(request.account), () => operation(request)) : operation(request);
 const SESSION_FILE = /^[0-9a-fA-F-]{36}\.jsonl$/;
@@ -837,7 +838,11 @@ async function trashProjectHistory(request) {
     const original = await readJSON(path.join(folder, 'request.json'));
     if (original.session?.directory === directory) throw new Error('请先停止此项目的远端任务');
   }
-  const trash = path.join(path.dirname(PROJECTS()), 'remotecc-trash', crypto.randomUUID());
+  const scope = historyScope.getStore();
+  const trashRoot = path.join(path.dirname(PROJECTS()), 'remotecc-trash');
+  // In another account's home that account decides what exists: do not follow a link it left here.
+  if (scope && !((await fsp.lstat(trashRoot).catch(() => null))?.isDirectory() ?? true)) throw new Error('执行账号的废纸篓目录不可用');
+  const trash = path.join(trashRoot, crypto.randomUUID());
   await fsp.mkdir(trash, { recursive: true, mode: 0o700 });
   await atomicJSON(path.join(trash, 'manifest.json'), {
     directory, createdAt: Date.now(), references: selected.map(item => item.reference),
@@ -861,11 +866,23 @@ async function trashProjectHistory(request) {
       catch { /* Keep recovery copy and report its location. */ }
     }
     throw new Error(error.message + '；恢复副本：' + trash);
-  } finally { listSnapshots.clear(); historyIndexes.clear(); }
+  } finally {
+    listSnapshots.clear(); historyIndexes.clear();
+    // The account can then restore or delete its own records.
+    if (scope?.uid) await handOver([trashRoot], trash, scope.uid, scope.gid).catch(() => {});
+  }
   return { count: moved.length, references: selected.map(item => item.reference), trash };
 }
 
-const historyOperations = { list: forAccount(historyList), messages: forAccount(historyMessages), projects: projectDirectories, trashProject: trashProjectHistory };
+async function handOver(folders, folder, uid, gid) {
+  for (const entry of await fsp.readdir(folder, { withFileTypes: true })) {
+    const target = path.join(folder, entry.name);
+    if (entry.isDirectory()) await handOver([], target, uid, gid); else await fsp.lchown(target, uid, gid);
+  }
+  for (const target of [...folders, folder]) await fsp.lchown(target, uid, gid);
+}
+
+const historyOperations = { list: forAccount(historyList), messages: forAccount(historyMessages), projects: projectDirectories, trashProject: forAccount(trashProjectHistory) };
 
 // ---------------------------------------------------------------- persistent tasks
 

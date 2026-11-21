@@ -158,7 +158,7 @@ test('project history trash matches exact cwd and preserves recovery copies and 
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('a root login reads the history of its execution account without writing into that home', async () => {
+test('a root login reads and trashes the history of its execution account, writing only that account\'s trash folder', async () => {
   const f = fixture();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'remotecc-history-account-'));
   try {
@@ -175,11 +175,24 @@ test('a root login reads the history of its execution account without writing in
     assert.deepEqual((await f.call({ operation: 'list' })).sessions.map(item => item.directory), ['/tmp/test']);
     assert.deepEqual(fs.readdirSync(path.join(home, '.claude')), ['projects']);
     assert.ok(fs.existsSync(path.join(f.root, 'remotecc-index', 'accounts', 'claude-runner', 'listing.json')));
+    // Moving a project's history to the trash reaches the account's records too, and leaves root's alone.
+    const trashed = await scoped({ inner: 'trashProject', directory: '/srv/app' });
+    assert.equal(trashed.count, 1);
+    assert.ok(trashed.trash.startsWith(path.join(home, '.claude', 'remotecc-trash')));
+    assert.ok(fs.existsSync(path.join(trashed.trash, '-srv-app', id + '.jsonl')));
+    assert.deepEqual((await scoped({ inner: 'list' })).sessions, []);
+    assert.deepEqual((await f.call({ operation: 'list' })).sessions.map(item => item.directory), ['/tmp/test']);
+    // A link the account left where its trash goes is not followed.
+    fs.rmSync(path.join(home, '.claude', 'remotecc-trash'), { recursive: true });
+    fs.writeFileSync(path.join(project, id + '.jsonl'), JSON.stringify({ type: 'user', uuid: randomUUID(), parentUuid: null, cwd: '/srv/app', message: { content: 'again' } }) + '\n');
+    fs.symlinkSync(f.root, path.join(home, '.claude', 'remotecc-trash'));
+    await assert.rejects(scoped({ inner: 'trashProject', directory: '/srv/app' }), /废纸篓目录不可用/);
+    assert.ok(fs.existsSync(path.join(project, id + '.jsonl')));
   } finally { delete (historyOperations as any).scoped; fs.rmSync(f.root, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); }
 });
 test('execution account history is refused for other logins and invalid accounts', () => {
   const passwd = () => 'claude-runner:x:1001:1001::/home/claude-runner:/bin/bash\n';
-  assert.deepEqual(accountHistory('claude-runner', { uid: 0 }, passwd), { account: 'claude-runner', home: '/home/claude-runner' });
+  assert.deepEqual(accountHistory('claude-runner', { uid: 0 }, passwd), { account: 'claude-runner', home: '/home/claude-runner', uid: 1001, gid: 1001 });
   assert.throws(() => accountHistory('claude-runner', { uid: 1000 }, passwd), /只有 root/);
   assert.throws(() => accountHistory('../etc', { uid: 0 }, passwd), /无效/);
   assert.throws(() => accountHistory('root', { uid: 0 }, () => 'root:x:0:0:root:/root:/bin/bash'), /非 root/);

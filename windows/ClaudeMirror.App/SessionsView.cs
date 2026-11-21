@@ -131,15 +131,25 @@ public sealed partial class MainWindow
             if (taskId == worker) taskId = null;
         }
         if (workers.Count > 0) local.Save();
-        JsonNode result;
-        try { result = await remote.CallAsync("history", new { operation = "trashProject", directory = path }); }
-        catch (IOException) when (workers.Count > 0)
+        // Conversations run as another account keep their records in that account's home, so each one is asked for separately.
+        int movedCount = 0; var failed = new List<string>();
+        foreach (var account in new string?[] { null }.Concat(history.Where(c => c.Directory == path && !string.IsNullOrEmpty(c.Account)).Select(c => c.Account).Distinct()))
         {
-            // A closed worker needs a moment to exit.
-            await Task.Delay(1500); result = await remote.CallAsync("history", new { operation = "trashProject", directory = path });
+            try
+            {
+                JsonNode result;
+                try { result = await remote.CallAsync("history", new { operation = "trashProject", directory = path, account }); }
+                catch (IOException) when (workers.Count > 0)
+                {
+                    // A closed worker needs a moment to exit.
+                    await Task.Delay(1500); result = await remote.CallAsync("history", new { operation = "trashProject", directory = path, account });
+                }
+                movedCount += result["count"]?.GetValue<int>() ?? 0;
+            }
+            catch (IOException e) when (account is not null) { failed.Add($"账号 {account}：{e.Message}"); }
         }
         if (open) { queue.Clear(); await NewConversationAsync(); }
         await RefreshHistoryAsync();
-        status.Text = $"已移走 {result["count"]?.GetValue<int>() ?? 0} 条对话记录";
+        status.Text = $"已移走 {movedCount} 条对话记录" + (failed.Count > 0 ? "；没有移走的：" + string.Join("；", failed) : "");
     }
 }
