@@ -791,7 +791,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func submit(text: String) {
+    /// `steer` hands the message to the reply that is running instead of queueing it behind it.
+    func submit(text: String, steer: Bool = false) {
         guard let engine, let id = activeId else { return }
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let files = attachments[id] ?? []
@@ -803,9 +804,22 @@ final class AppModel: ObservableObject {
                 return
             }
             if let session = engine.session(id) { try await engine.requireProject(session.config) }
-            try engine.submit(id, text: value, attachments: files)
+            try engine.submit(id, text: value, attachments: files, steer: steer)
             self.attachments[id] = nil
             self.drafts[id] = ""
+        }
+    }
+
+    /// Moves a queued message back into the composer. An unsent draft is kept below it.
+    func editQueued(_ item: QueuedMessage, in id: String) {
+        guard let engine else { return }
+        perform {
+            try engine.cancelQueued(id, item: item.id)
+            let draft = self.drafts[id] ?? ""
+            self.drafts[id] = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? item.text : item.text + "\n\n" + draft
+            let attached = self.attachments[id] ?? []
+            self.attachments[id] = attached + item.attachments.filter { file in !attached.contains { $0.path == file.path } }
+            self.composerFocus = UUID()
         }
     }
 

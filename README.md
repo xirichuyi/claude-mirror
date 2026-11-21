@@ -18,6 +18,7 @@
 | Intel Mac | 可尝试使用对应 Mac 从源码构建；本次不提供已验证的 Intel 安装包 |
 | Electron 客户端 | 仓库保留跨平台实现，可从源码启动；与原生版功能尚未完全一致 |
 | Windows 原生客户端（预览） | C# / WinUI 3，Windows 10 1809+ / Windows 11 x64；从[统一稳定发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载 `Claude-Mirror-Setup-x64.exe`；首次统一发布之前使用 [Windows 首发安装包](https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.1-windows.1/Claude-Mirror-Setup-x64.exe)；[使用与构建说明](windows/README.md)，[下载 CI 工件](https://github.com/xirichuyi/claude-mirror/actions/workflows/windows.yml) |
+| Android 客户端（预览） | Kotlin / Jetpack Compose，Android 8.0+；目前从源码构建，见“[Android 客户端](#android-客户端)” |
 | Linux 本地客户端 | 可尝试 Electron 源码版本；未完成发行验收 |
 | 远端服务器 | 通过 SSH 访问；主要验证 Linux。安装脚本支持 Linux、macOS、WSL 的 Linux 环境 |
 
@@ -143,6 +144,29 @@ npm start
 
 此入口启动跨平台 Electron 界面，不会启动 SwiftUI 客户端。需要本机 Node.js、npm 和系统 OpenSSH；Linux 还需要图形桌面及 Electron 运行依赖。Windows/Linux 尚需平台验证，旧界面也不包含所有原生版新功能。
 
+### Android 客户端
+
+```sh
+cd android
+./gradlew assembleDebug        # 产物：app/build/outputs/apk/debug/app-debug.apk
+./gradlew test                 # 引擎与协议测试，会在本机运行真实的远端代理
+```
+
+需要 JDK 17、Android SDK（`compileSdk 37`）和 Node.js：构建时会用仓库里的 TypeScript 源码生成随 App 携带的服务端程序。
+
+手机端和 macOS 版走同一套 SSH 协议，不经过任何中转服务：
+
+- 添加服务器（地址、端口、用户名、项目目录），用密码或粘贴的私钥登录。密码和私钥用 Android Keystore 加密保存在本机。
+- 第一次连接要核对并确认服务器的密钥指纹；之后指纹变了会拒绝连接。
+- 对话、流式回复、工具调用、权限确认和 Claude 的提问。
+- 回复过程中可以排队或插队，队列可编辑、移除、清空；停止后队列暂停。
+- 输入框上方显示上下文已用 / 总量（需要服务端支持）。
+- 切到后台或断网不影响服务器上的回复，回到前台自动接回。
+
+目前没有的：导入服务器上已有的 Claude 历史、附件上传、模型切换、MCP 表单填写。
+
+`SshEndToEndTest` 默认跳过；设置 `CLAUDE_MIRROR_E2E_HOST` 等环境变量后，会通过真实 SSH 对一台准备好的服务器跑完整对话（说明见该文件开头）。
+
 ### 自行打包 DMG
 
 ```sh
@@ -180,7 +204,22 @@ sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
 - 使用系统 OpenSSH，支持 SSH config 别名、密码和密钥；保留主机指纹检查。
 - **已有 Claude：** 只验证能否运行，不覆盖、不升级、不改认证配置。
 - **没有 Claude：** 下载 [Claude 官方安装器](https://github.com/anthropics/claude-code#installation)并安装 stable 版本，由官方安装器选择平台和架构。
-- 安装后检查远端 Node.js ≥18.14；不满足时提示并返回非零状态，不擅自修改系统包。
+- 远端 Node.js 低于 18.14 或不存在时，把官方 Node.js 装到用户目录，不改系统包。
+- SSH 断开会杀后台进程的服务器上自动开启 `loginctl enable-linger`；需要管理员权限时先试免密 `sudo`，不行再给出要运行的命令。
+
+**用 root 登录的新服务器**再加三个选项，一条命令配好 Full Access 需要的普通执行账号：
+
+```sh
+sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app root@example.com
+```
+
+| 选项 | 作用 |
+| --- | --- |
+| `--runner 账号` | 新建普通账号并为它安装 Claude Code。同名账号已存在且不是本脚本创建的，直接拒绝，不修改已有账号 |
+| `--project 目录` | 目录不存在则创建；只给该账号这个目录的读写权限（ACL），父目录仅可穿越。缺少 `setfacl` 时用系统包管理器安装 `acl`。拒绝 `/root`、`/etc` 等系统目录 |
+| `--copy-login` | 把 root 的 `~/.claude/.credentials.json` 复制给该账号（仅此一个文件，权限 600）。不加则按脚本最后打印的命令登录一次 |
+
+选项在安装任何东西之前检查，重复运行不会重复创建。完成后在新对话选择 Full Access，执行账号填 `claude-runner`。
 - 不会自动登录、索取 API Key，也不会把本机 Claude 凭据传到服务器。
 
 如需登录，请在服务器交互式终端运行 `claude auth login`；新安装通常位于 `~/.local/bin/claude`。完成后回到客户端连接同一主机。安装器要求远端能访问官方站点；发行地区、网络或系统依赖问题会按实际错误显示。
@@ -258,7 +297,7 @@ agent-sync doctor               # 检查 hub、对端连通性和记忆冲突
 
 1. **连接服务器**：添加一个有名称的 SSH 主机，连接后自动发现该用户的 Claude 历史。
 2. **选择项目**：在左侧展开项目继续对话，或选择远端目录开始新对话。正文按需加载，不一次下载全部聊天。
-3. **发送任务**：输入消息；输入 `/` 搜索远端命令，使用模型菜单切换远端提供的模型。回复中可停止，也可输入下一条消息加入队列。
+3. **发送任务**：输入消息；输入 `/` 搜索远端命令，使用模型菜单切换远端提供的模型。回复中按 `Esc` 停止；`Enter` 把下一条消息加入队列，`⌘ Enter` 或队列里的“立即发送”让 Claude 在下一步就读到它，不中断当前回复。输入框右下角显示上下文已用 / 总量。
 4. **附加文件**：把本机文件拖入输入框，或点击 `＋`。上传完成后显示附件，发送时将远端绝对路径交给 Claude。
 5. **管理文件**：打开文件面板浏览服务器；每行 `…` 菜单提供重命名、下载、删除等操作。删除需确认，直接作用于服务器。
 6. **查看产物**：点击聊天中的文件链接预览；可编辑文本、下载副本或使用本机软件打开。
@@ -427,12 +466,13 @@ macOS 的「对话选项 → 高级选项 → 上下文缓存」可选择远端�
 
 Claude 拒绝以 root 运行该模式。Linux 上可保留 root SSH 连接，在**新对话**的“Claude 执行账号”填写普通账号；后端通过 `runuser` 真正降低子进程身份，使用该账号的 home、Claude 安装与登录，不继承 root 的凭据环境。已有对话不能切换执行账号。其他系统请直接通过普通用户 SSH 连接。
 
-可在远端以 root 创建专用账号（需安装 `acl` / `setfacl`）：
+在本机一条命令创建专用账号（见“远端一键准备”）：
 
 ```sh
-npm run setup-claude-user -- --user claude-runner --project '/opt/my-project'
-runuser -u claude-runner -- /home/claude-runner/.local/bin/claude auth login
+sh scripts/setup-remote.sh --runner claude-runner --project /opt/my-project root@example.com
 ```
+
+已经在服务器上有仓库时，也可以用旧的 `npm run setup-claude-user -- --user claude-runner --project '/opt/my-project'`，随后运行 `runuser -u claude-runner -- /home/claude-runner/.local/bin/claude auth login`。
 
 工具安装当前 Claude 可执行文件，并仅给指定项目添加账号 ACL（父目录仅授予路径穿越权限），不更改项目所有者。它仅创建新账号，不修改已有账号。不支持位于 `/root` 的项目，请使用独立项目目录。
 

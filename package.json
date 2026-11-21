@@ -8,6 +8,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test build/test/*.test.cjs",
+    "test:e2e": "npm run build && node --test build/test/*.e2e.cjs",
     "postinstall": "electron-builder install-app-deps",
     "pack": "electron-builder --mac dir",
     "build": "tsc -p tsconfig.bootstrap.json && node build/scripts/build.cjs",

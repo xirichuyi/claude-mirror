@@ -56,7 +56,7 @@ export function resolveClaudeExecution(directory: string, preferences: import('.
   if (!launcher) throw new Error('服务器缺少 runuser，请安装 util-linux 或直接连接普通用户');
   let fields: string[];
   try { fields = execFileSync('getent', ['passwd', requested], { encoding: 'utf8', timeout: 5000 }).trim().split(':'); }
-  catch { throw new Error(`执行账号 ${requested} 不存在，请先运行远端 setup-claude-user 工具或直接连接普通用户`); }
+  catch { throw new Error(`执行账号 ${requested} 不存在，请先在本机运行 sh scripts/setup-remote.sh --runner ${requested} --project <项目目录> <主机>，或直接连接普通用户`); }
   const uid = Number(fields[2]);
   if (fields.length !== 7 || fields[0] !== requested || !Number.isSafeInteger(uid) || uid <= 0 || !path.isAbsolute(fields[5])) throw new Error('Full Access 执行账号必须是有效的非 root 用户');
   const home = fields[5];
