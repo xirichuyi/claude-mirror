@@ -31,6 +31,51 @@ public class SystemSshTests
         Assert.NotEqual(LocalState.HostKey(direct), LocalState.HostKey(first));
     }
 
+    private static async Task<(int Exit, string Output, string Error)> Shell(string program, string[] arguments, byte[] input, string? home = null)
+    {
+        var info = new System.Diagnostics.ProcessStartInfo(program) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in arguments) info.ArgumentList.Add(argument);
+        if (home is not null) info.Environment["HOME"] = home;
+        using var process = System.Diagnostics.Process.Start(info)!;
+        var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
+        await process.StandardInput.BaseStream.WriteAsync(input); process.StandardInput.Close();
+        await process.WaitForExitAsync();
+        return (process.ExitCode, await output, await error);
+    }
+
+    /// An attachment for a conversation that runs as another account. A login that is not root keeps it in its own home.
+    [Fact]
+    public async Task AnAttachmentForAnExecutionAccountIsStoredAndItsPathPrinted()
+    {
+        Assert.Throws<ArgumentException>(() => RemoteAgent.UploadForAccountCommand("x; rm -rf /", new string('a', 64), "a.txt"));
+        if (OperatingSystem.IsWindows()) return; // The command is for the server's shell.
+        var home = Directory.CreateTempSubdirectory("mirror-upload-").FullName; var bytes = new byte[70_000]; new Random(5).NextBytes(bytes);
+        try
+        {
+            var (exit, path, error) = await Shell("/bin/sh", ["-c", RemoteAgent.UploadForAccountCommand("claude-runner", new string('a', 64), "it's a file.bin")], bytes, home);
+            Assert.True(exit == 0, error);
+            Assert.Equal(Path.Combine(home, ".cache/claude-mirror/attachments", new string('a', 64), "it's a file.bin"), path);
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+            Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
+        }
+        finally { Directory.Delete(home, true); }
+    }
+
+    /// The root case, run through sudo: the file ends up in the account's home, owned by it, readable only by it.
+    [Fact]
+    public async Task ARootLoginStoresAnAttachmentAsTheExecutionAccount()
+    {
+        if (Environment.GetEnvironmentVariable("CLAUDE_MIRROR_TEST_SUDO_ACCOUNT") is not { Length: > 0 } account) return;
+        var bytes = new byte[70_000]; new Random(6).NextBytes(bytes);
+        var (exit, path, error) = await Shell("sudo", ["sh", "-c", RemoteAgent.UploadForAccountCommand(account, new string('b', 64), "photo.png")], bytes);
+        Assert.True(exit == 0, error);
+        Assert.Matches($"^/home/{account}/\\.cache/claude-mirror/attachments/b{{64}}/photo\\.png$", path);
+        var (_, facts, _) = await Shell("sudo", ["stat", "-c", "%U %a %s", path], []);
+        Assert.Equal($"{account} 600 70000", facts.Trim());
+        var (read, _, denied) = await Shell("sudo", ["-u", account, "cat", path], []);
+        Assert.True(read == 0, denied);
+    }
+
     /// The installed OpenSSH client reads every option this app passes. `ssh -G` parses the command line and prints the result without connecting,
     /// so this runs against the real ssh.exe on a Windows build machine.
     [Fact]

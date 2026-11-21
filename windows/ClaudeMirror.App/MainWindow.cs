@@ -345,7 +345,7 @@ public sealed partial class MainWindow : Window
         return (await picker.PickSingleFileAsync())?.Path;
     }
     private async Task UploadAsync() { RequireAgent(); var file = await PickAsync(); if (file is not null) await AttachAsync(file); }
-    private async Task AttachAsync(string file) { status.Text = "上传中…"; var path = await RequireAgent().UploadAsync(file); prompt.Text += "\n附件：" + path; status.Text = "已上传"; }
+    private async Task AttachAsync(string file) { status.Text = "上传中…"; var path = await RequireAgent().UploadAsync(file, executionUser); prompt.Text += "\n附件：" + path; status.Text = "已上传"; }
     private async Task BrowseAsync()
     {
         var remote = RequireAgent(); var path = new TextBox { Text = directory.Text }; var entries = new StackPanel { Spacing = 4 };

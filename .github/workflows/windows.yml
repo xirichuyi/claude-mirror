@@ -36,10 +36,13 @@ jobs:
           sudo mkdir -p /run/sshd
           export CLAUDE_MIRROR_TEST_SSH_CONFIG="$(sh windows/ClaudeMirror.Tests/test-sshd.sh "$RUNNER_TEMP/mirror-sshd")"
           export CLAUDE_MIRROR_TEST_RESOURCES="$RUNNER_TEMP/server"
+          sudo useradd -m mirror-runner
+          export CLAUDE_MIRROR_TEST_SUDO_ACCOUNT=mirror-runner
           ssh -F "$CLAUDE_MIRROR_TEST_SSH_CONFIG" -o BatchMode=yes mirror-jumped 'echo ready' || { cat "$RUNNER_TEMP/mirror-sshd/sshd.log"; exit 1; }
           dotnet test windows/ClaudeMirror.Tests -c Release --filter "FullyQualifiedName~SystemSshTests" --logger "console;verbosity=normal" | tee "$RUNNER_TEMP/system-ssh.log"
           # A skipped test here would mean the server was not reached at all.
           ! grep -q "Skipped SystemSshTests" "$RUNNER_TEMP/system-ssh.log"
+          grep -q "Passed SystemSshTests.ARootLoginStoresAnAttachmentAsTheExecutionAccount" "$RUNNER_TEMP/system-ssh.log"
   native:
     runs-on: windows-2025
     steps:

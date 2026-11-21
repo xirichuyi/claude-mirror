@@ -252,10 +252,32 @@ public sealed class RemoteAgent : IDisposable
         await download.Output.CopyToAsync(file, lifetime.Token);
         if (await download.Exit != 0) throw new IOException(download.Error);
     }
-    public async Task<string> UploadAsync(string localPath)
+    /// <summary>
+    /// Stores an attachment where the account Claude runs as can read it. A root login writes it as that account, into that account's home:
+    /// root's own folders are closed to it, and writing as root into a folder the account controls would follow any link left there.
+    /// The command reads the file on stdin and prints the path it was stored at.
+    /// </summary>
+    public static string UploadForAccountCommand(string account, string hash, string name)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(account, "^[a-z_][a-z0-9_-]{0,31}$")) throw new ArgumentException("无效的 Claude 执行账号");
+        var temporary = name + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        return $"if [ \"$(id -u)\" = 0 ]; then home=$(getent passwd {account} | cut -d: -f6); run=\"$(command -v runuser || echo /usr/sbin/runuser) -u {account} --\"; else home=$HOME; run=; fi; "
+            + "test -n \"$home\" && $run sh -c 'umask 077; mkdir -p \"$1\" && cat > \"$1/$3\" && mv \"$1/$3\" \"$1/$2\" && printf %s \"$1/$2\"' sh "
+            + $"\"$home/.cache/claude-mirror/attachments/{hash}\" {Protocol.Quote(name)} {Protocol.Quote(temporary)}";
+    }
+    /// <param name="account">The execution account of the conversation the file is for; empty when Claude runs as the SSH user.</param>
+    public async Task<string> UploadAsync(string localPath, string account = "")
     {
         await using var file = File.OpenRead(localPath);
         var hash = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(file)).ToLowerInvariant(); file.Position = 0;
+        if (account.Length > 0)
+        {
+            using var stored = ssh!.Run(UploadForAccountCommand(account, hash, Path.GetFileName(localPath)), true, lifetime.Token);
+            using var reader = new StreamReader(stored.Output); var path = reader.ReadToEndAsync(lifetime.Token);
+            using (var input = stored.Input) await file.CopyToAsync(input, lifetime.Token);
+            if (await stored.Exit != 0 || (await path).Length == 0) throw new IOException(stored.Error.Trim().Length > 0 ? stored.Error.Trim() : $"无法把附件交给执行账号 {account}");
+            return await path;
+        }
         var folder = Home + "/.cache/claude-mirror/attachments/" + hash;
         var remote = folder + "/" + Path.GetFileName(localPath);
         using (var existing = ssh!.Run("test -f " + Protocol.Quote(remote), false, lifetime.Token))
