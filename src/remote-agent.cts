@@ -881,8 +881,9 @@ async function trashProjectHistory(request) {
 // Moves transcripts into a trash folder inside an execution account's home, as that account.
 // Nothing here runs with root's rights, so a link the account planted leads only where it could go anyway.
 // A transcript that cannot be moved puts the earlier ones back, without overwriting a new one.
+// The folder's mode is set outright: a default ACL on the home overrides umask.
 const TRASH_AS_ACCOUNT = `umask 077; trash=$1; projects=$2; shift 2
-mkdir -p "$trash" && cat > "$trash/manifest.json" || exit 1
+mkdir -p "$trash" && chmod 700 "$trash" && cat > "$trash/manifest.json" || exit 1
 for reference; do
   mkdir -p "$trash/\${reference%/*}" && mv "$projects/$reference" "$trash/$reference" && continue
   for item; do [ -f "$trash/$item" ] && ln "$trash/$item" "$projects/$item" 2>/dev/null && rm -f "$trash/$item"; done
