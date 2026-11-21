@@ -53,10 +53,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -72,8 +77,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import claudemirror.app.AppModel
 import claudemirror.core.ChatSession
 import claudemirror.core.ConnectionState
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 
 private val PermissionModes = listOf(
@@ -179,18 +182,33 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
     // Whether the view keeps up with the reply. Only the reader's own scrolling changes it:
     // text arriving, the keyboard opening or the screen turning must not end it.
     var following by rememberSaveable { mutableStateOf(true) }
+    val reader = remember(list) {
+        object : NestedScrollConnection {
+            // Only gestures come through here; the scrolling done below does not.
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (consumed.y > 0f) following = false else if (!list.canScrollForward) following = true
+                return Offset.Zero
+            }
+        }
+    }
     val end by rememberUpdatedState(rows.size)
     LaunchedEffect(list) {
-        launch { snapshotFlow { list.isScrollInProgress }.drop(1).collect { moving -> if (!moving) following = !list.canScrollForward } }
-        snapshotFlow { list.layoutInfo.viewportSize }.collect { if (following && !list.isScrollInProgress) list.scrollToItem(end) }
-    }
-    LaunchedEffect(session.messages, session.status) {
-        if (following && !list.isScrollInProgress) list.scrollToItem(rows.size)
+        // Whatever makes the list longer than the window, the end comes back into view.
+        snapshotFlow { following && list.canScrollForward && !list.isScrollInProgress }.collect {
+            var place = -1 to -1
+            while (following && list.canScrollForward && !list.isScrollInProgress) {
+                list.scrollToItem(end)
+                // As far as it goes: a request taller than the window starts at its top.
+                if (place == list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset) break
+                place = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
+                withFrameNanos { }
+            }
+        }
     }
     // A request Claude is waiting on is brought into view, wherever the reader was.
     val asked = session.permissions.firstOrNull()?.id
     LaunchedEffect(asked) { if (asked != null) list.scrollToItem(rows.size) }
-    LazyColumn(modifier.fillMaxWidth(), state = list) {
+    LazyColumn(modifier.fillMaxWidth().nestedScroll(reader), state = list) {
         items(rows.size, key = { rows[it].first }) { index ->
             val (_, message, part) = rows[index]
             when (part) {

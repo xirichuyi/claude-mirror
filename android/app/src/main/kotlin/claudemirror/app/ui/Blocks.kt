@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import claudemirror.core.Block
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.model.rememberMarkdownState
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -76,7 +77,10 @@ fun UserBubble(text: String, caption: String? = null, faded: Boolean = false) {
 fun BlockView(block: Block) {
     when (block.type) {
         "text" -> if (!block.text.isNullOrBlank()) {
-            SelectionContainer { Markdown(block.text!!, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) }
+            // Laid out at full height from the first frame and while more text arrives; a block
+            // that is empty until it has been parsed makes the list lose its place.
+            val markdown = rememberMarkdownState(block.text!!, retainState = true, immediate = true)
+            SelectionContainer { Markdown(markdown, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) }
         }
         "thinking" -> Thinking(block)
         "tool" -> ToolCard(block)
