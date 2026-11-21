@@ -180,7 +180,22 @@ sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
 - 使用系统 OpenSSH，支持 SSH config 别名、密码和密钥；保留主机指纹检查。
 - **已有 Claude：** 只验证能否运行，不覆盖、不升级、不改认证配置。
 - **没有 Claude：** 下载 [Claude 官方安装器](https://github.com/anthropics/claude-code#installation)并安装 stable 版本，由官方安装器选择平台和架构。
-- 安装后检查远端 Node.js ≥18.14；不满足时提示并返回非零状态，不擅自修改系统包。
+- 远端 Node.js 低于 18.14 或不存在时，把官方 Node.js 装到用户目录，不改系统包。
+- SSH 断开会杀后台进程的服务器上自动开启 `loginctl enable-linger`；需要管理员权限时先试免密 `sudo`，不行再给出要运行的命令。
+
+**用 root 登录的新服务器**再加三个选项，一条命令配好 Full Access 需要的普通执行账号：
+
+```sh
+sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app root@example.com
+```
+
+| 选项 | 作用 |
+| --- | --- |
+| `--runner 账号` | 新建普通账号并为它安装 Claude Code。同名账号已存在且不是本脚本创建的，直接拒绝，不修改已有账号 |
+| `--project 目录` | 目录不存在则创建；只给该账号这个目录的读写权限（ACL），父目录仅可穿越。缺少 `setfacl` 时用系统包管理器安装 `acl`。拒绝 `/root`、`/etc` 等系统目录 |
+| `--copy-login` | 把 root 的 `~/.claude/.credentials.json` 复制给该账号（仅此一个文件，权限 600）。不加则按脚本最后打印的命令登录一次 |
+
+选项在安装任何东西之前检查，重复运行不会重复创建。完成后在新对话选择 Full Access，执行账号填 `claude-runner`。
 - 不会自动登录、索取 API Key，也不会把本机 Claude 凭据传到服务器。
 
 如需登录，请在服务器交互式终端运行 `claude auth login`；新安装通常位于 `~/.local/bin/claude`。完成后回到客户端连接同一主机。安装器要求远端能访问官方站点；发行地区、网络或系统依赖问题会按实际错误显示。
@@ -427,12 +442,13 @@ macOS 的「对话选项 → 高级选项 → 上下文缓存」可选择远端�
 
 Claude 拒绝以 root 运行该模式。Linux 上可保留 root SSH 连接，在**新对话**的“Claude 执行账号”填写普通账号；后端通过 `runuser` 真正降低子进程身份，使用该账号的 home、Claude 安装与登录，不继承 root 的凭据环境。已有对话不能切换执行账号。其他系统请直接通过普通用户 SSH 连接。
 
-可在远端以 root 创建专用账号（需安装 `acl` / `setfacl`）：
+在本机一条命令创建专用账号（见“远端一键准备”）：
 
 ```sh
-npm run setup-claude-user -- --user claude-runner --project '/opt/my-project'
-runuser -u claude-runner -- /home/claude-runner/.local/bin/claude auth login
+sh scripts/setup-remote.sh --runner claude-runner --project /opt/my-project root@example.com
 ```
+
+已经在服务器上有仓库时，也可以用旧的 `npm run setup-claude-user -- --user claude-runner --project '/opt/my-project'`，随后运行 `runuser -u claude-runner -- /home/claude-runner/.local/bin/claude auth login`。
 
 工具安装当前 Claude 可执行文件，并仅给指定项目添加账号 ACL（父目录仅授予路径穿越权限），不更改项目所有者。它仅创建新账号，不修改已有账号。不支持位于 `/root` 的项目，请使用独立项目目录。
 
