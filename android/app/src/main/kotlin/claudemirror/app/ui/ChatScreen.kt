@@ -51,6 +51,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +72,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import claudemirror.app.AppModel
 import claudemirror.core.ChatSession
 import claudemirror.core.ConnectionState
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 
 private val PermissionModes = listOf(
@@ -121,33 +125,36 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
         },
         snackbarHost = { Snackbar(snackbar) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-            if (session.status == "detached" || session.transportError != null) {
-                val host = model.host(session.hostId)
-                Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            session.transportError ?: (connections[session.hostId] as? ConnectionState.Failed)?.error?.message ?: "连接已断开，回复仍在服务器上进行",
-                            Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall,
-                        )
-                        if (host != null) TextButton(onClick = { model.reconnect(host) }) { Text("重新连接") }
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
+            // What is left of a phone on its side, or under its keyboard: the composer takes one line.
+            val compact = maxHeight < 320.dp
+            val wide = maxWidth >= 600.dp
+            val queueRoom = minOf(maxHeight / 4, 144.dp)
+            Column(Modifier.fillMaxSize()) {
+                if (session.status == "detached" || session.transportError != null) {
+                    val host = model.host(session.hostId)
+                    Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                session.transportError ?: (connections[session.hostId] as? ConnectionState.Failed)?.error?.message ?: "连接已断开，回复仍在服务器上进行",
+                                Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall,
+                            )
+                            if (host != null) TextButton(onClick = { model.reconnect(host) }) { Text("重新连接") }
+                        }
                     }
                 }
-            }
-            // The composer keeps its place below, however short the window and however much waits above it.
-            BoxWithConstraints(Modifier.weight(1f)) {
-                val queueRoom = minOf(maxHeight / 3, 144.dp)
-                Column {
+                // The composer keeps its place below, however short the window and however much waits above it.
+                Column(Modifier.weight(1f)) {
                     Transcript(session, Modifier.weight(1f)) { permission, answer -> model.respond(sessionId, permission, answer) }
                     // Editing a queued message must not throw away what is already being written.
                     Queue(session, model, queueRoom, onEdit = { item -> draft = if (draft.isBlank()) item else draft.trimEnd() + "\n" + item })
                 }
+                Composer(
+                    session, draft, compact, wide, onDraft = { draft = it },
+                    onSend = { steer -> if (model.submit(sessionId, draft, steer)) draft = "" },
+                    onStop = { model.stop(sessionId) },
+                )
             }
-            Composer(
-                session, draft, onDraft = { draft = it },
-                onSend = { steer -> if (model.submit(sessionId, draft, steer)) draft = "" },
-                onStop = { model.stop(sessionId) },
-            )
         }
     }
 }
@@ -163,20 +170,26 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
         }
     }
     val last = session.messages.lastOrNull()
-    val growth = rows.size to (last?.blocks?.lastOrNull()?.let { (it.text?.length ?: 0) + (it.output?.length ?: 0) } ?: 0)
-    // Follows the reply while the reader is at the end; scrolling up to read stops it.
-    LaunchedEffect(growth) {
-        if (rows.isNotEmpty() && (!list.canScrollForward || list.firstVisibleItemIndex == 0 && !list.canScrollBackward)) list.scrollToItem(rows.size, 0)
-    }
-    // A request Claude is waiting on is brought into view, wherever the reader was.
-    val asked = session.permissions.firstOrNull()?.id
-    LaunchedEffect(asked) { if (asked != null) list.scrollToItem(rows.size + 1) }
     if (rows.isEmpty() && session.permissions.isEmpty()) {
         Box(modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
             Text("在 ${session.directory} 里开始对话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
+    // Whether the view keeps up with the reply. Only the reader's own scrolling changes it:
+    // text arriving, the keyboard opening or the screen turning must not end it.
+    var following by rememberSaveable { mutableStateOf(true) }
+    val end by rememberUpdatedState(rows.size)
+    LaunchedEffect(list) {
+        launch { snapshotFlow { list.isScrollInProgress }.drop(1).collect { moving -> if (!moving) following = !list.canScrollForward } }
+        snapshotFlow { list.layoutInfo.viewportSize }.collect { if (following && !list.isScrollInProgress) list.scrollToItem(end) }
+    }
+    LaunchedEffect(session.messages, session.status) {
+        if (following && !list.isScrollInProgress) list.scrollToItem(rows.size)
+    }
+    // A request Claude is waiting on is brought into view, wherever the reader was.
+    val asked = session.permissions.firstOrNull()?.id
+    LaunchedEffect(asked) { if (asked != null) list.scrollToItem(rows.size) }
     LazyColumn(modifier.fillMaxWidth(), state = list) {
         items(rows.size, key = { rows[it].first }) { index ->
             val (_, message, part) = rows[index]
@@ -241,47 +254,61 @@ private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (Stri
 }
 
 @Composable
-private fun Composer(session: ChatSession, draft: String, onDraft: (String) -> Unit, onSend: (steer: Boolean) -> Unit, onStop: () -> Unit) {
+private fun Composer(
+    session: ChatSession, draft: String, compact: Boolean, wide: Boolean,
+    onDraft: (String) -> Unit, onSend: (steer: Boolean) -> Unit, onStop: () -> Unit,
+) {
     val replying = session.remoteTask != null
     val ready = draft.isNotBlank()
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        OutlinedTextField(
-            draft, onDraft,
-            Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
-                // Hardware keyboards only; on-screen keyboards insert the newline themselves.
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when {
-                    event.key == Key.Escape && session.isBusy -> { onStop(); true }
-                    event.key == Key.Enter && !event.isShiftPressed && ready -> { onSend(replying && (event.isCtrlPressed || event.isMetaPressed)); true }
-                    else -> false
-                }
-            },
-            placeholder = { Text(if (replying) "回复中：可以排队，或插入当前回复" else "给 Claude 发消息") },
-            maxLines = 6,
-        )
+    val actions: @Composable () -> Unit = {
+        if (session.isBusy) {
+            FilledIconButton(
+                onClick = onStop, enabled = session.status != "stopping",
+                colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
+            ) { Icon(Icons.Filled.Stop, "停止") }
+        }
+        if (replying) {
+            FilledTonalIconButton(onClick = { onSend(true) }, enabled = ready) { Icon(Icons.Filled.Bolt, "插队：让 Claude 在下一步读取") }
+            FilledIconButton(onClick = { onSend(false) }, enabled = ready) { Icon(Icons.AutoMirrored.Filled.Send, "排队：回复结束后发送") }
+        } else {
+            FilledIconButton(onClick = { onSend(false) }, enabled = ready) { Icon(Icons.AutoMirrored.Filled.Send, "发送") }
+        }
+    }
+    // How full Claude's context window is, as last reported by the server.
+    val meter: @Composable (bar: Boolean) -> Unit = { bar ->
+        session.context?.let { context ->
+            if (bar) LinearProgressIndicator(
+                progress = { context.fraction }, modifier = Modifier.width(56.dp),
+                trackColor = MaterialTheme.colorScheme.surfaceVariant, gapSize = 0.dp, drawStopIndicator = {},
+            )
+            Text("上下文 ${context.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = if (compact) 4.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // The field keeps its place in both layouts, so it keeps the keyboard when one turns into the other.
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // How full Claude's context window is, as last reported by the server.
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                session.context?.let { context ->
-                    LinearProgressIndicator(
-                        progress = { context.fraction }, modifier = Modifier.width(56.dp),
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant, gapSize = 0.dp, drawStopIndicator = {},
-                    )
-                    Text("上下文 ${context.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+            OutlinedTextField(
+                draft, onDraft,
+                Modifier.weight(1f).onPreviewKeyEvent { event ->
+                    // Hardware keyboards only; on-screen keyboards insert the newline themselves.
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when {
+                        event.key == Key.Escape && session.isBusy -> { onStop(); true }
+                        event.key == Key.Enter && !event.isShiftPressed && ready -> { onSend(replying && (event.isCtrlPressed || event.isMetaPressed)); true }
+                        else -> false
+                    }
+                },
+                placeholder = { Text(if (replying) "回复中：可以排队，或插入当前回复" else "给 Claude 发消息", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                maxLines = if (compact) 2 else 6,
+            )
+            if (compact) {
+                if (wide) meter(false)
+                actions()
             }
-            if (session.isBusy) {
-                FilledIconButton(
-                    onClick = onStop, enabled = session.status != "stopping",
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
-                ) { Icon(Icons.Filled.Stop, "停止") }
-            }
-            if (replying) {
-                FilledTonalIconButton(onClick = { onSend(true) }, enabled = ready) { Icon(Icons.Filled.Bolt, "插队：让 Claude 在下一步读取") }
-                FilledIconButton(onClick = { onSend(false) }, enabled = ready) { Icon(Icons.AutoMirrored.Filled.Send, "排队：回复结束后发送") }
-            } else {
-                FilledIconButton(onClick = { onSend(false) }, enabled = ready) { Icon(Icons.AutoMirrored.Filled.Send, "发送") }
-            }
+        }
+        if (!compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { meter(true) }
+            actions()
         }
     }
 }
