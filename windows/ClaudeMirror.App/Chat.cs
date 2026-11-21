@@ -204,12 +204,10 @@ public sealed partial class MainWindow
         };
     }
 
-    private static readonly (string Value, string Label, string Hint)[] PermissionModes =
-    [
-        ("default", "默认权限", "每次操作前询问"), ("plan", "计划", "只制定计划，不修改文件"),
-        ("acceptEdits", "自动编辑", "自动接受文件编辑"), ("dontAsk", "拒绝未授权", "未授权的操作直接拒绝")
-    ];
     private string permissionMode = "default";
+    /// The server account Claude runs as when SSH logs in as root; empty means the SSH user.
+    private string executionUser = "";
+    private bool AutoModeSupported => selectedModel is null || selectedModel.Auto;
     private Button permissionMenu = null!;
 
     /// The permission mode for this conversation; a change reaches a running task at once.
@@ -217,23 +215,80 @@ public sealed partial class MainWindow
     {
         permissionMenu = ActionButton("权限模式", "\uE72E", () => Task.CompletedTask, true);
         var menu = new MenuFlyout();
-        foreach (var mode in PermissionModes)
+        menu.Opening += (_, _) =>
         {
-            var choice = new MenuFlyoutItem { Text = mode.Label + " · " + mode.Hint };
-            choice.Click += async (_, _) => await RunAsync(async () =>
+            menu.Items.Clear();
+            foreach (var mode in PermissionModes.For(AutoModeSupported || permissionMode == "auto"))
             {
-                if (taskId is not null && agent?.Connected == true)
-                    await agent.TaskCommandAsync(taskId, new { kind = "control", action = "permission", value = mode.Value });
-                permissionMode = mode.Value; UpdatePermissionTitle();
-            });
-            menu.Items.Add(choice);
-        }
+                var choice = new ToggleMenuFlyoutItem { Text = mode.Label + " · " + mode.Hint, IsChecked = mode.Value == permissionMode };
+                choice.Click += async (_, _) => await RunAsync(() => SetPermissionModeAsync(mode.Value));
+                menu.Items.Add(choice);
+            }
+        };
         permissionMenu.Flyout = menu; UpdatePermissionTitle();
         return permissionMenu;
     }
+    private async Task SetPermissionModeAsync(string mode)
+    {
+        var account = executionUser;
+        if (mode == PermissionModes.FullAccess && permissionMode != mode)
+        {
+            if (await AskFullAccessAsync() is not { } chosen) return;
+            account = chosen;
+        }
+        if (taskId is not null && agent?.Connected == true)
+            await agent.TaskCommandAsync(taskId, new { kind = "control", action = "permission", value = mode });
+        permissionMode = mode; executionUser = account; UpdatePermissionTitle();
+    }
+    /// Explains Full Access, asks the server whether this login may use it, and returns the account to run as; null when the user backs out.
+    private async Task<string?> AskFullAccessAsync()
+    {
+        var remote = RequireAgent();
+        bool started = taskId is not null || conversation?.SessionId is not null;
+        var current = FullAccessStatus.From(await remote.CallAsync("task", new { operation = "inspect", digest = remote.Digest, directory = directory.Text, action = "permissionStatus", preferences = new { executionUser } }));
+        var panel = new StackPanel { Spacing = 10, MaxWidth = 420 };
+        panel.Children.Add(new TextBlock { Text = "Full Access 会跳过 Claude 的操作确认：它可以直接修改文件和执行命令，只受执行账号的系统权限限制。", TextWrapping = TextWrapping.Wrap });
+        var account = new TextBox { Header = "Claude 执行账号", PlaceholderText = "例如 claude-runner", Text = executionUser, IsEnabled = !started };
+        var problem = new TextBlock { Foreground = danger, FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        if (current.NeedsAccount || executionUser.Length > 0)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = started
+                    ? "这个对话以 root 运行，Claude 不允许 root 使用 Full Access。请新建对话，再选择一个普通执行账号。"
+                    : "SSH 登录的是 root，Claude 不允许 root 使用 Full Access。请填写服务器上已配置好的普通账号；它使用独立的登录和历史记录。",
+                TextWrapping = TextWrapping.Wrap, Foreground = muted, FontSize = 12
+            });
+            panel.Children.Add(account);
+        }
+        panel.Children.Add(problem);
+        var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = "开启 Full Access？", Content = panel, PrimaryButtonText = "开启", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
+        string? result = null;
+        dialog.PrimaryButtonClick += async (_, e) =>
+        {
+            var wait = e.GetDeferral();
+            try
+            {
+                var name = PermissionModes.ExecutionAccount(account.Text, started, executionUser);
+                // The server resolves the account and refuses root, a missing account, or one that cannot use this project.
+                var status = FullAccessStatus.From(await remote.CallAsync("task", new { operation = "inspect", digest = remote.Digest, directory = directory.Text, action = "permissionStatus", preferences = new { permissionMode = PermissionModes.FullAccess, executionUser = name } }));
+                if (!status.Available) throw new IOException("这个账号不能使用 Full Access");
+                result = name;
+            }
+            catch (Exception error) { e.Cancel = true; problem.Text = error.Message; problem.Visibility = Visibility.Visible; }
+            finally { wait.Complete(); }
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary ? result : null;
+    }
+    /// Another conversation runs as its own account, and Full Access is granted to one conversation at a time.
+    private void UseAccount(string? account)
+    {
+        executionUser = account ?? "";
+        if (permissionMode == PermissionModes.FullAccess) { permissionMode = "default"; UpdatePermissionTitle(); }
+    }
     private void UpdatePermissionTitle()
     {
-        var label = PermissionModes.First(mode => mode.Value == permissionMode).Label;
+        var label = PermissionModes.Label(permissionMode);
         permissionMenu.Content = Row(new FontIcon { Glyph = "\uE72E", FontSize = 13 }, new TextBlock { Text = label }, new FontIcon { Glyph = "\uE70D", FontSize = 10 });
     }
 }

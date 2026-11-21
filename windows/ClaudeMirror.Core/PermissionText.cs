@@ -83,3 +83,36 @@ public static class PermissionText
         return string.Join(", ", picked.Concat(text.Length > 0 ? new[] { text } : Array.Empty<string>()));
     }
 }
+
+/// <summary>What the server said about running Claude without confirmations (the inspect action <c>permissionStatus</c>).</summary>
+public sealed record FullAccessStatus(bool Available, bool NeedsAccount, string Account)
+{
+    public static FullAccessStatus From(JsonNode? status) => new(
+        status?["fullAccessAvailable"]?.GetValue<bool>() == true,
+        status?["requiresExecutionUser"]?.GetValue<bool>() == true,
+        status?["executionUser"]?.GetValue<string>() ?? "");
+}
+
+public static class PermissionModes
+{
+    public const string FullAccess = "bypassPermissions";
+    public static readonly (string Value, string Label, string Hint)[] All =
+    [
+        ("default", "默认权限", "每次操作前询问"), ("plan", "计划", "只制定计划，不修改文件"),
+        ("acceptEdits", "自动编辑", "自动接受文件编辑"), ("dontAsk", "拒绝未授权", "未授权的操作直接拒绝"),
+        (FullAccess, "Full Access", "跳过操作确认"), ("auto", "自动权限", "由 Claude 判断是否需要确认")
+    ];
+    /// <summary>The modes to offer. Auto is listed only when the chosen model reports support for it.</summary>
+    public static IEnumerable<(string Value, string Label, string Hint)> For(bool autoSupported) =>
+        All.Where(mode => mode.Value != "auto" || autoSupported);
+    public static string Label(string value) => All.FirstOrDefault(mode => mode.Value == value).Label ?? value;
+    /// <summary>The account name Claude runs as, or an error. Root cannot run Full Access, and the account can only be chosen before the conversation starts.</summary>
+    public static string ExecutionAccount(string? typed, bool conversationStarted, string current)
+    {
+        var name = (typed ?? "").Trim();
+        if (name == current) return name;
+        if (conversationStarted) throw new IOException("执行账号会改变登录与历史记录的位置，请新建对话后再选择");
+        if (name.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-z_][a-z0-9_-]{0,31}$")) throw new IOException("执行账号只能是服务器上的普通用户名，例如 claude-runner");
+        return name;
+    }
+}

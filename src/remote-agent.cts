@@ -10,6 +10,7 @@ import path = require('node:path');
 import crypto = require('node:crypto');
 import zlib = require('node:zlib');
 import { spawn, execFile, execFileSync } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 const HOME = os.homedir();
 const expand = value => value === '~' ? HOME : value.startsWith('~/') ? path.join(HOME, value.slice(2)) : value;
@@ -515,8 +516,20 @@ async function transfer(request) {
 // ---------------------------------------------------------------- history
 
 const CLAUDE_ROOT = () => expand(process.env.CLAUDE_CONFIG_DIR || '~/.claude');
-const PROJECTS = () => path.join(CLAUDE_ROOT(), 'projects');
-const INDEX_DIRECTORY = () => path.join(CLAUDE_ROOT(), 'remotecc-index');
+// A root login may read the transcripts of the account it runs Claude as (request.account).
+// The index for them stays in root's own folder, so nothing is written into the other home.
+const historyScope = new AsyncLocalStorage<{ account: string, home: string }>();
+const PROJECTS = () => { const scope = historyScope.getStore(); return scope ? path.join(scope.home, '.claude', 'projects') : path.join(CLAUDE_ROOT(), 'projects'); };
+const INDEX_DIRECTORY = () => { const scope = historyScope.getStore(); return path.join(CLAUDE_ROOT(), 'remotecc-index', ...(scope ? ['accounts', scope.account] : [])); };
+function accountHistory(account, current = os.userInfo(), lookup = name => execFileSync('getent', ['passwd', name], { encoding: 'utf8', timeout: 5000 })) {
+  if (typeof account !== 'string' || !/^[a-z_][a-z0-9_-]{0,31}$/.test(account)) throw new Error('无效的 Claude 执行账号');
+  if (current.uid !== 0) throw new Error('只有 root 登录可以读取执行账号的历史');
+  let fields;
+  try { fields = lookup(account).trim().split(':'); } catch { throw new Error(`执行账号 ${account} 不存在`); }
+  if (fields.length !== 7 || fields[0] !== account || !(Number(fields[2]) > 0) || !path.isAbsolute(fields[5])) throw new Error('执行账号必须是有效的非 root 用户');
+  return { account, home: fields[5] };
+}
+const forAccount = operation => request => request.account ? historyScope.run(accountHistory(request.account), () => operation(request)) : operation(request);
 const SESSION_FILE = /^[0-9a-fA-F-]{36}\.jsonl$/;
 const WINDOW = 65536, MAX_LINE = 16 * MEGABYTE;
 const listSnapshots = new Map();
@@ -852,7 +865,7 @@ async function trashProjectHistory(request) {
   return { count: moved.length, references: selected.map(item => item.reference), trash };
 }
 
-const historyOperations = { list: historyList, messages: historyMessages, projects: projectDirectories, trashProject: trashProjectHistory };
+const historyOperations = { list: forAccount(historyList), messages: forAccount(historyMessages), projects: projectDirectories, trashProject: trashProjectHistory };
 
 // ---------------------------------------------------------------- persistent tasks
 
@@ -1251,5 +1264,5 @@ if (require.main === module) {
   } else serve();
 }
 
-module.exports = { fileOperations, historyOperations, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
+module.exports = { fileOperations, historyOperations, historyScope, accountHistory, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
   processCommand, persistenceWarning, workerCommand, parseAuthStatus };

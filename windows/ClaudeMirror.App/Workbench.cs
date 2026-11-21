@@ -58,7 +58,7 @@ public sealed partial class MainWindow
             if(model){
                 foreach(var option in availableModels){
                     var choice=new MenuFlyoutItem {Text=option.Label};
-                    choice.Click+=(_,_)=>{selectedModel=option; UpdatePickerTitle();};menu.Items.Add(choice);
+                    choice.Click+=(_,_)=>{selectedModel=option; UpdatePickerTitle(); if(permissionMode=="auto"&&!option.Auto){permissionMode="default"; UpdatePermissionTitle(); status.Text="这个模型不支持自动权限，已改回默认权限";}};menu.Items.Add(choice);
                 }
             }else{
                 foreach(var name in availableCommands){

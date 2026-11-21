@@ -34,7 +34,7 @@ public sealed partial class MainWindow : Window
     private MessageView? reply;
     private readonly SendQueue queue = new();
     private bool sending;
-    private sealed record ModelChoice(string Value, string Label);
+    private sealed record ModelChoice(string Value, string Label, bool Auto = false);
     private static SolidColorBrush Brush(byte r, byte g, byte b) => new(Windows.UI.Color.FromArgb(255, r, g, b));
 
     public MainWindow()
@@ -171,21 +171,30 @@ public sealed partial class MainWindow : Window
     private RemoteAgent RequireAgent() => agent?.Connected == true ? agent : throw new IOException(agent?.SshConnected == true ? "服务器还需要设置，请先按首页提示完成" : "请先连接服务器");
     private async Task RefreshHistoryAsync()
     {
-        var remote = RequireAgent(); var sessions = new List<Conversation>(); object offset = 0;
-        do
+        var remote = RequireAgent(); var sessions = new List<Conversation>(); var unread = new List<string>();
+        // Conversations run as another account keep their transcripts in that account's home.
+        foreach (var account in new string?[] { null }.Concat(local.Accounts.GetValueOrDefault(LocalState.HostKey(host!)) ?? []))
         {
-            var page = await remote.CallAsync("history", new { operation = "list", offset });
-            foreach (var item in page["sessions"]!.AsArray()) sessions.Add(new(item!["name"]!.GetValue<string>(), item["directory"]?.GetValue<string>() ?? remote.Home, item["sessionId"]?.GetValue<string>(), item["reference"]?.GetValue<string>()));
-            if (page["nextOffset"] is null) break; offset = page["nextOffset"]!.GetValue<string>();
-        } while (true);
+            object offset = 0;
+            try
+            {
+                do
+                {
+                    var page = await remote.CallAsync("history", new { operation = "list", offset, account });
+                    foreach (var item in page["sessions"]!.AsArray()) sessions.Add(new(item!["name"]!.GetValue<string>(), item["directory"]?.GetValue<string>() ?? remote.Home, item["sessionId"]?.GetValue<string>(), item["reference"]?.GetValue<string>(), account));
+                    if (page["nextOffset"] is null) break; offset = page["nextOffset"]!.GetValue<string>();
+                } while (true);
+            }
+            catch (IOException) when (account is not null) { unread.Add(account); }
+        }
         history = sessions; RenderHistory(); RefreshWorkbench();
-        status.Text = $"已同步 {sessions.Count} 条会话";
+        status.Text = $"已同步 {sessions.Count} 条会话" + (unread.Count > 0 ? "；读不到执行账号 " + string.Join("、", unread) + " 的历史" : "");
     }
     private async Task NewConversationAsync()
     {
         if (busy) throw new IOException("请先停止当前回复");
         await ConfirmLeavingQueueAsync();
-        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); queue.Clear(); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
+        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); queue.Clear(); UseAccount(null); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
     }
     /// Queued prompts belong to the open conversation. Leaving it asks first; declining keeps the conversation and stops the caller.
@@ -204,9 +213,10 @@ public sealed partial class MainWindow : Window
         if (busy) throw new IOException("请先停止当前回复");
         // Reopening the same conversation keeps its queued prompts.
         if (!IsCurrent(selected)) { await ConfirmLeavingQueueAsync(); queue.Clear(); }
+        if (!IsCurrent(selected)) UseAccount(selected.Account);
         conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; RenderQueue(); RenderPermissions(null, null);
         RefreshWorkbench(); RenderHistory();
-        var page = await RequireAgent().CallAsync("history", new { operation = "messages", reference = selected.Reference });
+        var page = await RequireAgent().CallAsync("history", new { operation = "messages", reference = selected.Reference, account = selected.Account });
         foreach (var message in History.Messages(page["records"] as JsonArray)) AddMessage("", Presentation.Text(message["role"]) == "user").Show(message);
         taskKey = LocalState.HostKey(host!) + "|" + selected.SessionId;
         taskId = local.Tasks.GetValueOrDefault(taskKey);
@@ -217,8 +227,8 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var remote = RequireAgent(); var caps = await remote.CallAsync("task", new { operation = "inspect", digest = remote.Digest, directory = directory.Text, action = "catalogue" });
-            availableModels = caps["models"]?.AsArray().Select(m => new ModelChoice(m!["value"]!.GetValue<string>(), m["displayName"]?.GetValue<string>() ?? m["value"]!.GetValue<string>())).ToList() ?? [];
+            var remote = RequireAgent(); var caps = await remote.CallAsync("task", new { operation = "inspect", digest = remote.Digest, directory = directory.Text, action = "catalogue", preferences = new { executionUser } });
+            availableModels = caps["models"]?.AsArray().Select(m => new ModelChoice(m!["value"]!.GetValue<string>(), m["displayName"]?.GetValue<string>() ?? m["value"]!.GetValue<string>(), m["supportsAutoMode"]?.GetValue<bool>() == true)).ToList() ?? [];
             availableCommands = caps["commands"]?.AsArray().Select(c => c!["name"]!.GetValue<string>()).ToList() ?? [];
         }
         catch (Exception e) { status.Text = "能力读取失败：" + e.Message; }
@@ -244,8 +254,8 @@ public sealed partial class MainWindow : Window
             if (taskId is null)
             {
                 taskId = Guid.NewGuid().ToString(); taskKey = LocalState.HostKey(host!) + "|" + (conversation?.SessionId ?? taskId);
-                local.Tasks[taskKey] = taskId; local.Save();
-                await remote.CallAsync("task", new { operation = "start", taskId, digest = remote.Digest, request = new { session = new { id = Guid.NewGuid().ToString(), host = host!.Host, directory = directory.Text, name = "Windows 对话", remoteSessionId = conversation?.SessionId, messages = new[] { message }, permissions = Array.Empty<object>(), preferences = new { selectedModel = selectedModel?.Value ?? "", permissionMode } }, prompt = text } });
+                local.Tasks[taskKey] = taskId; local.RememberAccount(LocalState.HostKey(host!), executionUser); local.Save();
+                await remote.CallAsync("task", new { operation = "start", taskId, digest = remote.Digest, request = new { session = new { id = Guid.NewGuid().ToString(), host = host!.Host, directory = directory.Text, name = "Windows 对话", remoteSessionId = conversation?.SessionId, messages = new[] { message }, permissions = Array.Empty<object>(), preferences = new { selectedModel = selectedModel?.Value ?? "", permissionMode, executionUser } }, prompt = text } });
                 await WatchCurrentAsync();
             }
             else
@@ -277,7 +287,7 @@ public sealed partial class MainWindow : Window
         if (state["remoteSessionId"] is JsonValue session && taskId is not null)
         {
             var sessionId = session.GetValue<string>();
-            conversation = new Conversation(conversation?.Name ?? "Windows 对话", directory.Text, sessionId, conversation?.Reference);
+            conversation = new Conversation(conversation?.Name ?? "Windows 对话", directory.Text, sessionId, conversation?.Reference, executionUser.Length > 0 ? executionUser : null);
             local.Tasks[LocalState.HostKey(host!) + "|" + sessionId] = taskId; local.Save();
         }
         if (state["done"]?.GetValue<bool>() == true)

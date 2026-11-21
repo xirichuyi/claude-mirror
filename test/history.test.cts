@@ -3,7 +3,7 @@ import assert = require('node:assert/strict');
 import fs = require('node:fs');
 import os = require('node:os');
 import path = require('node:path');
-const { historyOperations } = require('../src/remote-agent.cjs');
+const { historyOperations, historyScope, accountHistory } = require('../src/remote-agent.cjs');
 import { randomUUID } from 'node:crypto';
 const { RemoteHistory, historyMessages } = require('../src/history.cjs');
 const { ChatService } = require('../src/chat-service.cjs');
@@ -156,4 +156,33 @@ test('project history trash matches exact cwd and preserves recovery copies and 
     assert.equal((await f.call({ operation: 'trashProject', directory: '/tmp/test' })).count, 0);
     await assert.rejects(f.call({ operation: 'trashProject', directory: '../test' }), /绝对目录/);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('a root login reads the history of its execution account without writing into that home', async () => {
+  const f = fixture();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'remotecc-history-account-'));
+  try {
+    const project = path.join(home, '.claude', 'projects', '-srv-app'); fs.mkdirSync(project, { recursive: true });
+    const id = randomUUID();
+    fs.writeFileSync(path.join(project, id + '.jsonl'), JSON.stringify({ type: 'user', uuid: randomUUID(), parentUuid: null, cwd: '/srv/app', message: { content: 'as runner' } }) + '\n');
+    fs.writeFileSync(f.file, JSON.stringify({ type: 'user', uuid: randomUUID(), parentUuid: null, cwd: '/tmp/test', message: { content: 'as root' } }) + '\n');
+    const scoped = request => f.call({ ...request, operation: 'scoped' });
+    (historyOperations as any).scoped = request => historyScope.run({ account: 'claude-runner', home }, () => historyOperations[request.inner]({ ...request, account: undefined }));
+    const list = await scoped({ inner: 'list' });
+    assert.deepEqual(list.sessions.map(item => item.directory), ['/srv/app']);
+    const page = await scoped({ inner: 'messages', reference: '-srv-app/' + id + '.jsonl' });
+    assert.equal(page.records.length, 1);
+    assert.deepEqual((await f.call({ operation: 'list' })).sessions.map(item => item.directory), ['/tmp/test']);
+    assert.deepEqual(fs.readdirSync(path.join(home, '.claude')), ['projects']);
+    assert.ok(fs.existsSync(path.join(f.root, 'remotecc-index', 'accounts', 'claude-runner', 'listing.json')));
+  } finally { delete (historyOperations as any).scoped; fs.rmSync(f.root, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); }
+});
+test('execution account history is refused for other logins and invalid accounts', () => {
+  const passwd = () => 'claude-runner:x:1001:1001::/home/claude-runner:/bin/bash\n';
+  assert.deepEqual(accountHistory('claude-runner', { uid: 0 }, passwd), { account: 'claude-runner', home: '/home/claude-runner' });
+  assert.throws(() => accountHistory('claude-runner', { uid: 1000 }, passwd), /只有 root/);
+  assert.throws(() => accountHistory('../etc', { uid: 0 }, passwd), /无效/);
+  assert.throws(() => accountHistory('root', { uid: 0 }, () => 'root:x:0:0:root:/root:/bin/bash'), /非 root/);
+  assert.throws(() => accountHistory('ghost', { uid: 0 }, () => { throw new Error('exit 2'); }), /不存在/);
+  assert.throws(() => historyOperations.list({ account: 'claude-runner' }), /只有 root|不存在/);
 });

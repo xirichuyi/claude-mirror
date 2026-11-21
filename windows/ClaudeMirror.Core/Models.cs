@@ -6,7 +6,8 @@ namespace ClaudeMirror.Core;
 public sealed record HostProfile(string Name, string Host, int Port, string User, string? KeyFile = null);
 /// <summary>A port on the server's loopback made reachable on this computer's loopback.</summary>
 public sealed record Tunnel(int LocalPort, int RemotePort);
-public sealed record Conversation(string Name, string Directory, string? SessionId, string? Reference)
+/// <param name="Account">The server account Claude runs this conversation as, when it is not the SSH user.</param>
+public sealed record Conversation(string Name, string Directory, string? SessionId, string? Reference, string? Account = null)
 {
     public override string ToString() => Name;
 }
@@ -73,6 +74,8 @@ public sealed class LocalState
     public HashSet<string> Pinned { get; set; } = [];
     public HashSet<string> Archived { get; set; } = [];
     public HashSet<string> Hidden { get; set; } = [];
+    /// <summary>Execution accounts used on each host (keyed by <see cref="HostKey"/>); their conversations are listed next to the SSH user's.</summary>
+    public Dictionary<string, List<string>> Accounts { get; set; } = [];
     /// <summary>"system", "light" or "dark".</summary>
     public string Theme { get; set; } = "system";
     public LocalState(string folder)
@@ -88,12 +91,19 @@ public sealed class LocalState
         Pinned = saved?["pinned"]?.Deserialize<HashSet<string>>() ?? [];
         Archived = saved?["archived"]?.Deserialize<HashSet<string>>() ?? [];
         Hidden = saved?["hidden"]?.Deserialize<HashSet<string>>() ?? [];
+        Accounts = saved?["accounts"]?.Deserialize<Dictionary<string, List<string>>>() ?? [];
         Theme = saved?["theme"]?.GetValue<string>() is "light" or "dark" ? saved["theme"]!.GetValue<string>() : "system";
     }
     public void Save()
     {
-        File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(new { hosts = Hosts, fingerprints = Fingerprints, tasks = Tasks, declinedKeyLogin = DeclinedKeyLogin, names = Names, pinned = Pinned, archived = Archived, hidden = Hidden, theme = Theme }));
+        File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(new { hosts = Hosts, fingerprints = Fingerprints, tasks = Tasks, declinedKeyLogin = DeclinedKeyLogin, names = Names, pinned = Pinned, archived = Archived, hidden = Hidden, accounts = Accounts, theme = Theme }));
         File.Move(file + ".tmp", file, true);
+    }
+    public void RememberAccount(string hostKey, string account)
+    {
+        if (account.Length == 0) return;
+        if (!Accounts.TryGetValue(hostKey, out var known)) Accounts[hostKey] = known = [];
+        if (!known.Contains(account)) known.Add(account);
     }
     public static string HostKey(HostProfile h) => $"{h.User}@{h.Host}:{h.Port}";
 }
