@@ -89,10 +89,11 @@ public sealed partial class MainWindow : Window
     private async Task ConnectDialogAsync(HostProfile? existing)
     {
         var name = new TextBox { Header = "显示名称", Text = existing?.Name ?? "", PlaceholderText = "例如：开发服务器（可选）" };
-        var address = new TextBox { Header = "服务器地址", Text = existing is null ? "" : existing.User + "@" + existing.Host, PlaceholderText = "例如 ubuntu@192.168.1.10" };
+        var address = new TextBox { Header = "服务器地址", Text = existing is null ? "" : existing.User.Length > 0 ? existing.User + "@" + existing.Host : existing.Host, PlaceholderText = "例如 ubuntu@192.168.1.10" };
         var user = new TextBox { Header = "用户名", PlaceholderText = "地址里没写 用户名@ 时填写" };
-        var port = new NumberBox { Header = "端口", Value = existing?.Port ?? 22, Minimum = 1, Maximum = 65535 };
-        var mode = new ComboBox { Header = "登录方式", ItemsSource = new[] { "密码", "私钥文件" }, SelectedIndex = existing?.KeyFile is null ? 0 : 1 };
+        var port = new NumberBox { Header = "端口", Value = existing is null ? 22 : existing.Port > 0 ? existing.Port : double.NaN, Minimum = 1, Maximum = 65535 };
+        var mode = new ComboBox { Header = "登录方式", ItemsSource = new[] { "密码", "私钥文件", "系统 SSH（SSH 配置、ssh-agent、跳板机）" }, SelectedIndex = existing?.SystemSsh == true ? 2 : existing?.KeyFile is null ? 0 : 1 };
+        var jump = new TextBox { Header = "跳板机（可选）", Text = existing?.Jump ?? "", PlaceholderText = "例如 ops@bastion.example.com，或 SSH 配置里的别名" };
         var password = new PasswordBox { Header = "密码", PlaceholderText = "服务器登录密码" }; var phrase = new PasswordBox { Header = "私钥口令（可选）" };
         var key = new TextBox { Header = "私钥文件", Text = existing?.KeyFile ?? "" };
         var pick = Button("选择私钥", async () => { var file = await PickAsync(); if (file is not null) key.Text = file; });
@@ -101,7 +102,13 @@ public sealed partial class MainWindow : Window
         {
             password.Visibility = mode.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
             phrase.Visibility = key.Visibility = pick.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
-            note.Text = mode.SelectedIndex == 0 ? "密码只用于这次连接，不会保存。连接成功后可以一键设置免密登录。首次连接会请你确认服务器指纹。" : "使用所选私钥登录，私钥不会上传。首次连接会请你确认服务器指纹。";
+            jump.Visibility = mode.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
+            note.Text = mode.SelectedIndex switch
+            {
+                0 => "密码只用于这次连接，不会保存。连接成功后可以一键设置免密登录。首次连接会请你确认服务器指纹。",
+                1 => "使用所选私钥登录，私钥不会上传。首次连接会请你确认服务器指纹。",
+                _ => "用这台电脑自带的 OpenSSH 连接，和在终端里输入 ssh 一样：读取 ~/.ssh/config，使用 ssh-agent 里的密钥，经跳板机时不在本机开端口。地址可以填配置里的别名；用户名和端口留空时由配置决定。不能输入密码，带口令的私钥请先 ssh-add。"
+            };
         }
         mode.SelectionChanged += (_, _) => UpdateMode(); UpdateMode();
         var jumpNote = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = danger, Visibility = Visibility.Collapsed };
@@ -119,14 +126,16 @@ public sealed partial class MainWindow : Window
             var account = entry.User ?? Environment.UserName;
             name.Text = entry.Alias; address.Text = account + "@" + entry.Host; port.Value = entry.Port;
             key.Text = entry.KeyFile ?? ""; mode.SelectedIndex = entry.KeyFile is null ? 0 : 1;
-            // This client connects directly only; say so instead of failing later with a timeout.
-            jumpNote.Text = entry.ProxyJump is null ? "" : $"SSH 配置里这台主机要经过跳板机 {entry.ProxyJump} 连接。Windows 版暂不支持跳板机，只有这台电脑能直接连到 {entry.Host} 时才能连接。";
+            // A host behind a jump host is left to OpenSSH, which reads the whole config entry by its alias.
+            if (entry.ProxyJump is not null) { address.Text = entry.Alias; port.Value = double.NaN; mode.SelectedIndex = 2; jump.Text = ""; }
+            jumpNote.Text = entry.ProxyJump is null ? "" : $"SSH 配置里这台主机经过跳板机 {entry.ProxyJump} 连接，已改用系统 SSH。";
+            jumpNote.Foreground = muted;
             jumpNote.Visibility = entry.ProxyJump is null ? Visibility.Collapsed : Visibility.Visible;
             expander.IsExpanded = entry.Port != 22;
         };
         var panel = new StackPanel { Spacing = 14 };
         panel.Children.Add(new TextBlock { Text = "填写服务器地址和登录方式。Claude Code 和项目都在服务器上运行，本机只负责显示和操作。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
-        foreach (var element in new UIElement[] { import, jumpNote, address, mode, password, key, pick, phrase, note, expander }) panel.Children.Add(element);
+        foreach (var element in new UIElement[] { import, jumpNote, address, mode, password, key, pick, phrase, jump, note, expander }) panel.Children.Add(element);
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = existing == null ? "添加服务器" : "连接服务器", Content = new ScrollViewer { Content = panel }, Background = canvas, PrimaryButtonText = "连接", CloseButtonText = "取消" };
         (string User, string Host) Target()
         {
@@ -136,15 +145,23 @@ public sealed partial class MainWindow : Window
         void Validate()
         {
             var (u, h) = Target();
+            if (mode.SelectedIndex == 2)
+            {
+                // OpenSSH takes a missing user or port from its config.
+                dialog.IsPrimaryButtonEnabled = SystemSsh.Safe(h) && (u.Length == 0 || SystemSsh.Safe(u)) && (jump.Text.Trim().Length == 0 || SystemSsh.SafeJump(jump.Text.Trim()));
+                UpdateMode(); return;
+            }
             dialog.IsPrimaryButtonEnabled = !string.IsNullOrWhiteSpace(h) && !string.IsNullOrWhiteSpace(u) && port.Value is >= 1 and <= 65535 && (mode.SelectedIndex == 0 || !string.IsNullOrWhiteSpace(key.Text));
             if (string.IsNullOrWhiteSpace(u) && !string.IsNullOrWhiteSpace(h)) { note.Text = "请在地址前写上用户名，例如 root@" + h + "，或在高级选项里填写。"; }
             else if (!string.IsNullOrWhiteSpace(h)) UpdateMode();
         }
-        address.TextChanged += (_,_) => Validate(); user.TextChanged += (_,_) => Validate(); key.TextChanged += (_,_) => Validate();
+        address.TextChanged += (_,_) => Validate(); user.TextChanged += (_,_) => Validate(); key.TextChanged += (_,_) => Validate(); jump.TextChanged += (_,_) => Validate();
         mode.SelectionChanged += (_,_) => Validate(); port.ValueChanged += (_,_) => Validate(); Validate();
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         var (login, server) = Target();
-        var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? server : name.Text.Trim(), server, (int)port.Value, login, mode.SelectedIndex == 1 ? key.Text : null);
+        bool system = mode.SelectedIndex == 2;
+        var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? server : name.Text.Trim(), server, double.IsNaN(port.Value) ? 0 : (int)port.Value, login, mode.SelectedIndex == 1 ? key.Text : null,
+            system, system && jump.Text.Trim().Length > 0 ? jump.Text.Trim() : null);
         // Queued prompts cannot follow the user to another server.
         if (host is not null && LocalState.HostKey(host) != LocalState.HostKey(profile)) await ConfirmLeavingQueueAsync();
         agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
@@ -154,6 +171,8 @@ public sealed partial class MainWindow : Window
         var usedPassword = mode.SelectedIndex == 0;
         try { await next.ConnectAsync(profile, password.Password, phrase.Password, ServerResources, fingerprint => ConfirmHostAsync(profile, fingerprint)); }
         catch (RemoteSetupException e) { setup = e; }
+        catch (SystemSshException e) when (e.Kind == SystemSshFailure.HostKey) { next.Dispose(); RefreshWorkbench(); await OfferTerminalLoginAsync(profile, e.Message); throw; }
+        catch (SystemSshException) { next.Dispose(); RefreshWorkbench(); throw; }
         catch (Exception e) { next.Dispose(); RefreshWorkbench(); throw new IOException(ConnectionAdvice.Explain(e.Message), e); }
         finally { password.Password = ""; phrase.Password = ""; }
         host = profile; local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(profile)); local.Hosts.Add(profile); local.Save();

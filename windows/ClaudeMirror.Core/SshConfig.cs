@@ -1,6 +1,6 @@
 namespace ClaudeMirror.Core;
 
-/// <summary>The parts of an OpenSSH client config this app uses: Host patterns with HostName, User, Port and IdentityFile. ProxyJump is read only to say that the host needs a jump host, which this client does not connect through.</summary>
+/// <summary>The parts of an OpenSSH client config this app uses: Host patterns with HostName, User, Port and IdentityFile. A host with ProxyJump is connected through the system OpenSSH client by its alias.</summary>
 public static class SshConfig
 {
     public sealed record Entry(string Alias, string Host, string? User, int Port, string? KeyFile, string? ProxyJump);

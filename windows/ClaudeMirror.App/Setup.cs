@@ -104,7 +104,8 @@ public sealed partial class MainWindow
     private void OpenTerminal(string remoteCommand)
     {
         if (host is null) return;
-        var target = $"ssh -t -p {host.Port} {host.User}@{host.Host} \"{remoteCommand.Replace("\"", "\\\"")}\"";
+        var login = host.SystemSsh ? "ssh -t" + SystemSsh.TerminalCommand(host)[3..] : $"ssh -t -p {host.Port} {host.User}@{host.Host}";
+        var target = $"{login} \"{remoteCommand.Replace("\"", "\\\"")}\"";
         try { Process.Start(new ProcessStartInfo("cmd.exe", "/k " + target) { UseShellExecute = true }); status.Text = "已打开终端，按提示完成登录后点“重新检查”"; }
         catch { Copy(target, "无法打开终端，已复制命令，请粘贴到 PowerShell 运行"); }
     }
@@ -148,7 +149,7 @@ public sealed partial class MainWindow
     /// Offered once after a password login: create a dedicated key, authorize it, prove it works, then switch.
     private async Task OfferKeyLoginAsync(HostProfile profile, RemoteAgent remote)
     {
-        if (profile.KeyFile is not null || local.DeclinedKeyLogin.Contains(LocalState.HostKey(profile)) || FindKeygen() is not { } keygen) return;
+        if (profile.SystemSsh || profile.KeyFile is not null || local.DeclinedKeyLogin.Contains(LocalState.HostKey(profile)) || FindKeygen() is not { } keygen) return;
         var dialog = new ContentDialog
         {
             XamlRoot = root.XamlRoot, Title = "为 " + profile.Name + " 设置免密登录？", Background = canvas,

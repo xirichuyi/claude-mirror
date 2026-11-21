@@ -9,8 +9,8 @@ public sealed partial class MainWindow
     private static readonly int[] ReconnectDelays = [1, 2, 5, 10, 30];
     private CancellationTokenSource? reconnecting;
 
-    /// A dropped connection comes back by itself only when that needs no secret: a key file without a passphrase.
-    /// Passwords and passphrases are never kept after connecting, so those hosts ask the user to connect again.
+    /// A dropped connection comes back by itself only when that needs no secret: a key file without a passphrase,
+    /// or the system SSH client, which never asks. Passwords and passphrases are never kept after connecting, so those hosts ask the user to connect again.
     private void OnDisconnected(RemoteAgent lost, string error)
     {
         if (agent != lost) return;
@@ -18,7 +18,7 @@ public sealed partial class MainWindow
         // What happened to the reply is unknown from here on, so queued prompts wait for the user.
         if (queue.Items.Count > 0) { queue.Pause(); RenderQueue(); }
         RefreshWorkbench();
-        if (host is { KeyFile: { Length: > 0 } } profile) _ = ReconnectAsync(profile);
+        if (host is { } profile && (profile.SystemSsh || profile.KeyFile is { Length: > 0 })) _ = ReconnectAsync(profile);
     }
 
     /// Hosts from the user's OpenSSH config, offered when adding a server. An unreadable config offers nothing.
@@ -47,6 +47,8 @@ public sealed partial class MainWindow
                     Task.FromResult(trusted = local.Fingerprints.GetValueOrDefault(LocalState.HostKey(profile)) == fingerprint));
             }
             catch (RemoteSetupException) { next.Dispose(); status.Text = "已重新连上 SSH，但服务器需要重新设置，请手动连接"; return; }
+            // The system client was refused a login or a host key: trying again will not change that.
+            catch (SystemSshException e) when (e.Kind != SystemSshFailure.Other) { next.Dispose(); status.Text = "自动重连已停止：" + e.Message; return; }
             catch (Exception e) when (e is Renci.SshNet.Common.SshAuthenticationException or Renci.SshNet.Common.SshPassPhraseNullOrEmptyException or FileNotFoundException)
             { next.Dispose(); status.Text = "自动重连失败：" + ConnectionAdvice.Explain(e.Message); return; }
             catch (Exception)
@@ -58,7 +60,7 @@ public sealed partial class MainWindow
             if (attempt.IsCancellationRequested || host != profile) { next.Dispose(); return; }
             var tunnels = agent?.Tunnels ?? [];
             agent?.Dispose(); agent = next;
-            foreach (var tunnel in tunnels) try { next.Forward(tunnel); } catch (IOException) { } // A port taken meanwhile is simply not restored.
+            foreach (var tunnel in tunnels) try { await next.ForwardAsync(tunnel); } catch (IOException) { } // A port taken meanwhile is simply not restored.
             next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
             await RunAsync(async () =>
             {
@@ -72,6 +74,16 @@ public sealed partial class MainWindow
         }
     }
 
+    /// The system SSH client refuses a host key it has not seen. The user confirms it once in a terminal, where OpenSSH shows the fingerprint.
+    private async Task OfferTerminalLoginAsync(HostProfile profile, string message)
+    {
+        var command = SystemSsh.TerminalCommand(profile);
+        var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = "需要先确认主机密钥", Content = new TextBlock { Text = message + "\n\n" + command, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true }, PrimaryButtonText = "在终端确认", CloseButtonText = "关闭" };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k " + command) { UseShellExecute = true }); }
+        catch (System.ComponentModel.Win32Exception) { Copy(command, "无法打开终端，已复制命令，请粘贴到 PowerShell 运行"); }
+    }
+
     private readonly StackPanel tunnelList = new() { Spacing = 6 };
 
     /// Port forwarding: a port on the server's loopback opened at 127.0.0.1 on this computer, until it is closed or the app disconnects.
@@ -79,12 +91,11 @@ public sealed partial class MainWindow
     {
         var localPort = new NumberBox { Header = "本地端口", Minimum = 1, Maximum = 65535, Width = 120 };
         var remotePort = new NumberBox { Header = "服务器端口", Minimum = 1, Maximum = 65535, Width = 120 };
-        var add = Button("转发", () =>
+        var add = Button("转发", async () =>
         {
             if (double.IsNaN(localPort.Value) || double.IsNaN(remotePort.Value)) throw new IOException("请填写两个端口");
-            RequireSsh().Forward(new Tunnel((int)localPort.Value, (int)remotePort.Value));
+            await RequireSsh().ForwardAsync(new Tunnel((int)localPort.Value, (int)remotePort.Value));
             localPort.Value = double.NaN; remotePort.Value = double.NaN; RenderTunnels();
-            return Task.CompletedTask;
         });
         add.VerticalAlignment = VerticalAlignment.Bottom;
         var panel = new StackPanel { Spacing = 12, Width = 340 };
