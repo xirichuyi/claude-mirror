@@ -517,8 +517,9 @@ async function transfer(request) {
 
 const CLAUDE_ROOT = () => expand(process.env.CLAUDE_CONFIG_DIR || '~/.claude');
 // A root login may read the transcripts of the account it runs Claude as (request.account).
-// The index for them stays in root's own folder. The only thing written into the other home is
-// that account's own trash folder, which is handed to the account.
+// The index for them stays in root's own folder, and root itself writes nothing into the other home:
+// that account controls every path there and could swap one for a link. Its trash is moved by a
+// process running as the account (trashAsAccount).
 const historyScope = new AsyncLocalStorage<{ account: string, home: string, uid?: number, gid?: number }>();
 const PROJECTS = () => { const scope = historyScope.getStore(); return scope ? path.join(scope.home, '.claude', 'projects') : path.join(CLAUDE_ROOT(), 'projects'); };
 const INDEX_DIRECTORY = () => { const scope = historyScope.getStore(); return path.join(CLAUDE_ROOT(), 'remotecc-index', ...(scope ? ['accounts', scope.account] : [])); };
@@ -839,14 +840,21 @@ async function trashProjectHistory(request) {
     if (original.session?.directory === directory) throw new Error('请先停止此项目的远端任务');
   }
   const scope = historyScope.getStore();
-  const trashRoot = path.join(path.dirname(PROJECTS()), 'remotecc-trash');
-  // In another account's home that account decides what exists: do not follow a link it left here.
-  if (scope && !((await fsp.lstat(trashRoot).catch(() => null))?.isDirectory() ?? true)) throw new Error('执行账号的废纸篓目录不可用');
-  const trash = path.join(trashRoot, crypto.randomUUID());
+  const trash = path.join(path.dirname(PROJECTS()), 'remotecc-trash', crypto.randomUUID());
+  const manifest = { directory, createdAt: Date.now(), references: selected.map(item => item.reference) };
+  if (scope) {
+    try {
+      for (const entry of selected) {
+        const info = await fsp.stat(historyPath(entry.reference), { bigint: true });
+        if (`${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}` !== entry.signature)
+          throw new Error('聊天记录正在变化，请停止远端会话后重试');
+      }
+      await trashAsAccount(scope, PROJECTS(), trash, manifest);
+    } finally { listSnapshots.clear(); historyIndexes.clear(); }
+    return { count: selected.length, references: manifest.references, trash };
+  }
   await fsp.mkdir(trash, { recursive: true, mode: 0o700 });
-  await atomicJSON(path.join(trash, 'manifest.json'), {
-    directory, createdAt: Date.now(), references: selected.map(item => item.reference),
-  });
+  await atomicJSON(path.join(trash, 'manifest.json'), manifest);
   const moved = [];
   try {
     for (const entry of selected) {
@@ -866,20 +874,34 @@ async function trashProjectHistory(request) {
       catch { /* Keep recovery copy and report its location. */ }
     }
     throw new Error(error.message + '；恢复副本：' + trash);
-  } finally {
-    listSnapshots.clear(); historyIndexes.clear();
-    // The account can then restore or delete its own records.
-    if (scope?.uid) await handOver([trashRoot], trash, scope.uid, scope.gid).catch(() => {});
-  }
+  } finally { listSnapshots.clear(); historyIndexes.clear(); }
   return { count: moved.length, references: selected.map(item => item.reference), trash };
 }
 
-async function handOver(folders, folder, uid, gid) {
-  for (const entry of await fsp.readdir(folder, { withFileTypes: true })) {
-    const target = path.join(folder, entry.name);
-    if (entry.isDirectory()) await handOver([], target, uid, gid); else await fsp.lchown(target, uid, gid);
-  }
-  for (const target of [...folders, folder]) await fsp.lchown(target, uid, gid);
+// Moves transcripts into a trash folder inside an execution account's home, as that account.
+// Nothing here runs with root's rights, so a link the account planted leads only where it could go anyway.
+// A transcript that cannot be moved puts the earlier ones back, without overwriting a new one.
+const TRASH_AS_ACCOUNT = `umask 077; trash=$1; projects=$2; shift 2
+mkdir -p "$trash" && cat > "$trash/manifest.json" || exit 1
+for reference; do
+  mkdir -p "$trash/\${reference%/*}" && mv "$projects/$reference" "$trash/$reference" && continue
+  for item; do [ -f "$trash/$item" ] && ln "$trash/$item" "$projects/$item" 2>/dev/null && rm -f "$trash/$item"; done
+  exit 1
+done`;
+function trashAsAccount(scope, projects, trash, manifest) {
+  const root = process.getuid?.() === 0;
+  if (root && !(scope.uid > 0 && scope.gid >= 0)) throw new Error('执行账号必须是有效的非 root 用户');
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn('/bin/sh', ['-c', TRASH_AS_ACCOUNT, 'sh', trash, projects, ...manifest.references], {
+      ...(root ? { uid: scope.uid, gid: scope.gid } : {}), cwd: '/', env: { PATH: '/usr/bin:/bin' }, stdio: ['pipe', 'ignore', 'pipe'],
+    });
+    let problem = '';
+    child.stderr.on('data', data => { problem = (problem + data).slice(-2000); });
+    child.stdin.on('error', () => {});
+    child.on('error', reject);
+    child.on('close', code => code === 0 ? resolve() : reject(new Error((problem.trim() || '无法移动执行账号的聊天记录') + '；恢复副本：' + trash)));
+    child.stdin.end(JSON.stringify(manifest));
+  });
 }
 
 const historyOperations = { list: forAccount(historyList), messages: forAccount(historyMessages), projects: projectDirectories, trashProject: forAccount(trashProjectHistory) };

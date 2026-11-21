@@ -158,7 +158,7 @@ test('project history trash matches exact cwd and preserves recovery copies and 
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('a root login reads and trashes the history of its execution account, writing only that account\'s trash folder', async () => {
+test('a root login reads and trashes the history of its execution account', async () => {
   const f = fixture();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'remotecc-history-account-'));
   try {
@@ -182,13 +182,46 @@ test('a root login reads and trashes the history of its execution account, writi
     assert.ok(fs.existsSync(path.join(trashed.trash, '-srv-app', id + '.jsonl')));
     assert.deepEqual((await scoped({ inner: 'list' })).sessions, []);
     assert.deepEqual((await f.call({ operation: 'list' })).sessions.map(item => item.directory), ['/tmp/test']);
-    // A link the account left where its trash goes is not followed.
-    fs.rmSync(path.join(home, '.claude', 'remotecc-trash'), { recursive: true });
-    fs.writeFileSync(path.join(project, id + '.jsonl'), JSON.stringify({ type: 'user', uuid: randomUUID(), parentUuid: null, cwd: '/srv/app', message: { content: 'again' } }) + '\n');
-    fs.symlinkSync(f.root, path.join(home, '.claude', 'remotecc-trash'));
-    await assert.rejects(scoped({ inner: 'trashProject', directory: '/srv/app' }), /废纸篓目录不可用/);
-    assert.ok(fs.existsSync(path.join(project, id + '.jsonl')));
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(trashed.trash, 'manifest.json'), 'utf8')).references, ['-srv-app/' + id + '.jsonl']);
+    // A transcript that cannot be moved leaves the others where they were.
+    const second = randomUUID();
+    for (const name of [id, second]) fs.writeFileSync(path.join(project, name + '.jsonl'), JSON.stringify({ type: 'user', uuid: randomUUID(), parentUuid: null, cwd: '/srv/app', message: { content: 'again' } }) + '\n');
+    const list2 = await scoped({ inner: 'list' });
+    assert.equal(list2.sessions.length, 2);
+    fs.chmodSync(project, 0o500);
+    try { await assert.rejects(scoped({ inner: 'trashProject', directory: '/srv/app' }), /恢复副本/); }
+    finally { fs.chmodSync(project, 0o700); }
+    assert.deepEqual(fs.readdirSync(project).sort(), [id + '.jsonl', second + '.jsonl'].sort());
   } finally { delete (historyOperations as any).scoped; fs.rmSync(f.root, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); }
+});
+// Run through sudo in CI. Root must not write or chown anything in a home the account controls:
+// the account moves its own records, so a link it planted there gets it nowhere.
+test('as root, an execution account\'s history is trashed by that account itself', { skip: !(process.getuid?.() === 0 && process.env.CLAUDE_MIRROR_TEST_SUDO_ACCOUNT) }, async () => {
+  const account = process.env.CLAUDE_MIRROR_TEST_SUDO_ACCOUNT; const scope = accountHistory(account);
+  const { execFileSync } = require('node:child_process');
+  const claude = path.join(scope.home, '.claude'), project = path.join(claude, 'projects', '-srv-app'), trashRoot = path.join(claude, 'remotecc-trash');
+  const transcript = () => {
+    const id = randomUUID(); fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, id + '.jsonl'), JSON.stringify({ type: 'user', uuid: randomUUID(), parentUuid: null, cwd: '/srv/app', message: { content: 'as runner' } }) + '\n');
+    execFileSync('chown', ['-R', '-h', scope.uid + ':' + scope.gid, claude]);
+    return id + '.jsonl';
+  };
+  const f = fixture(); const guarded = fs.mkdtempSync(path.join(os.tmpdir(), 'remotecc-root-only-'));
+  try {
+    const first = transcript();
+    const trashed = await f.call({ operation: 'trashProject', directory: '/srv/app', account });
+    assert.equal(trashed.count, 1);
+    for (const item of [trashRoot, trashed.trash, path.join(trashed.trash, 'manifest.json'), path.join(trashed.trash, '-srv-app', first)]) assert.equal(fs.lstatSync(item).uid, scope.uid, item);
+    assert.equal(fs.statSync(trashed.trash).mode & 0o777, 0o700);
+    assert.deepEqual((await f.call({ operation: 'list', account })).sessions, []);
+    // The account swaps its trash folder for a link into a folder only root may write.
+    fs.rmSync(trashRoot, { recursive: true }); fs.symlinkSync(guarded, trashRoot); fs.lchownSync(trashRoot, scope.uid, scope.gid);
+    const second = transcript();
+    await assert.rejects(f.call({ operation: 'trashProject', directory: '/srv/app', account }));
+    assert.deepEqual(fs.readdirSync(guarded), []);
+    assert.equal(fs.statSync(guarded).uid, 0);
+    assert.ok(fs.existsSync(path.join(project, second)));
+  } finally { fs.rmSync(claude, { recursive: true, force: true }); fs.rmSync(guarded, { recursive: true, force: true }); fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 test('execution account history is refused for other logins and invalid accounts', () => {
   const passwd = () => 'claude-runner:x:1001:1001::/home/claude-runner:/bin/bash\n';

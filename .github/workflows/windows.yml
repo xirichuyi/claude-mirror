@@ -43,6 +43,11 @@ jobs:
           # A skipped test here would mean the server was not reached at all.
           ! grep -q "Skipped SystemSshTests" "$RUNNER_TEMP/system-ssh.log"
           grep -q "Passed SystemSshTests.ARootLoginStoresAnAttachmentAsTheExecutionAccount" "$RUNNER_TEMP/system-ssh.log"
+      - name: A root login trashes an execution account's history without acting as root in that home
+        run: |
+          sudo env CLAUDE_MIRROR_TEST_SUDO_ACCOUNT=mirror-runner "$(command -v node)" --test --test-reporter=tap --test-name-pattern="as root" build/test/history.test.cjs | tee "$RUNNER_TEMP/root-history.log"
+          grep -q "^# pass 1$" "$RUNNER_TEMP/root-history.log"
+          grep -q "^# skipped 0$" "$RUNNER_TEMP/root-history.log"
   native:
     runs-on: windows-2025
     steps:
