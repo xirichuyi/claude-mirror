@@ -1,6 +1,6 @@
 namespace ClaudeMirror.Core;
 
-/// <summary>The parts of an OpenSSH client config this app uses: Host patterns with HostName, User, Port, IdentityFile and ProxyJump.</summary>
+/// <summary>The parts of an OpenSSH client config this app uses: Host patterns with HostName, User, Port and IdentityFile. ProxyJump is read only to say that the host needs a jump host, which this client does not connect through.</summary>
 public static class SshConfig
 {
     public sealed record Entry(string Alias, string Host, string? User, int Port, string? KeyFile, string? ProxyJump);
@@ -40,31 +40,6 @@ public static class SshConfig
         }
         return entries;
     }
-
-    /// <summary>The jump host named by a ProxyJump value: <c>[user@]host[:port]</c>, or an alias from <paramref name="known"/>. Chains of several hosts are not supported.</summary>
-    public static HostProfile Jump(string spec, string defaultUser, string? keyFile, IEnumerable<Entry>? known = null)
-    {
-        var text = spec.Trim();
-        if (text.Length == 0 || text.Contains(',') || text.Contains(' ')) throw new ArgumentException("跳板机请写成 用户名@主机:端口，目前只支持一台跳板机");
-        if (text.StartsWith("ssh://", StringComparison.OrdinalIgnoreCase)) text = text[6..].TrimEnd('/');
-        string? user = null; int port = 22;
-        var at = text.LastIndexOf('@');
-        if (at > 0) { user = text[..at]; text = text[(at + 1)..]; }
-        var colon = text.LastIndexOf(':');
-        if (colon > 0 && !text.EndsWith(']'))
-        {
-            if (!int.TryParse(text[(colon + 1)..], out port) || port is < 1 or > 65535) throw new ArgumentException("跳板机端口无效");
-            text = text[..colon];
-        }
-        text = text.Trim('[', ']');
-        if (text.Length == 0) throw new ArgumentException("跳板机请写成 用户名@主机:端口");
-        if (known?.FirstOrDefault(entry => entry.Alias.Equals(text, StringComparison.OrdinalIgnoreCase)) is { } alias)
-            return new HostProfile(alias.Alias, alias.Host, colon > 0 ? port : alias.Port, user ?? alias.User ?? defaultUser, alias.KeyFile ?? keyFile);
-        return new HostProfile(text, text, port, user ?? defaultUser, keyFile);
-    }
-
-    /// <summary>A jump host in the form <see cref="Jump"/> reads back.</summary>
-    public static string JumpSpec(HostProfile jump) => $"{jump.User}@{(jump.Host.Contains(':') ? "[" + jump.Host + "]" : jump.Host)}:{jump.Port}";
 
     /// <summary>A line up to a `#` that starts it or follows whitespace outside quotes, as OpenSSH reads it.</summary>
     private static string WithoutComment(string line)

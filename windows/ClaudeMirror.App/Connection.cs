@@ -44,8 +44,7 @@ public sealed partial class MainWindow
                 status.Text = "正在重新连接…";
                 // An unknown or changed fingerprint is never accepted without the user: stop and let them connect by hand.
                 await next.ConnectAsync(profile, "", "", ServerResources, fingerprint =>
-                    Task.FromResult(trusted = local.Fingerprints.GetValueOrDefault(LocalState.HostKey(profile)) == fingerprint),
-                    (hop, fingerprint) => Task.FromResult(trusted = local.Fingerprints.GetValueOrDefault(LocalState.HostKey(hop)) == fingerprint));
+                    Task.FromResult(trusted = local.Fingerprints.GetValueOrDefault(LocalState.HostKey(profile)) == fingerprint));
             }
             catch (RemoteSetupException) { next.Dispose(); status.Text = "已重新连上 SSH，但服务器需要重新设置，请手动连接"; return; }
             catch (Exception e) when (e is Renci.SshNet.Common.SshAuthenticationException or Renci.SshNet.Common.SshPassPhraseNullOrEmptyException or FileNotFoundException)

@@ -37,21 +37,6 @@ public class SshConfigTests
     }
 
     [Fact]
-    public void JumpHostsAreReadFromAddressesAndAliases()
-    {
-        var plain = SshConfig.Jump("ops@gate.example.com:2200", "me", "/keys/id");
-        Assert.Equal(("gate.example.com", 2200, "ops", "/keys/id"), (plain.Host, plain.Port, plain.User, plain.KeyFile));
-        Assert.Equal(("gate", 22, "me"), (SshConfig.Jump("gate", "me", null).Host, SshConfig.Jump("gate", "me", null).Port, SshConfig.Jump("gate", "me", null).User));
-        var known = SshConfig.Parse("Host bastion\n  HostName 10.1.1.1\n  User jump\n  Port 2022\n  IdentityFile /keys/bastion", "/home/me");
-        var alias = SshConfig.Jump("bastion", "me", "/keys/id", known);
-        Assert.Equal(("10.1.1.1", 2022, "jump", "/keys/bastion"), (alias.Host, alias.Port, alias.User, alias.KeyFile));
-        Assert.Equal("jump@10.1.1.1:2022", SshConfig.JumpSpec(alias));
-        Assert.Equal(plain with { Name = "x" }, SshConfig.Jump(SshConfig.JumpSpec(plain), "other", "/keys/id") with { Name = "x" });
-        Assert.Throws<ArgumentException>(() => SshConfig.Jump("a,b", "me", null));
-        Assert.Throws<ArgumentException>(() => SshConfig.Jump("gate:0", "me", null));
-    }
-
-    [Fact]
     public void ForwardingNeedsValidPortsAndAConnection()
     {
         using var agent = new RemoteAgent();

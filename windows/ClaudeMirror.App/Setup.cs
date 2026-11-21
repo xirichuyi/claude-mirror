@@ -102,14 +102,7 @@ public sealed partial class MainWindow
     private void OpenTerminal(string remoteCommand)
     {
         if (host is null) return;
-        var through = "";
-        if (!string.IsNullOrWhiteSpace(host.ProxyJump))
-        {
-            // -J cannot name the jump host's key, so the relay is spelled out.
-            var hop = SshConfig.Jump(host.ProxyJump, host.User, host.JumpKeyFile ?? host.KeyFile);
-            through = $"-o \"ProxyCommand=ssh {(hop.KeyFile is null ? "" : $"-i \\\"{hop.KeyFile}\\\" ")}-p {hop.Port} -W %h:%p {hop.User}@{hop.Host}\" ";
-        }
-        var target = $"ssh -t {through}-p {host.Port} {host.User}@{host.Host} \"{remoteCommand.Replace("\"", "\\\"")}\"";
+        var target = $"ssh -t -p {host.Port} {host.User}@{host.Host} \"{remoteCommand.Replace("\"", "\\\"")}\"";
         try { Process.Start(new ProcessStartInfo("cmd.exe", "/k " + target) { UseShellExecute = true }); status.Text = "已打开终端，按提示完成登录后点“重新检查”"; }
         catch { Copy(target, "无法打开终端，已复制命令，请粘贴到 PowerShell 运行"); }
     }
@@ -175,7 +168,7 @@ public sealed partial class MainWindow
         var publicKey = RemoteInstaller.ValidPublicKey(await File.ReadAllTextAsync(path + ".pub")) ?? throw new IOException("登录密钥无法读取");
         if (!(await remote.RunScriptAsync(RemoteInstaller.AuthorizeScript(publicKey))).Contains("__RCC_KEY_OK__")) throw new IOException("服务器没有确认添加密钥");
         var updated = profile with { KeyFile = path };
-        try { await RemoteAgent.VerifyKeyLoginAsync(updated, local.Fingerprints[LocalState.HostKey(profile)], agent); }
+        try { await RemoteAgent.VerifyKeyLoginAsync(updated, local.Fingerprints[LocalState.HostKey(profile)]); }
         catch (Exception e) { throw new IOException("密钥已添加，但服务器不接受密钥登录，仍可继续使用密码。" + e.Message); }
         local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(profile)); local.Hosts.Add(updated); local.Save();
         host = updated; hosts.ItemsSource = local.Hosts.ToList(); hosts.SelectedItem = updated;

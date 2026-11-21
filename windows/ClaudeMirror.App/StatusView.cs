@@ -19,7 +19,7 @@ public sealed partial class MainWindow
         void Title(string text) => content.Children.Add(new TextBlock { Text = text, FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink, Margin = new Thickness(0, 12, 0, 0) });
         void Note(string text, bool problem = false) => content.Children.Add(new TextBlock { Text = text, FontSize = 12.5, Foreground = problem ? danger : muted, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
         Title("服务器");
-        Note(host is null ? "未连接" : $"{host.Name} · {LocalState.HostKey(host)}" + (host.ProxyJump is null ? "" : " · 经跳板机 " + host.ProxyJump));
+        Note(host is null ? "未连接" : $"{host.Name} · {LocalState.HostKey(host)}");
         if (agent?.Hello is { } hello) Note($"{Presentation.Text(hello["hostname"])} · {Presentation.Text(hello["platform"])}/{Presentation.Text(hello["arch"])} · Node {Presentation.Text(hello["node"])} · Claude {(Presentation.Text(hello["claude"]) ?? "未安装")}");
         foreach (var issue in health) Note(issue.Title + "：" + issue.Detail, issue.Blocking);
         if (taskId is null || agent?.Connected != true)
