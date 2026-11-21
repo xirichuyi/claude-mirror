@@ -92,12 +92,15 @@ public sealed partial class MainWindow
     private async Task TrashProjectAsync(string path)
     {
         if (busy && conversation?.Directory == path) throw new IOException("请先停止此项目的任务");
+        // Closing the open conversation's worker would also end what it still runs in the background.
+        if (taskId is not null && (conversation?.Directory == path || directory.Text == path) && backgroundTasks.Any(item => Presentation.Text(item?["status"]) == "running"))
+            throw new IOException("此项目还有后台任务在运行，请先在状态页停止它们");
         var remote = RequireAgent();
         int count = history.Count(c => c.Directory == path);
         var dialog = new ContentDialog
         {
             XamlRoot = root.XamlRoot, Title = "把项目历史移到废纸篓",
-            Content = new TextBlock { Text = $"{path}\n\n这个目录的 {count} 条对话记录会移到服务器的废纸篓。项目里的文件不受影响。", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
+            Content = new TextBlock { Text = $"{path}\n\n这个目录的 {count} 条对话记录会移到服务器的废纸篓，这些对话在服务器上保留的进程会被关闭。项目里的文件不受影响。", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
             PrimaryButtonText = "移到废纸篓", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
