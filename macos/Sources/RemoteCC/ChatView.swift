@@ -545,6 +545,7 @@ struct BlockView: View, Equatable {
                 ThinkingCard(text: block.text ?? "", active: thinkingActive)
             }
         case "tool": ToolCard(block: block, actions: actions)
+        case "user": SteeredMessage(block: block)
         case "notice":
             Text(block.text ?? "").font(.caption)
                 .foregroundStyle(block.level == "error" ? WorkbenchTheme.error : WorkbenchTheme.inkMuted)
@@ -554,6 +555,29 @@ struct BlockView: View, Equatable {
                 .overlay(alignment: .bottom) { if block.level == "boundary" { Divider() } }
         default: Text(block.text ?? "暂不支持的消息类型：\(block.type)").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
         }
+    }
+}
+
+/// A message the user sent while this reply was running, shown where Claude read it.
+struct SteeredMessage: View {
+    let block: Block
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            Text(block.text ?? "").strikethrough(block.cancelled == true).textSelection(.enabled)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(WorkbenchTheme.userBubble, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.card))
+                .opacity(block.pending == true || block.cancelled == true ? 0.6 : 1)
+            if let count = block.attachments?.count, count > 0 {
+                Text("\(count) 个附件").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+            }
+            if block.cancelled == true {
+                Text("已停止，未送达").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+            } else if block.pending == true {
+                Text("等待 Claude 读取…").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 

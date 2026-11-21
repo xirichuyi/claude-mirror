@@ -27,6 +27,8 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: npm test
+      - name: Real Claude Code CLI against a scripted API
+        run: node --test build/test/*.e2e.cjs
       - run: python3 scripts/test-stable-release.py
 
   android:

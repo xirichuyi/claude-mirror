@@ -25,5 +25,16 @@ public class ProtocolTests
             Assert.DoesNotContain("password", File.ReadAllText(Path.Combine(folder, "state.json")), StringComparison.OrdinalIgnoreCase);
         }
         finally { Directory.Delete(folder, true); }
+    }    [Fact] public void ReadsHostsSavedWithAJumpHost()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, "state.json"), """{"hosts":[{"Name":"内网","Host":"10.0.0.8","Port":22,"User":"ci","KeyFile":"/keys/id","ProxyJump":"ops@gate:22","JumpKeyFile":"/keys/gate"}]}""");
+            var host = Assert.Single(new LocalState(folder).Hosts);
+            Assert.Equal(("10.0.0.8", "ci", "/keys/id"), (host.Host, host.User, host.KeyFile));
+        }
+        finally { Directory.Delete(folder, true); }
     }
 }

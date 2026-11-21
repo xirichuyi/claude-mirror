@@ -8,6 +8,7 @@ namespace ClaudeMirror.Core;
 public sealed class RemoteAgent : IDisposable
 {
     private SshClient? ssh;
+    private readonly Dictionary<int, (Tunnel Tunnel, ForwardedPortLocal Port)> forwards = [];
     private SshCommand? command;
     private StreamWriter? writer;
     private readonly SemaphoreSlim writeLock = new(1);
@@ -15,16 +16,16 @@ public sealed class RemoteAgent : IDisposable
     private readonly ConcurrentDictionary<string, Action<JsonObject>> watches = new();
     private readonly CancellationTokenSource lifetime = new();
     private int sequence;
-    private bool channelClosed;
+    private bool channelClosed, attached;
     public string Home { get; private set; } = "~";
     public string Digest { get; private set; } = "";
     /// <summary>The agent's hello reply: claude path, persistence warning, Node version.</summary>
     public JsonNode? Hello { get; private set; }
     public HostProfile? Profile { get; private set; }
     /// <summary>SSH is up even when the agent could not start (for example Node.js is missing).</summary>
-    public bool SshConnected => ssh?.IsConnected == true && !lifetime.IsCancellationRequested;
+    public bool SshConnected => (attached || ssh?.IsConnected == true) && !lifetime.IsCancellationRequested;
     public event Action<string>? Disconnected;
-    public bool Connected => ssh?.IsConnected == true && writer is not null && !lifetime.IsCancellationRequested && !channelClosed;
+    public bool Connected => (attached || ssh?.IsConnected == true) && writer is not null && !lifetime.IsCancellationRequested && !channelClosed;
 
     public async Task ConnectAsync(HostProfile profile, string password, string keyPassphrase,
         string resourceDirectory, Func<string, Task<bool>> verifyHost)
@@ -35,9 +36,10 @@ public sealed class RemoteAgent : IDisposable
         AuthenticationMethod auth = privateKey is null
             ? new PasswordAuthenticationMethod(profile.User, password)
             : new PrivateKeyAuthenticationMethod(profile.User, privateKey);
+        static string Fingerprint(byte[] key) => "SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(key)).TrimEnd('=');
         ssh = new SshClient(new ConnectionInfo(profile.Host, profile.Port, profile.User, auth) { Timeout = TimeSpan.FromSeconds(20) });
         ssh.KeepAliveInterval = TimeSpan.FromSeconds(15);
-        ssh.HostKeyReceived += (_, e) => e.CanTrust = verifyHost("SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(e.HostKey)).TrimEnd('=')).GetAwaiter().GetResult();
+        ssh.HostKeyReceived += (_, e) => e.CanTrust = verifyHost(Fingerprint(e.HostKey)).GetAwaiter().GetResult();
         await Task.Run(() => ssh.Connect());
         Profile = profile;
         await StartAgentAsync(resourceDirectory);
@@ -71,14 +73,25 @@ public sealed class RemoteAgent : IDisposable
         command = ssh.CreateCommand("bash -lc " + Protocol.Quote(script));
         var execution = command.ExecuteAsync(lifetime.Token);
         writer = new StreamWriter(command.CreateInputStream(), new UTF8Encoding(false)) { AutoFlush = true };
+        var channel = command!;
+        var ready = Listen(channel.OutputStream, execution, () => channel == command);
+        await ready.WaitAsync(TimeSpan.FromSeconds(30));
+        var hello = await CallAsync("file", new { operation = "hello" });
+        Home = hello["home"]!.GetValue<string>();
+        if (hello["nodeSupported"]?.GetValue<bool>() != true) { channelClosed = true; throw new RemoteSetupException(true, hello["node"]?.GetValue<string>()); }
+        Hello = hello;
+        await CallAsync("task", new { operation = "install", digest = Digest, payload = manifest["bundlePayload"]!.GetValue<string>() });
+    }
+    /// <summary>Reads the agent's JSON lines until the stream ends. The returned task completes at the agent's ready line.</summary>
+    private Task Listen(Stream output, Task finished, Func<bool> current)
+    {
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         RemoteSetupException? setupFailure = null;
-        var channel = command!;
         _ = Task.Run(async () =>
         {
             try
             {
-                using var reader = new StreamReader(channel.OutputStream);
+                using var reader = new StreamReader(output);
                 while (await reader.ReadLineAsync(lifetime.Token) is { } line)
                 {
                     if (line == "__RCC_NO_NODE__") { setupFailure = new RemoteSetupException(false); ready.TrySetException(setupFailure); continue; }
@@ -95,7 +108,7 @@ public sealed class RemoteAgent : IDisposable
                     if (message["error"] is not null) pending.TrySetException(new IOException(message["error"]!.GetValue<string>()));
                     else pending.TrySetResult(message["result"]?.DeepClone() ?? new JsonObject());
                 }
-                await execution;
+                await finished;
                 throw new IOException("SSH 通道已断开，请重新连接；远端任务会保留");
             }
             catch (Exception e)
@@ -105,15 +118,21 @@ public sealed class RemoteAgent : IDisposable
                 foreach (var request in requests.Values) request.TrySetException(e);
                 requests.Clear();
                 // A missing Node.js is reported by ConnectAsync as a setup step, not as a lost connection.
-                if (!lifetime.IsCancellationRequested && setupFailure is null && channel == command) Disconnected?.Invoke(e.Message);
+                if (!lifetime.IsCancellationRequested && setupFailure is null && current()) Disconnected?.Invoke(e.Message);
             }
         });
-        await ready.Task.WaitAsync(TimeSpan.FromSeconds(30));
-        var hello = await CallAsync("file", new { operation = "hello" });
-        Home = hello["home"]!.GetValue<string>();
-        if (hello["nodeSupported"]?.GetValue<bool>() != true) { channelClosed = true; throw new RemoteSetupException(true, hello["node"]?.GetValue<string>()); }
-        Hello = hello;
-        await CallAsync("task", new { operation = "install", digest = Digest, payload = manifest["bundlePayload"]!.GetValue<string>() });
+        return ready.Task;
+    }
+
+    /// <summary>Speaks the agent protocol over two streams instead of SSH: the built-in demo, or a local agent in tests.</summary>
+    public static async Task<RemoteAgent> AttachAsync(Stream toAgent, Stream fromAgent, HostProfile profile)
+    {
+        var agent = new RemoteAgent { attached = true, Profile = profile, Digest = new string('0', 64) };
+        agent.writer = new StreamWriter(toAgent, new UTF8Encoding(false)) { AutoFlush = true };
+        await agent.Listen(fromAgent, Task.CompletedTask, () => true).WaitAsync(TimeSpan.FromSeconds(30));
+        var hello = await agent.CallAsync("file", new { operation = "hello" });
+        agent.Home = hello["home"]!.GetValue<string>(); agent.Hello = hello;
+        return agent;
     }
     /// <summary>Proves a key logs in on its own, pinning the host fingerprint already trusted for this host.</summary>
     public static async Task VerifyKeyLoginAsync(HostProfile profile, string expectedFingerprint)
@@ -219,8 +238,41 @@ public sealed class RemoteAgent : IDisposable
         if (upload.ExitStatus != 0) throw new IOException(upload.Error);
         return remote;
     }
+    /// <summary>Makes a port on the server's loopback reachable at 127.0.0.1 on this computer for as long as the connection lasts.</summary>
+    public void Forward(Tunnel tunnel)
+    {
+        if (tunnel.LocalPort is < 1 or > 65535 || tunnel.RemotePort is < 1 or > 65535) throw new ArgumentException("端口需在 1–65535 之间");
+        if (ssh is null || !ssh.IsConnected) throw new IOException("请先连接服务器");
+        lock (forwards)
+        {
+            if (forwards.ContainsKey(tunnel.LocalPort)) throw new IOException($"本地端口 {tunnel.LocalPort} 已在转发");
+            var port = new ForwardedPortLocal("127.0.0.1", (uint)tunnel.LocalPort, "127.0.0.1", (uint)tunnel.RemotePort);
+            ssh.AddForwardedPort(port);
+            try { port.Start(); }
+            catch (System.Net.Sockets.SocketException e)
+            {
+                ssh.RemoveForwardedPort(port); port.Dispose();
+                throw new IOException($"无法监听本地端口 {tunnel.LocalPort}：{e.Message}", e);
+            }
+            forwards[tunnel.LocalPort] = (tunnel, port);
+        }
+    }
+
+    public void CloseForward(int localPort)
+    {
+        lock (forwards)
+        {
+            if (!forwards.Remove(localPort, out var entry)) return;
+            try { entry.Port.Stop(); ssh?.RemoveForwardedPort(entry.Port); } catch (Exception e) when (e is ObjectDisposedException or Renci.SshNet.Common.SshException) { }
+            entry.Port.Dispose();
+        }
+    }
+
+    public IReadOnlyList<Tunnel> Tunnels { get { lock (forwards) return forwards.Values.Select(entry => entry.Tunnel).OrderBy(tunnel => tunnel.LocalPort).ToList(); } }
+
     public void Dispose()
     {
+        foreach (var tunnel in Tunnels) CloseForward(tunnel.LocalPort);
         lifetime.Cancel(); writer?.Dispose(); command?.Dispose(); ssh?.Dispose();
         foreach (var request in requests.Values) request.TrySetCanceled(); requests.Clear(); watches.Clear();
     }

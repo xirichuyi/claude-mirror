@@ -4,15 +4,6 @@ import RemoteCCCore
 
 struct SessionDetailsView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var context: JSON?
-    @State private var contextError: String?
-    @State private var loading = false
-    @State private var revision = 0
-
-    private var source: String {
-        "\(model.activeId ?? ""): \(model.active?.status ?? ""): \(model.isConnected):\(revision)"
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -33,19 +24,13 @@ struct SessionDetailsView: View {
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Label("上下文", systemImage: "gauge.with.dots.needle.33percent").font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Button { revision += 1 } label: { WorkbenchIcon(symbol: "arrow.clockwise") }
-                                .buttonStyle(QuietButtonStyle()).disabled(loading || !model.isConnected).help("刷新上下文").accessibilityLabel("刷新上下文")
-                        }
-                        if loading { ProgressView().controlSize(.small) }
-                        if let context, let total = context["totalTokens"]?.double, let limit = context["maxTokens"]?.double, limit > 0 {
-                            ProgressView(value: min(total, limit), total: limit)
-                            Text("\(Int(total)) / \(Int(limit)) tokens · \(Int(total / limit * 100))%")
+                        Label("上下文", systemImage: "gauge.with.dots.needle.33percent").font(.subheadline.weight(.semibold))
+                        if let context = session.context {
+                            ProgressView(value: context.fraction)
+                            Text("\(Int(context.usedTokens)) / \(Int(context.maxTokens)) tokens · \(Int((context.fraction * 100).rounded()))%")
                                 .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                         } else {
-                            Text(contextError ?? "开始对话后显示实时上下文").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                            Text("回复完成后显示上下文用量").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                         }
                         Button("查看用量明细") { model.showUsage = true }
                     }
@@ -72,18 +57,6 @@ struct SessionDetailsView: View {
                 }
             }.buttonStyle(.link).padding(16).frame(maxWidth: .infinity, alignment: .leading)
         }.background(WorkbenchTheme.sidebar)
-        .task(id: source) {
-            context = nil; contextError = nil
-            guard let session = model.active, session.remoteOwner != nil, model.isConnected, let engine = model.engine else { return }
-            loading = true
-            defer { loading = false }
-            do {
-                let result = try await engine.details(session.id, section: "context")
-                try Task.checkCancellation()
-                context = result
-            } catch is CancellationError { }
-            catch { contextError = error.localizedDescription }
-        }
     }
 }
 #endif

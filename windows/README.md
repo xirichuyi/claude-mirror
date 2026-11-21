@@ -23,9 +23,21 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 - 服务器环境检查：缺 Node.js / Claude Code 一键安装，Claude 未登录引导终端登录，SSH 断开会结束后台任务时给出处理命令；连接失败给出原因说明。
 - 密码登录成功后可一键设置免密登录（使用 Windows 自带的 ssh-keygen 生成专用密钥）。
 - 首次确认主机指纹，指纹变更拒绝连接；SSH keepalive。
+- 添加服务器时可以从 `~/.ssh/config` 导入主机（HostName、User、Port、IdentityFile；不处理 `Match` 块）。配置里写了 ProxyJump 的主机会提示不支持。
+- 断线自动重连：用无口令私钥登录的服务器会按 1、2、5、10、30 秒的间隔自动重连，保留当前对话并重新订阅仍在运行的远端任务。密码和私钥口令不会留存，所以这类服务器断线后需要手动重新连接。主机指纹变化或私钥被拒绝时停止重试。
+- 端口转发（“更多操作”里）：把服务器 127.0.0.1 上的端口接到本机 127.0.0.1，可随时关闭；自动重连后会恢复。
 - 项目分组、分页同步历史索引、选中后读取消息。
-- 新会话、历史续聊、远端持久任务、停止、工具权限确认与 AskUserQuestion 回答。
+- 会话管理（右键侧栏里的对话）：重命名、固定、归档、详情、从列表移除；这些只保存在本机，不改动服务器上的对话记录。右键项目可以把该目录的全部对话记录移到服务器的废纸篓。
+- 新会话、历史续聊、远端持久任务、停止。
+- 对话：工具调用显示为可展开的卡片（命令、文件、diff、任务清单、输出和运行状态），思考过程可折叠；代码块保留长行、横向滚动，超过 380 像素在块内滚动；历史消息里的工具结果并入对应的工具卡片。
+- 权限请求显示在输入框上方的卡片里：直接看到命令或 diff，可以选择问题的选项、应用远端建议的权限规则、拒绝时附上修改意见；输入框工具栏可切换权限模式。
+- 回复进行中发送的消息进入队列，回复结束后依次发送；回复失败或被停止时队列暂停，由你决定是否继续。
+- 回复结束后可以复制整条回复，或预览并回退这条回复改动的文件（需要远端任务仍在运行）。
 - 远端模型/命令列表；命令填入输入框，发送后由远端处理。
+- 工作区（“更多操作”里）：Git 变更列表和并排 diff、在项目文件中搜索（Ctrl+Shift+F）、按文件名快速打开（Ctrl+P）、从当前 HEAD 新建 worktree、PDF 预览（前 30 页，标签页上可下载原文件）。这些和文件编辑器共用对话右侧的标签页。
+- 状态页（“更多操作”里）：服务器和环境检查结果、账号用量、上下文用量、MCP 服务器（重连、启用/停用）、重新加载插件、停止后台任务。后面几项来自对话的远端任务，发送过消息后才有数据。
+- 设置（“更多操作”里）：外观可选跟随系统、浅色或深色，选择会保存。
+- 远端文件浏览器里可以新建文件和文件夹，右键条目可以重命名、删除（删除在菜单里二次确认，不进废纸篓）。
 - 远端目录浏览，文本/图片预览和下载，选择文件/拖放上传；附件按内容哈希存入远端缓存，相同内容复用路径。
 - 会话 ID 和远端任务 ID 保存在 LocalAppData/claude-mirror，可在重连选择历史会话时重新订阅。
 
@@ -33,7 +45,7 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 
 聊天和 Markdown 文件共用原生渲染器，支持标题、引用、表格、列表、任务标记、链接、行内代码和带语言名的围栏代码块。打开“远端文件”，选择文本文件即可在聊天右侧打开标签。使用“编辑”和 Ctrl+S 保存；保存遇到版本冲突时保留草稿。完整预览和编辑上限为 1 MB，窄窗口可用“返回对话”切换。
 
-复杂命令的专用交互卡片、文件删除、自动重连、SSH config/ProxyJump/agent、反向访问和可视化 usage 尚未移植。私钥需要手动选择，不自动读取 macOS 配置。目录切换请新建会话，运行中的任务仍使用原目录。
+跨消息连续选择文本（目前只能在一段文字内选择，或复制整条回复）、表单类交互（elicitation）、ssh-agent 登录、跳板机（ProxyJump）、反向访问和可视化 usage 尚未移植。目录切换请新建会话，运行中的任务仍使用原目录。
 
 原生 Windows 窗口交互须在 Windows 实机验收；macOS 只能验证共享 C# 核心和远端协议。CI 提供 Windows 编译、测试和自包含 x64 ZIP 工件。安装程序和客户端当前均未签名。
 
@@ -42,3 +54,13 @@ dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o
 核心单元测试覆盖状态增量、乱序保护、Shell 参数引用和本地状态持久化。已通过 `axi` 实测 SSH 连接、历史索引、文件目录、真实 Claude 回复与会话能力读取。Windows CI 另外检查编译和原生窗口 Loaded 事件，再输出 ZIP。
 
 集成测试默认跳过。维护者可以设置 `MIRROR_SMOKE_HOST`、`MIRROR_SMOKE_PORT`、`MIRROR_SMOKE_USER`、`MIRROR_SMOKE_KEY`、`MIRROR_SMOKE_FINGERPRINT` 和 `MIRROR_SMOKE_RESOURCES` 运行只读连接检查；额外设置 `MIRROR_SMOKE_CHAT=1` 会创建一条测试会话，产生一次模型请求，随后关闭测试任务。私钥和真实主机配置不要提交到仓库。
+
+### 演示场景和截图
+
+不连接服务器也可以打开真实窗口：设置 `CLAUDE_MIRROR_DEMO=home`、`chat`、`permission` 或 `finished` 后启动，界面使用内置的演示数据，不读写已保存的主机。可选 `CLAUDE_MIRROR_THEME=light|dark`、`CLAUDE_MIRROR_SIZE=1280x860`、`CLAUDE_MIRROR_SCROLL=0`；设置 `CLAUDE_MIRROR_SNAPSHOT=路径.png` 会把窗口内容保存为图片后退出。
+
+```powershell
+./windows/capture-screenshots.ps1 windows/dist/claude-mirror/claude-mirror.exe windows/dist/screenshots
+```
+
+CI 每次都会生成这些截图，并作为 `claude-mirror-windows-screenshots` 产物上传。

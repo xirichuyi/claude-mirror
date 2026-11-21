@@ -253,28 +253,47 @@ public final class ChatEngine {
 
     public func exportMarkdown(_ id: String) throws -> String {
         let session = sessions[try index(id)]
-        let body = session.messages.map { message -> String in
-            let text = message.text ?? (message.blocks ?? []).filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n\n")
-            return "## " + (message.role == "user" ? "User" : "Claude") + "\n\n" + text
+        // A message steered into a reply splits it: Claude, User, Claude.
+        var sections: [(user: Bool, text: [String])] = []
+        for message in session.messages {
+            sections.append((message.role == "user", message.text.map { [$0] } ?? []))
+            guard message.text == nil else { continue }
+            for block in message.blocks ?? [] {
+                guard let text = block.text, block.type == "text" || (block.type == "user" && block.cancelled != true) else { continue }
+                let last = sections.count - 1, user = block.type == "user"
+                if user != sections[last].user {
+                    if sections[last].text.isEmpty { sections[last].user = user } else { sections.append((user, [])) }
+                }
+                sections[sections.count - 1].text.append(text)
+            }
         }
+        let body = sections.map { "## " + ($0.user ? "User" : "Claude") + "\n\n" + $0.text.joined(separator: "\n\n") }
         return "# " + session.name + "\n\n" + body.joined(separator: "\n\n")
     }
 
     // MARK: Sending
 
-    public func submit(_ id: String, text: String, attachments: [Attachment] = []) throws {
+    /// While Claude is replying the message waits in the queue; `steer` hands it to the running reply instead.
+    public func submit(_ id: String, text: String, attachments: [Attachment] = [], steer: Bool = false) throws {
         if let session = session(id), projectMissing(session.config) { throw RemoteError("远端项目目录已不存在，请选择其他项目。") }
-        if running.contains(id) { try enqueue(id, text: text, attachments: attachments) }
-        else { try send(id, text: text, attachments: attachments) }
+        guard running.contains(id) else { return try send(id, text: text, attachments: attachments) }
+        let item = try enqueue(id, text: text, attachments: attachments)
+        guard steer else { return }
+        Task { @MainActor [weak self] in
+            do { try await self?.steer(id, item: item) } catch { self?.onError?(error.localizedDescription) }
+        }
     }
 
-    public func enqueue(_ id: String, text: String, attachments: [Attachment] = []) throws {
+    @discardableResult
+    public func enqueue(_ id: String, text: String, attachments: [Attachment] = []) throws -> String {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!value.isEmpty || !attachments.isEmpty), text.count <= 200_000 else { throw RemoteError("消息不能为空或超过 20 万字符") }
         let position = try index(id)
         guard (sessions[position].queue?.count ?? 0) < 20 else { throw RemoteError("最多排队 20 条消息") }
-        sessions[position].queue = (sessions[position].queue ?? []) + [QueuedMessage(id: UUID().uuidString, text: value.isEmpty ? "请查看附件。" : value, attachments: attachments)]
+        let item = QueuedMessage(id: UUID().uuidString.lowercased(), text: value.isEmpty ? "请查看附件。" : value, attachments: attachments)
+        sessions[position].queue = (sessions[position].queue ?? []) + [item]
         changed(id)
+        return item.id
     }
 
     public func cancelQueued(_ id: String, item: String) throws {
@@ -286,6 +305,54 @@ public final class ChatEngine {
     public func resumeQueue(_ id: String) throws {
         sessions[try index(id)].queuePaused = false
         drainQueue(id)
+        changed(id)
+    }
+
+    /// Hands a queued message to the reply that is running now. Claude reads it at its
+    /// next step; the reply is not stopped. With no reply running it is sent next.
+    public func steer(_ id: String, item: String) async throws {
+        let position = try index(id)
+        guard let queued = sessions[position].queue?.first(where: { $0.id == item }) else { return }
+        sessions[position].queue?.removeAll { $0.id == item }
+        guard running.contains(id), sessions[position].status != "stopping" else {
+            sessions[position].queue?.insert(queued, at: 0)
+            sessions[position].queuePaused = false
+            changed(id)
+            drainQueue(id)
+            return
+        }
+        changed(id)
+        do {
+            _ = try await command(id, kind: "steer", fields: [
+                "id": .string(queued.id), "text": .string(queued.text), "prompt": .string(Self.prompt(queued.text, queued.attachments)),
+                "attachments": try JSON.from(queued.attachments),
+            ])
+        } catch {
+            guard let current = try? index(id) else { throw error }
+            // Only the acknowledgement was lost: the reply already shows the message.
+            if steered(current, queued.id) { return }
+            // The reply ended first, the link dropped, or the remote worker predates
+            // steering. The message returns to the head of the queue, never lost.
+            sessions[current].queue = [queued] + (sessions[current].queue ?? [])
+            changed(id)
+            if !running.contains(id), sessions[current].queuePaused != true { return drainQueue(id) }
+            // A worker started by an older app version does not know the request.
+            throw error.localizedDescription == "未知会话请求" ? RemoteError("这个远端会话启动于旧版本，暂不支持插队；消息已排在队首") : error
+        }
+    }
+
+    static func prompt(_ text: String, _ attachments: [Attachment]) -> String {
+        attachments.isEmpty ? text : text + "\n\n用户附加的远端文件（已上传或在远端选定，可通过 Read 等工具访问，包括图片）：\n" + attachments.map { "- " + JSON.string($0.path).text() }.joined(separator: "\n")
+    }
+
+    private func steered(_ position: Int, _ item: String) -> Bool {
+        sessions[position].messages.contains { $0.blocks?.contains { $0.type == "user" && $0.id == item && $0.cancelled != true } == true }
+    }
+
+    public func clearQueue(_ id: String) throws {
+        let position = try index(id)
+        sessions[position].queue = nil
+        sessions[position].queuePaused = nil
         changed(id)
     }
 
@@ -318,7 +385,7 @@ public final class ChatEngine {
         sessions[position].updatedAt = Date().timeIntervalSince1970 * 1000
         sessions[position].queuePaused = sessions[position].queuePaused == true ? false : nil
         running.insert(id)
-        let prompt = attachments.isEmpty ? value : value + "\n\n用户附加的远端文件（已上传或在远端选定，可通过 Read 等工具访问，包括图片）：\n" + attachments.map { "- " + JSON.string($0.path).text() }.joined(separator: "\n")
+        let prompt = Self.prompt(value, attachments)
         // Persist identity and request before dispatch: uncertain ACKs reuse this exact task ID.
         let owner = sessions[position].remoteOwner
         sessions[position].remoteTask = RemoteTask(id: owner?.id ?? UUID().uuidString.lowercased(), prompt: prompt, version: -1, submitted: false, messageId: reply.id, continuation: owner != nil)
@@ -468,7 +535,9 @@ public final class ChatEngine {
         let reportedStatus = state["status"]?.string ?? "working"
         // A closed worker cannot still generate a reply, even if an older worker
         // persisted a stale busy state while shutting down.
-        let status = done && ["working", "connecting", "permission", "stopping", "detached"].contains(reportedStatus) ? "stopped" : reportedStatus
+        var status = done && ["working", "connecting", "permission", "stopping", "detached"].contains(reportedStatus) ? "stopped" : reportedStatus
+        // A snapshot written before the stop arrived must not flip the session back to working.
+        if stopRequests.contains(id), ["working", "connecting", "permission"].contains(status) { status = "stopping" }
         let messageId = state["message"]?["id"]?.string
         // A queued new turn must not be overwritten by the previous turn's idle snapshot.
         if let task, messageId != task.messageId {
@@ -497,6 +566,11 @@ public final class ChatEngine {
         let previousMetadata = sessions[position].transcriptIndependentState
         sessions[position].messages[target] = try message.decode(ChatMessage.self)
         if done && status == "stopped" { sessions[position].messages[target].interrupted = true }
+        // A message the reply shows has been delivered, even when the steer request
+        // failed without an answer and put it back in the queue.
+        if let delivered = sessions[position].queue?.filter({ steered(position, $0.id) }).map(\.id), !delivered.isEmpty {
+            sessions[position].queue?.removeAll { delivered.contains($0.id) }
+        }
         sessions[position].status = status
         sessions[position].permissions = (try? state["permissions"]?.decode([PermissionRequest].self)) ?? []
         if let value = state["remoteSessionId"]?.string { sessions[position].remoteSessionId = value }
@@ -509,6 +583,7 @@ public final class ChatEngine {
             if let decoded = try? value.decode(Capabilities.self) { sessions[position].capabilities = decoded }
         }
         if let value = state["usage"] { sessions[position].usage = value }
+        if let value = state["context"], let decoded = try? value.decode(ContextUsage.self) { sessions[position].context = decoded }
         if let value = state["tasks"] { sessions[position].tasks = value }
         if let value = state["tools"] { sessions[position].tools = value }
         if let value = state["plugins"] { sessions[position].plugins = value }
@@ -549,7 +624,7 @@ public final class ChatEngine {
         guard let owner = session.remoteOwner?.id ?? session.remoteTask?.id else { throw RemoteError("远端会话已经结束") }
         var command = fields
         command["kind"] = .string(kind)
-        let wait = session.remoteOwner != nil || kind == "control" || kind == "send"
+        let wait = session.remoteOwner != nil || ["control", "send", "steer"].contains(kind)
         let response = try await agents.call(session.config, "task", ["operation": "command", "taskId": .string(owner), "commandId": .string(commandId), "command": .object(command), "wait": .bool(wait)], timeout: 60)
         if response["ok"]?.bool == false {
             throw RemoteError(response["error"]?.string ?? "远端操作失败", confirmed: response["uncertain"]?.isTruthy != true)
@@ -601,7 +676,16 @@ public final class ChatEngine {
         guard session.remoteTask != nil || session.remoteOwner != nil else { return }
         let owner = session.remoteOwner?.id ?? session.remoteTask?.id
         let message = session.messages.last?.id
-        _ = try await command(id, kind: "stop")
+        // Show the stop at once; the remote confirmation can take a round trip.
+        if running.contains(id) { sessions[try index(id)].status = "stopping"; changed(id) }
+        do { _ = try await command(id, kind: "stop") }
+        catch {
+            if let position = try? index(id), sessions[position].status == "stopping", running.contains(id) {
+                sessions[position].status = session.status
+                changed(id)
+            }
+            throw error
+        }
         if try await waitForStop(id, owner: owner, message: message) { return }
         // Older resident workers may acknowledge an interrupt without ending the
         // turn. Close only that owner; never kill unrelated Claude processes.

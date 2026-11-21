@@ -52,6 +52,15 @@ jobs:
       - name: Verify SSH setup buttons in the published client
         shell: pwsh
         run: ./windows/test-host-dialog.ps1 windows/dist/claude-mirror/claude-mirror.exe
+      - name: Render demo scenes
+        shell: pwsh
+        run: ./windows/capture-screenshots.ps1 windows/dist/claude-mirror/claude-mirror.exe windows/dist/screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-mirror-windows-screenshots
+          path: windows/dist/screenshots
+          if-no-files-found: warn
       - name: Package portable Windows client
         shell: pwsh
         run: |
