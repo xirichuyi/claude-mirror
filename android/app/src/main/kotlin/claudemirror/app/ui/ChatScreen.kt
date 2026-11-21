@@ -2,17 +2,22 @@ package claudemirror.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -59,11 +64,13 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import claudemirror.app.AppModel
 import claudemirror.core.ChatSession
 import claudemirror.core.ConnectionState
+import kotlinx.serialization.json.JsonObject
 
 private val PermissionModes = listOf(
     null to "默认：每次操作先询问",
@@ -127,12 +134,15 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
                     }
                 }
             }
-            Transcript(session, Modifier.weight(1f))
-            for (permission in session.permissions) {
-                PermissionCard(permission) { answer -> model.respond(sessionId, permission.id, answer) }
+            // The composer keeps its place below, however short the window and however much waits above it.
+            BoxWithConstraints(Modifier.weight(1f)) {
+                val queueRoom = minOf(maxHeight / 3, 144.dp)
+                Column {
+                    Transcript(session, Modifier.weight(1f)) { permission, answer -> model.respond(sessionId, permission, answer) }
+                    // Editing a queued message must not throw away what is already being written.
+                    Queue(session, model, queueRoom, onEdit = { item -> draft = if (draft.isBlank()) item else draft.trimEnd() + "\n" + item })
+                }
             }
-            // Editing a queued message must not throw away what is already being written.
-            Queue(session, model, onEdit = { item -> draft = if (draft.isBlank()) item else draft.trimEnd() + "\n" + item })
             Composer(
                 session, draft, onDraft = { draft = it },
                 onSend = { steer -> if (model.submit(sessionId, draft, steer)) draft = "" },
@@ -143,7 +153,7 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
 }
 
 @Composable
-private fun Transcript(session: ChatSession, modifier: Modifier) {
+private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (permission: String, JsonObject) -> Unit) {
     val list = rememberLazyListState()
     // One row per block, so a long reply only redraws the part that is still being written.
     val rows = remember(session.messages) {
@@ -158,7 +168,10 @@ private fun Transcript(session: ChatSession, modifier: Modifier) {
     LaunchedEffect(growth) {
         if (rows.isNotEmpty() && (!list.canScrollForward || list.firstVisibleItemIndex == 0 && !list.canScrollBackward)) list.scrollToItem(rows.size, 0)
     }
-    if (rows.isEmpty()) {
+    // A request Claude is waiting on is brought into view, wherever the reader was.
+    val asked = session.permissions.firstOrNull()?.id
+    LaunchedEffect(asked) { if (asked != null) list.scrollToItem(rows.size + 1) }
+    if (rows.isEmpty() && session.permissions.isEmpty()) {
         Box(modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
             Text("在 ${session.directory} 里开始对话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -177,7 +190,7 @@ private fun Transcript(session: ChatSession, modifier: Modifier) {
             }
         }
         item(key = "status") {
-            // A pending request is shown by its own card below.
+            // A pending request is shown by its own card.
             if (session.isBusy && session.status != "permission") {
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (session.status != "detached") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -188,12 +201,16 @@ private fun Transcript(session: ChatSession, modifier: Modifier) {
                 }
             }
         }
+        // In the list rather than pinned over it: a long command must not push the reply or the composer off screen.
+        items(session.permissions, key = { "permission:" + it.id }) { permission ->
+            PermissionCard(permission) { answer -> onAnswer(permission.id, answer) }
+        }
     }
 }
 
 /** Messages waiting for the current reply to end. Each can go into the reply now, back to the editor, or away. */
 @Composable
-private fun Queue(session: ChatSession, model: AppModel, onEdit: (String) -> Unit) {
+private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (String) -> Unit) {
     if (session.queue.isEmpty()) return
     HorizontalDivider()
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp)) {
@@ -210,12 +227,14 @@ private fun Queue(session: ChatSession, model: AppModel, onEdit: (String) -> Uni
             if (waiting) TextButton(onClick = { model.resumeQueue(session.id) }) { Text("继续发送") }
             TextButton(onClick = { model.clearQueue(session.id) }) { Text("清空") }
         }
-        for (item in session.queue) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(item.text, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                if (session.remoteTask != null) IconButton(onClick = { model.steer(session.id, item.id) }) { Icon(Icons.Filled.Bolt, "立即发送：插入当前回复") }
-                IconButton(onClick = { model.cancelQueued(session.id, item.id); onEdit(item.text) }) { Icon(Icons.Filled.Edit, "编辑") }
-                IconButton(onClick = { model.cancelQueued(session.id, item.id) }) { Icon(Icons.Filled.Close, "移除") }
+        Column(Modifier.heightIn(max = room).verticalScroll(rememberScrollState())) {
+            for (item in session.queue) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(item.text, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                    if (session.remoteTask != null) IconButton(onClick = { model.steer(session.id, item.id) }) { Icon(Icons.Filled.Bolt, "立即发送：插入当前回复") }
+                    IconButton(onClick = { model.cancelQueued(session.id, item.id); onEdit(item.text) }) { Icon(Icons.Filled.Edit, "编辑") }
+                    IconButton(onClick = { model.cancelQueued(session.id, item.id) }) { Icon(Icons.Filled.Close, "移除") }
+                }
             }
         }
     }
