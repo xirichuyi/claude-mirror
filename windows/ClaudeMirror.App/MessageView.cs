@@ -35,6 +35,9 @@ public sealed partial class MainWindow
         private string? previous, checkpoint;
         private string plain = "";
         public Border Container { get; }
+        public bool User => user;
+        /// The message's text without tool calls or thinking.
+        public string Plain => plain;
 
         public MessageView(MainWindow window,bool user,string text)
         {
@@ -48,6 +51,7 @@ public sealed partial class MainWindow
                 Padding=user?new Thickness(14,10,14,10):new Thickness(0), CornerRadius=new CornerRadius(16), Background=user?window.bubble:null,
                 MaxWidth=user?620:double.PositiveInfinity
             };
+            Container.Tag = this;
             if(text.Length>0) body.Children.Add(Label(text,15,user?window.ink:window.muted));
         }
 
@@ -124,6 +128,7 @@ public sealed partial class MainWindow
             if(footer.Visibility==Visibility.Collapsed) return;
             if(interrupted) footer.Children.Add(new TextBlock { Text="已停止",FontSize=12,Foreground=window.muted,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,6,0) });
             if(plain.Length>0) footer.Children.Add(window.ActionButton("复制回复","\uE8C8",()=>{ Copy(plain); return Task.CompletedTask; }));
+            if(plain.Length>0) footer.Children.Add(window.ActionButton("跨消息选择文本","\uE8B3",window.TranscriptAsync));
             if(checkpoint is { } id) footer.Children.Add(window.ActionButton("回退文件改动","\uE7A7",()=>window.RewindAsync(id)));
         }
     }

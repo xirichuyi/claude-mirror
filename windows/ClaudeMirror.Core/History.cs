@@ -99,6 +99,18 @@ public sealed class SendQueue
     }
 }
 
+/// <summary>A conversation as one piece of text, so a selection can run across messages.</summary>
+public static class Transcript
+{
+    public sealed record Entry(bool User, string Text);
+    /// <summary>The messages that have text, in order; tool calls and thinking are left out.</summary>
+    public static List<Entry> Entries(IEnumerable<(bool User, string Text)> messages) =>
+        messages.Where(message => !string.IsNullOrWhiteSpace(message.Text)).Select(message => new Entry(message.User, message.Text.Trim())).ToList();
+    public static string Speaker(bool user) => user ? "你" : "Claude";
+    public static string Text(IEnumerable<(bool User, string Text)> messages) =>
+        string.Join("\n\n", Entries(messages).Select(entry => Speaker(entry.User) + "：\n" + entry.Text));
+}
+
 /// <summary>What a task snapshot says about the turn in progress.</summary>
 public static class Turn
 {

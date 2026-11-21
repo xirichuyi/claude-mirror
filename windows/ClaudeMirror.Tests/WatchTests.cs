@@ -105,4 +105,13 @@ public class WatchTests
         Assert.Equal("有新回复", Turn.Label(false, false, false, 0, true));
         Assert.Null(Turn.Label(false, false, false, 0, false));
     }
+
+    [Fact]
+    public void ATranscriptJoinsTheMessagesThatHaveText()
+    {
+        var messages = new[] { (true, "  第一个问题 "), (false, ""), (false, "回答一\n第二行"), (true, "追问") };
+        Assert.Equal("你：\n第一个问题\n\nClaude：\n回答一\n第二行\n\n你：\n追问", Transcript.Text(messages));
+        Assert.Equal(3, Transcript.Entries(messages).Count);
+        Assert.Equal("", Transcript.Text([]));
+    }
 }

@@ -123,4 +123,33 @@ public sealed partial class MainWindow
             content.Children.Add(row);
         }
     }
+
+    /// The whole conversation as one block of text. Selection in the chat stops at each bubble, because every block is its own control;
+    /// here it runs from any message to any other.
+    private Task TranscriptAsync()
+    {
+        var entries = Transcript.Entries(messages.Children.OfType<FrameworkElement>().Select(element => element.Tag).OfType<MessageView>().Select(view => (view.User, view.Plain)));
+        if (entries.Count == 0) throw new IOException("这个对话还没有可以选择的文字");
+        var text = new RichTextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FontSize = 14, Foreground = ink, Margin = new Thickness(18, 6, 18, 18), LineHeight = 22 };
+        foreach (var entry in entries)
+        {
+            var paragraph = new Microsoft.UI.Xaml.Documents.Paragraph { Margin = new Thickness(0, 0, 0, 14) };
+            paragraph.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = Transcript.Speaker(entry.User) + "：", Foreground = entry.User ? sage : muted, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            paragraph.Inlines.Add(new Microsoft.UI.Xaml.Documents.LineBreak());
+            paragraph.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = entry.Text });
+            text.Blocks.Add(paragraph);
+        }
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(6) };
+        bar.Children.Add(BackToChat());
+        bar.Children.Add(ActionButton("全选", "\uE8B3", () => { text.Focus(FocusState.Programmatic); text.SelectAll(); return Task.CompletedTask; }, true));
+        bar.Children.Add(ActionButton("复制选中的文字", "\uE8C8", () =>
+        {
+            // Nothing selected copies the whole conversation.
+            Copy(text.SelectedText.Length > 0 ? text.SelectedText : Transcript.Text(entries.Select(entry => (entry.User, entry.Text))));
+            status.Text = "已复制"; return Task.CompletedTask;
+        }, true));
+        bar.Children.Add(ActionButton("刷新", "\uE72C", TranscriptAsync, true));
+        OpenToolTab("transcript", "对话文本", ToolArea(bar, new ScrollViewer { Content = text }));
+        return Task.CompletedTask;
+    }
 }
