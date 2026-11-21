@@ -255,14 +255,14 @@ public sealed class RemoteAgent : IDisposable
     /// <summary>
     /// Stores an attachment where the account Claude runs as can read it. A root login writes it as that account, into that account's home:
     /// root's own folders are closed to it, and writing as root into a folder the account controls would follow any link left there.
-    /// The command reads the file on stdin and prints the path it was stored at.
+    /// The command reads the file on stdin and prints the path it was stored at. The modes are set outright: a default ACL on the home overrides umask.
     /// </summary>
     public static string UploadForAccountCommand(string account, string hash, string name)
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(account, "^[a-z_][a-z0-9_-]{0,31}$")) throw new ArgumentException("无效的 Claude 执行账号");
         var temporary = name + "." + Guid.NewGuid().ToString("N") + ".tmp";
         return $"if [ \"$(id -u)\" = 0 ]; then home=$(getent passwd {account} | cut -d: -f6); run=\"$(command -v runuser || echo /usr/sbin/runuser) -u {account} --\"; else home=$HOME; run=; fi; "
-            + "test -n \"$home\" && $run sh -c 'umask 077; mkdir -p \"$1\" && cat > \"$1/$3\" && mv \"$1/$3\" \"$1/$2\" && printf %s \"$1/$2\"' sh "
+            + "test -n \"$home\" && $run sh -c 'umask 077; mkdir -p \"$1\" && chmod 700 \"$1\" && : > \"$1/$3\" && chmod 600 \"$1/$3\" && cat >> \"$1/$3\" && mv \"$1/$3\" \"$1/$2\" && printf %s \"$1/$2\"' sh "
             + $"\"$home/.cache/claude-mirror/attachments/{hash}\" {Protocol.Quote(name)} {Protocol.Quote(temporary)}";
     }
     /// <param name="account">The execution account of the conversation the file is for; empty when Claude runs as the SSH user.</param>

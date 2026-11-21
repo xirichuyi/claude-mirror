@@ -57,6 +57,8 @@ public class SystemSshTests
             Assert.Equal(Path.Combine(home, ".cache/claude-mirror/attachments", new string('a', 64), "it's a file.bin"), path);
             Assert.Equal(bytes, File.ReadAllBytes(path));
             Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.GetDirectoryName(path)!));
         }
         finally { Directory.Delete(home, true); }
     }
@@ -72,6 +74,8 @@ public class SystemSshTests
         Assert.Matches($"^/home/{account}/\\.cache/claude-mirror/attachments/b{{64}}/photo\\.png$", path);
         var (_, facts, _) = await Shell("sudo", ["stat", "-c", "%U %a %s", path], []);
         Assert.Equal($"{account} 600 70000", facts.Trim());
+        var (_, folder, _) = await Shell("sudo", ["stat", "-c", "%U %a", Path.GetDirectoryName(path)!], []);
+        Assert.Equal($"{account} 700", folder.Trim());
         var (read, _, denied) = await Shell("sudo", ["-u", account, "cat", path], []);
         Assert.True(read == 0, denied);
     }
