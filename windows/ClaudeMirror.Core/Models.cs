@@ -3,7 +3,9 @@ using System.Text.Json.Nodes;
 
 namespace ClaudeMirror.Core;
 
-public sealed record HostProfile(string Name, string Host, int Port, string User, string? KeyFile = null);
+/// <param name="SystemSsh">Connect with the computer's OpenSSH client: SSH config, ssh-agent and jump hosts work as they do in a terminal.</param>
+/// <param name="Jump">Jump hosts for <c>ssh -J</c>; only with <paramref name="SystemSsh"/>.</param>
+public sealed record HostProfile(string Name, string Host, int Port, string User, string? KeyFile = null, bool SystemSsh = false, string? Jump = null);
 /// <summary>A port on the server's loopback made reachable on this computer's loopback.</summary>
 public sealed record Tunnel(int LocalPort, int RemotePort);
 /// <param name="Account">The server account Claude runs this conversation as, when it is not the SSH user.</param>

@@ -37,12 +37,12 @@ public class SshConfigTests
     }
 
     [Fact]
-    public void ForwardingNeedsValidPortsAndAConnection()
+    public async Task ForwardingNeedsValidPortsAndAConnection()
     {
         using var agent = new RemoteAgent();
-        Assert.Throws<ArgumentException>(() => agent.Forward(new Tunnel(0, 3000)));
-        Assert.Throws<ArgumentException>(() => agent.Forward(new Tunnel(3000, 70000)));
-        Assert.Throws<IOException>(() => agent.Forward(new Tunnel(3000, 3000)));
+        await Assert.ThrowsAsync<ArgumentException>(() => agent.ForwardAsync(new Tunnel(0, 3000)));
+        await Assert.ThrowsAsync<ArgumentException>(() => agent.ForwardAsync(new Tunnel(3000, 70000)));
+        await Assert.ThrowsAsync<IOException>(() => agent.ForwardAsync(new Tunnel(3000, 3000)));
         Assert.Empty(agent.Tunnels);
         agent.CloseForward(3000);
     }
