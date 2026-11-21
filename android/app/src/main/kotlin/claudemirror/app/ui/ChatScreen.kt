@@ -193,12 +193,13 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
     }
     val end by rememberUpdatedState(rows.size)
     LaunchedEffect(list) {
-        // Whatever makes the list longer than the window, the end comes back into view.
-        snapshotFlow { following && list.canScrollForward && !list.isScrollInProgress }.collect {
+        // Whatever makes the list longer than the window, the end comes back into view. A reader
+        // already past it, part way down a request taller than the window, is not taken back up.
+        fun behind() = following && list.canScrollForward && !list.isScrollInProgress && list.firstVisibleItemIndex < end
+        snapshotFlow { behind() }.collect {
             var place = -1 to -1
-            while (following && list.canScrollForward && !list.isScrollInProgress) {
+            while (behind()) {
                 list.scrollToItem(end)
-                // As far as it goes: a request taller than the window starts at its top.
                 if (place == list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset) break
                 place = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
                 withFrameNanos { }
