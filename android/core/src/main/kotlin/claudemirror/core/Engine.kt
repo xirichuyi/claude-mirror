@@ -138,8 +138,9 @@ class Engine(
 
     /** The hold belongs to the messages that were waiting when the server moved; it ends with the last of them. */
     /** A reply nobody is writing any more: whatever it was still running did not finish here. */
-    private fun ChatMessage.cutShort() = copy(
-        interrupted = true,
+    private fun ChatMessage.cutShort() = settled().copy(interrupted = true)
+
+    private fun ChatMessage.settled() = copy(
         blocks = blocks?.map { block ->
             block.copy(
                 status = if (block.status == "running") "stopped" else block.status,
@@ -381,8 +382,9 @@ class Engine(
 
         if (session.messages.none { it.id == messageId }) throw RemoteException("远端任务与本地消息不匹配")
         var message = MirrorJson.decodeFromJsonElement<ChatMessage>(remote["message"]!!)
-        if (done && status == "stopped") message = message.cutShort()
         val turnEnded = done || status in ENDED
+        // A worker that died says so in its last state, but not for the command it was running.
+        if (turnEnded) message = if (done && status == "stopped") message.cutShort() else message.settled()
         // Until the worker confirms the stop, states it wrote before hearing of it still say "working".
         if (!turnEnded && id in stopRequests && status != "stopping") status = "stopping"
         val permissions = remote["permissions"]?.let { runCatching { MirrorJson.decodeFromJsonElement<List<PermissionRequest>>(it) }.getOrNull() }.orEmpty()

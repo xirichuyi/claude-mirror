@@ -309,6 +309,16 @@ class EngineTest {
         assertEquals("stopped", tools[1].children!!.single().status)
     }
 
+    @Test fun `a command whose worker died no longer shows as running`() = engineTest {
+        val (session, task) = started()
+        agent.emit(task.id, """{"version":1,"status":"error","done":true,"permissions":[],"message":{"id":"${task.messageId}","role":"assistant","error":"远端任务进程异常退出（signal）","blocks":[
+            {"type":"tool","id":"t1","name":"Bash","status":"running"}]}}""")
+        until("the failure arrives") { current(session.id).status == "error" }
+        val reply = current(session.id).messages.last()
+        assertEquals("stopped", reply.blocks!!.single().status)
+        assertNull(reply.interrupted)
+    }
+
     @Test fun `a held message the worker would not take is still held`() = engineTest {
         val (session, task) = started()
         agent.emit(task.id, state(task, 1, "working"))
