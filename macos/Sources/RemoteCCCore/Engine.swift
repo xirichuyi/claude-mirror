@@ -738,6 +738,16 @@ public final class ChatEngine {
             if next.fastMode == true, model.supportsFastMode != true { throw RemoteError("此模型不支持快速模式，请先关闭快速模式") }
             if next.permissionMode == "auto", model.supportsAutoMode != true { throw RemoteError("此模型不支持自动权限模式") }
         }
+        guard ["default", "plan", "acceptEdits", "dontAsk", "auto", "bypassPermissions"].contains(next.permissionMode ?? "default") else { throw RemoteError("无效权限模式") }
+        let identityChanged = (next.executionUser ?? "") != (current.executionUser ?? "")
+        if identityChanged, !session.messages.isEmpty || session.remoteSessionId != nil || session.remoteOwner != nil {
+            throw RemoteError("切换执行账号会改变登录与历史存储，请创建新对话后选择账号")
+        }
+        if identityChanged || next.permissionMode == "bypassPermissions" {
+            var probe = session
+            probe.preferences = next
+            _ = try await inspect(probe, action: "permissionStatus")
+        }
         let cacheChanged = (next.promptCacheTtl ?? "") != (current.promptCacheTtl ?? "")
         if cacheChanged, let ttl = next.promptCacheTtl, !ttl.isEmpty {
             guard ["5m", "1h"].contains(ttl) else { throw RemoteError("无效缓存时长") }
@@ -752,7 +762,7 @@ public final class ChatEngine {
         if (next.permissionMode ?? "default") != (current.permissionMode ?? "default") { patch["permissionMode"] = .string(next.permissionMode ?? "default") }
         if (next.fastMode ?? false) != (current.fastMode ?? false) { patch["fastMode"] = .bool(next.fastMode ?? false) }
         if (next.outputStyle ?? "") != (current.outputStyle ?? "") { patch["outputStyle"] = .string(next.outputStyle ?? "") }
-        let startup = cacheChanged || (next.additionalDirectories ?? []) != (current.additionalDirectories ?? []) || (next.agent ?? "") != (current.agent ?? "")
+        let startup = identityChanged || cacheChanged || (next.additionalDirectories ?? []) != (current.additionalDirectories ?? []) || (next.agent ?? "") != (current.agent ?? "")
         if running.contains(id), session.remoteOwner == nil || startup { throw RemoteError("请等待当前回复完成后切换设置") }
         if session.remoteOwner != nil {
             if startup { try await release(id) }
@@ -764,6 +774,7 @@ public final class ChatEngine {
             } else { return }
         }
         sessions[try index(id)].preferences = next
+        if identityChanged { sessions[try index(id)].capabilities = nil }
         changed(id)
     }
 

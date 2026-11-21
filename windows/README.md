@@ -10,7 +10,7 @@ Windows 10 1809+ / Windows 11，安装 .NET 9 SDK 和 Visual Studio 的 Windows 
 
 ```powershell
 npm ci --ignore-scripts
-node macos/scripts/prepare-server.cjs windows/Resources/server
+npm run prepare-server -- windows/Resources/server
 dotnet test windows/ClaudeMirror.Tests -c Release
 dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o windows/dist/claude-mirror
 ```

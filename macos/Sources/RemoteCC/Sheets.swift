@@ -13,6 +13,7 @@ struct PreferencesSheet: View {
     @State private var customModel = ""
     @State private var effort = ""
     @State private var permissionMode = "default"
+    @State private var executionUser = ""
     @State private var fastMode = false
     @State private var outputStyle = ""
     @State private var promptCacheTtl = ""
@@ -32,7 +33,7 @@ struct PreferencesSheet: View {
             else { ProgressView("读取远端能力…").padding().frame(maxWidth: .infinity) }
             HStack {
                 Button("刷新模型列表") { load(refresh: true) }
-                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.error).lineLimit(2) }
+                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.error).fixedSize(horizontal: false, vertical: true) }
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("应用") { apply() }.buttonStyle(WorkbenchButtonStyle(prominent: true)).keyboardShortcut(.defaultAction).disabled(capabilities == nil || saving)
@@ -52,6 +53,16 @@ struct PreferencesSheet: View {
             WorkbenchSelect(title: "思考强度", selection: $effort, options:
                 [WorkbenchOption("", "自动")] + ["low", "medium", "high", "xhigh", "max"].filter { currentModel == nil || currentModel?.supportedEffortLevels?.contains($0) == true }.map { WorkbenchOption($0, $0) })
             WorkbenchSelect(title: "权限", selection: $permissionMode, options: permissionOptions)
+            if permissionMode == "bypassPermissions" {
+                Text("Full Access 会跳过 Claude 的操作确认，可修改文件和执行命令；仍受执行账号的系统权限限制。")
+                    .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+            }
+            if capabilities.permissionStatus?.requiresExecutionUser == true || !executionUser.isEmpty {
+                TextField("Claude 执行账号（例如 claude-runner）", text: $executionUser)
+                    .disabled(session?.messages.isEmpty == false || session?.remoteSessionId != nil || session?.remoteOwner != nil)
+                Text("root 不能启动 Full Access。请在新对话中填写已配置的普通账号；该账号使用独立的登录与历史记录。留空使用 SSH 用户。")
+                    .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+            }
             DisclosureGroup("高级选项", isExpanded: $advanced) {
                 WorkbenchSelect(title: "Agent", selection: $agent, options:
                     [WorkbenchOption("", "远端默认")] + (capabilities.agents ?? []).map { WorkbenchOption($0.name, $0.name) } +
@@ -78,7 +89,7 @@ struct PreferencesSheet: View {
 
     private var permissionOptions: [WorkbenchOption<String>] {
         var options = [WorkbenchOption("default", "默认 · 请求时确认"), WorkbenchOption("plan", "计划 · 不执行修改"),
-                       WorkbenchOption("acceptEdits", "自动接受文件编辑"), WorkbenchOption("dontAsk", "拒绝未授权操作")]
+                       WorkbenchOption("acceptEdits", "自动接受文件编辑"), WorkbenchOption("dontAsk", "拒绝未授权操作"), WorkbenchOption("bypassPermissions", "Full Access · 跳过操作确认")]
         if currentModel == nil || currentModel?.supportsAutoMode == true { options.append(WorkbenchOption("auto", "自动判断权限")) }
         return options
     }
@@ -96,6 +107,7 @@ struct PreferencesSheet: View {
                 else { selectedModel = customTag; customModel = selected }
                 effort = preferences.effort ?? ""
                 permissionMode = preferences.permissionMode ?? "default"
+                executionUser = preferences.executionUser ?? ""
                 fastMode = preferences.fastMode ?? false
                 outputStyle = preferences.outputStyle ?? ""
                 promptCacheTtl = preferences.promptCacheTtl ?? ""
@@ -111,6 +123,7 @@ struct PreferencesSheet: View {
         next.agent = agent
         next.selectedModel = selectedModel == customTag ? customModel.trimmingCharacters(in: .whitespaces) : selectedModel
         next.effort = effort; next.permissionMode = permissionMode; next.fastMode = fastMode; next.outputStyle = outputStyle
+        next.executionUser = executionUser.trimmingCharacters(in: .whitespacesAndNewlines)
         next.promptCacheTtl = promptCacheTtl
         next.additionalDirectories = directories.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         saving = true; error = ""

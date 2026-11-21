@@ -107,6 +107,7 @@ final class AppModel: ObservableObject {
     }
     @Published var drafts: [String: String] = [:]
     @Published var attachments: [String: [Attachment]] = [:]
+    @Published var deferredPermissionId: String?
     @Published var presentation: AppPresentation?
     @Published var fatalError: String?
     #if DEBUG
@@ -340,14 +341,17 @@ final class AppModel: ObservableObject {
 
     func setReverseAccess(_ machine: ConnectionConfig, enabled: Bool) {
         if enabled {
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "允许 \(machine.displayName) 登录这台 Mac？"
-            alert.informativeText = "开启后，服务器上的程序可以通过本应用的连接，以你的身份登录这台 Mac 并执行命令。只在你完全信任这台服务器、并且确实需要从服务器访问本机时开启。关闭后立即撤销。"
-            alert.addButton(withTitle: "仍要开启")
-            alert.addButton(withTitle: "取消")
-            guard alert.runModal() == .alertFirstButtonReturn else { objectWillChange.send(); return }
+            presentation = .confirmation(WorkbenchConfirmation(
+                title: "允许 \(machine.displayName) 登录这台 Mac？",
+                detail: "开启后，服务器上的程序可以通过本应用的连接，以你的身份登录这台 Mac 并执行命令。只在你完全信任这台服务器、并且确实需要从服务器访问本机时开启。关闭后立即撤销。",
+                actionTitle: "仍要开启",
+                action: { self.applyReverseAccess(machine, enabled: true) }))
+            return
         }
+        applyReverseAccess(machine, enabled: false)
+    }
+
+    private func applyReverseAccess(_ machine: ConnectionConfig, enabled: Bool) {
         var updated = savedMachines.first { $0.key == machine.key } ?? machine
         updated.reverseAccess = enabled ? true : nil
         rememberMachine(updated)
@@ -858,8 +862,11 @@ final class AppModel: ObservableObject {
         perform { try await engine.stop(id) }
     }
 
-    func respond(_ permission: PermissionRequest, answer: JSON) async throws {
-        guard let engine, let id = activeId else { return }
+    /// Answers go to the session that asked (`session`), not whichever chat is open by the time
+    /// the user clicks. Missing state throws so the card shows an error instead of spinning.
+    func respond(_ permission: PermissionRequest, answer: JSON, session: String? = nil) async throws {
+        guard let engine else { throw RemoteError("未连接服务器，无法提交") }
+        guard let id = session ?? activeId else { throw RemoteError("找不到这条请求所属的对话") }
         try await engine.respond(id, permission: permission.id, answer: answer)
     }
 

@@ -115,11 +115,11 @@ struct RootView: View {
         }
         .animation(Motion.animation(Motion.dialogIn, reduce: reduceMotion), value: model.toast)
         // Keep every app dialog in the workspace, matching Winc's floating modal cards.
-        .disabled(model.presentation != nil)
-        .accessibilityHidden(model.presentation != nil)
+        .disabled(model.effectivePresentation != nil)
+        .accessibilityHidden(model.effectivePresentation != nil)
         .overlay { WorkbenchPresentationLayer() }
-        .onChange(of: model.presentation?.id) {
-            if model.presentation == nil { model.focusWorkspace() }
+        .onChange(of: model.effectivePresentation?.id) {
+            if model.effectivePresentation == nil { model.focusWorkspace() }
         }
         .font(WorkbenchMetrics.ui)
         .buttonStyle(WorkbenchButtonStyle())

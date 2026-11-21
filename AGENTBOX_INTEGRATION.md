@@ -46,9 +46,9 @@ which is shipped in the desktop package.
 ## Verification
 
 - `npm test`: 49 passing tests.
-- `node scripts/autocomplete-smoke.cjs`: real axi catalogue and completion UI.
-- `node scripts/model-interaction-smoke.cjs`: native model/effort controls and a
+- `node build/scripts/autocomplete-smoke.cjs`: real axi catalogue and completion UI.
+- `node build/scripts/model-interaction-smoke.cjs`: native model/effort controls and a
   real Sonnet reply on axi.
-- `scripts/agentbox-commands-smoke.cjs`: real axi suffix completion, IME,
+- `scripts/agentbox-commands-smoke.cts`: real axi suffix completion, IME,
   Shift+Tab, partial command Enter, native `/context`, and `/clear` retention.
 - `npm run pack`: macOS arm64 app, version 0.13.1.

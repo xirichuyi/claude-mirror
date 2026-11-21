@@ -89,10 +89,10 @@
 
 ## 本次真实验收
 
-- `scripts/capabilities-smoke.cjs`：真实 Electron + axi，79 个远端命令、13 个模型；选择 Sonnet/low 后实际模型为 `claude-sonnet-5-5`；上下文查询与远端分支 ID 检查。
-- `scripts/tunnel-smoke.cjs`：axi 临时回环 HTTP 服务，SSH 转发读到准确响应，随后关闭。
-- `scripts/files-smoke.cjs`：上传、下载、编辑保存、旧版本拒绝覆盖；仅测试独立临时目录。
-- `scripts/workspace-smoke.cjs`：文件浏览、上传、附件、图片/PDF、下载与本地打开界面。
+- `scripts/capabilities-smoke.cts`：真实 Electron + axi，79 个远端命令、13 个模型；选择 Sonnet/low 后实际模型为 `claude-sonnet-5-5`；上下文查询与远端分支 ID 检查。
+- `scripts/tunnel-smoke.cts`：axi 临时回环 HTTP 服务，SSH 转发读到准确响应，随后关闭。
+- `scripts/files-smoke.cts`：上传、下载、编辑保存、旧版本拒绝覆盖；仅测试独立临时目录。
+- `scripts/workspace-smoke.cts`：文件浏览、上传、附件、图片/PDF、下载与本地打开界面。
 - `npm test`：38 项转义、权限、会话、设置和消息协议测试。
 
 模型列表与功能随远端 Claude 版本和账户变化。未验证的项目不标记为完成。
@@ -101,19 +101,19 @@
 
 ## 0.5 工作流验证
 
-- `scripts/queue-smoke.cjs`：axi 上两轮真实 Claude 请求，第二轮排队后自动续接并正确返回第一轮保存的校验字符串；固定、归档、恢复 UI 验证。
-- `scripts/input-smoke.cjs`：真实 axi + Electron；原生 File 拖放、`@` 搜索、图片粘贴事件到远端上传、文件编辑和预览。粘贴事件携带真实 PNG 字节，由测试构造；不宣称自动化已覆盖操作系统剪贴板集成。
-- `test/workflows.test.cjs`：顺序队列、取消、停止后暂停、重启后保留附件并暂停、thinking 去重。
+- `scripts/queue-smoke.cts`：axi 上两轮真实 Claude 请求，第二轮排队后自动续接并正确返回第一轮保存的校验字符串；固定、归档、恢复 UI 验证。
+- `scripts/input-smoke.cts`：真实 axi + Electron；原生 File 拖放、`@` 搜索、图片粘贴事件到远端上传、文件编辑和预览。粘贴事件携带真实 PNG 字节，由测试构造；不宣称自动化已覆盖操作系统剪贴板集成。
+- `test/workflows.test.cts`：顺序队列、取消、停止后暂停、重启后保留附件并暂停、thinking 去重。
 
-- `scripts/slash-smoke.cjs`：核对菜单与 axi 返回的命令及别名集合完全一致；直接发送 `/context` 并验证远端回复，不打开本地替代面板。
+- `scripts/slash-smoke.cts`：核对菜单与 axi 返回的命令及别名集合完全一致；直接发送 `/context` 并验证远端回复，不打开本地替代面板。
 
-- `scripts/autocomplete-smoke.cjs`：打包应用连接 axi，逐字输入 `/us`，验证 `/usage` 首位可见、方向键选择、Tab/点击补全、Esc 关闭及继续输入重新展开；同时覆盖 `/mod` 和远端别名 `/co`。
+- `scripts/autocomplete-smoke.cts`：打包应用连接 axi，逐字输入 `/us`，验证 `/usage` 首位可见、方向键选择、Tab/点击补全、Esc 关闭及继续输入重新展开；同时覆盖 `/mod` 和远端别名 `/co`。
 
 ## 0.6 远端历史验证
 
-- `scripts/history-smoke.cjs`：真实 axi + Electron，连接后自动发现各项目会话，未点击时消息数组为空；项目路径搜索、点击加载、同一 session ID 两轮上下文续接、刷新去重均通过。
-- `test/history.test.cjs`：元数据读取、50 条分页、父链分支过滤、路径越界拒绝、发现去重与工具结果显示。
-- `scripts/workspace-smoke.cjs`：增加未保存编辑时取消退出的验证，取消后编辑内容保留。
+- `scripts/history-smoke.cts`：真实 axi + Electron，连接后自动发现各项目会话，未点击时消息数组为空；项目路径搜索、点击加载、同一 session ID 两轮上下文续接、刷新去重均通过。
+- `test/history.test.cts`：元数据读取、50 条分页、父链分支过滤、路径越界拒绝、发现去重与工具结果显示。
+- `scripts/workspace-smoke.cts`：增加未保存编辑时取消退出的验证，取消后编辑内容保留。
 - 历史列表每次 200 条自动翻页，每个日志只读取首尾各 64 KB；选择后才扫描该日志并返回最多 50 条记录。工作树功能仍未实现。
 
 ## 0.7 持久任务
@@ -121,8 +121,8 @@
 - 请求在远端独立进程执行；客户端退出或 SSH 断开只取消结果订阅。显式停止会传到任务持有者。
 - 任务 ID 在发送前持久化；相同 ID 启动幂等，未知执行结果不自动重跑。快照版本和消息 ID 避免恢复时重复追加。
 - 权限等待保留在远端，重连恢复原审批；断线不会自动批准。尚未发送的队列暂停。
-- `scripts/persistence-smoke.cjs` 验证真实 axi 上审批跨客户端重启、完全无 SSH 时执行和结果恢复。
-- `scripts/persistence-ui-smoke.cjs` 验证 Electron 退出/重开、断开/重连和显式停止。
+- `scripts/persistence-smoke.cts` 验证真实 axi 上审批跨客户端重启、完全无 SSH 时执行和结果恢复。
+- `scripts/persistence-ui-smoke.cts` 验证 Electron 退出/重开、断开/重连和显式停止。
 - 服务器重启和远端进程被杀不保证继续执行；目前依赖原客户端任务记录恢复。
 
 ## 0.8 性能优化
@@ -131,8 +131,8 @@
 - 文件：3 秒目录缓存及并发合并、显式刷新、按版本复用 256 MiB 内容缓存、图片/PDF 二进制传输、传输变化检测。
 - 存储：单会话文件，流式写入合并；审批及结束状态立即保存，旧版数据自动迁移并备份。
 - 界面：未变化的侧栏跳过重建，折叠项目懒创建子项，历史消息复用。
-- `test/performance.test.cjs` 验证状态增量、旧数据迁移、单会话写入与缓存版本失效。
-- 性能脚本及原始结果位于 `scripts/performance*.cjs` 和 `dist/performance*.json`；网络测量为小样本端到端耗时，不能当作带宽上限。
+- `test/performance.test.cts` 验证状态增量、旧数据迁移、单会话写入与缓存版本失效。
+- 性能脚本及原始结果位于 `scripts/performance*.cts` 和 `dist/performance*.json`；网络测量为小样本端到端耗时，不能当作带宽上限。
 
 ## 0.9 连接恢复与索引
 

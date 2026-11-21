@@ -72,7 +72,8 @@ final class AgentEnvironment {
         let toolDirectories = executables.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }
         try ("export PATH=" + shellQuote(toolDirectories.joined(separator: ":")) + ":$PATH\n")
             .write(to: home.appendingPathComponent(".bash_profile"), atomically: true, encoding: .utf8)
-        _ = try run(node, [repository.appendingPathComponent("macos/scripts/prepare-server.cjs").path, resourcesDirectory.path])
+        let npm = try XCTUnwrap(Self.which("npm"))
+        _ = try run(npm, ["--prefix", repository.path, "run", "prepare-server", "--", resourcesDirectory.path])
         if standIn {
             let script = "const{createHash:c}=require('crypto'),z=require('zlib'),fs=require('fs');const d=Buffer.from(JSON.stringify({'task-worker.cjs':fs.readFileSync(0,'utf8')}));const m=JSON.parse(fs.readFileSync(process.argv[1]));m.bundleDigest=c('sha256').update(d).digest('hex');m.bundlePayload=z.gzipSync(d).toString('base64');fs.writeFileSync(process.argv[1],JSON.stringify(m));"
             _ = try run(node, ["-e", script, resourcesDirectory.appendingPathComponent("manifest.json").path], input: Data((workerSource ?? standInWorker).utf8))

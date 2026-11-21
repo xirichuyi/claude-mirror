@@ -4,6 +4,7 @@ import RemoteCCCore
 /// Only one application sheet can be presented at a time.
 enum AppPresentation: Identifiable {
     case account
+    case permission(session: String, request: String)
     case confirmation(WorkbenchConfirmation)
     case rename(WorkbenchRename)
     case fileName(NamePrompt, Workspace)
@@ -29,6 +30,7 @@ enum AppPresentation: Identifiable {
         case .rewind(let session, let checkpoint): return "rewind:" + session + checkpoint
         case .confirmation(let request): return "confirm:" + request.id.uuidString
         case .rename(let request): return "rename:" + request.id.uuidString
+        case .permission(let session, let request): return "permission:" + session + ":" + request
         case .account: return "account"
         case .accountUsage: return "accountUsage"
         case .worktree: return "worktree"
@@ -51,6 +53,21 @@ enum AppPresentation: Identifiable {
 
 @MainActor
 extension AppModel {
+    /// Derived from the live queue so withdrawn or answered requests cannot leave stale dialogs.
+    var pendingPermissionPresentation: AppPresentation? {
+        guard let session = active, let request = session.permissions.first else { return nil }
+        return .permission(session: session.id, request: request.id)
+    }
+
+    var effectivePresentation: AppPresentation? {
+        if let presentation { return presentation }
+        guard let pending = pendingPermissionPresentation, pending.id != deferredPermissionId else { return nil }
+        return pending
+    }
+
+    func deferPermission() { deferredPermissionId = pendingPermissionPresentation?.id }
+    func showPendingPermission() { deferredPermissionId = nil }
+
     var showWorktree: Bool {
         get { presentation?.id == "worktree" }
         set {
@@ -140,6 +157,13 @@ struct AppSheet: View {
             case .rewind(let session, let checkpoint): RewindSheet(sessionId: session, checkpoint: checkpoint)
             case .confirmation(let request): ConfirmationSheet(request: request)
             case .rename(let request): RenameSheet(request: request)
+            case .permission(let sessionId, let requestId):
+                if let session = model.active, session.id == sessionId,
+                   let permission = session.permissions.first(where: { $0.id == requestId }) {
+                    PermissionCard(permission: permission, sessionId: sessionId, pending: session.permissions.count,
+                                   onDefer: { model.deferPermission() })
+                        .frame(width: 560)
+                }
             case .account: AccountStatusSheet(store: model.accountStore)
             case .accountUsage: AccountUsageSheet()
             case .worktree: WorktreeSheet()
@@ -174,16 +198,13 @@ struct WorkbenchPresentationLayer: View {
 
     var body: some View {
         GeometryReader { geometry in
-            if let destination = model.presentation {
+            if let destination = model.effectivePresentation {
                 ZStack {
                     WorkbenchTheme.scrim.ignoresSafeArea().contentShape(Rectangle())
                         .onTapGesture { } // Do not discard an in-progress form on an outside click.
                     ScrollView(.vertical) {
                         AppSheet(destination: destination).id(destination.id)
-                            .background(WorkbenchTheme.popup)
-                            .clipShape(RoundedRectangle(cornerRadius: WorkbenchMetrics.dialogRadius))
-                            .overlay(RoundedRectangle(cornerRadius: WorkbenchMetrics.dialogRadius).strokeBorder(WorkbenchTheme.popupBorder))
-                            .shadow(color: WorkbenchTheme.shadow, radius: 24, y: 10)
+                            .workbenchDialogSurface()
                             .padding(24)
                             .frame(maxWidth: .infinity, minHeight: geometry.size.height)
                     }
@@ -194,6 +215,6 @@ struct WorkbenchPresentationLayer: View {
                 .accessibilityAddTraits(.isModal)
             }
         }
-        .animation(Motion.animation(Motion.dialogIn, reduce: reduceMotion), value: model.presentation?.id)
+        .animation(Motion.animation(Motion.dialogIn, reduce: reduceMotion), value: model.effectivePresentation?.id)
     }
 }

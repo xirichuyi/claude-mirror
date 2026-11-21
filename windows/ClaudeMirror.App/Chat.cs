@@ -68,10 +68,6 @@ public sealed partial class MainWindow
 
     private readonly StackPanel permissionPanel = new() { Spacing = 8 };
     private readonly Dictionary<string, FrameworkElement> permissionCards = [];
-    private static readonly Dictionary<string, string> RuleScopes = new()
-    {
-        ["session"] = "本次运行", ["localSettings"] = "此项目的本地设置", ["projectSettings"] = "此项目的共享设置", ["userSettings"] = "远端用户的所有项目", ["cliArg"] = "本次启动参数"
-    };
 
     /// Requests waiting for an answer sit above the composer. A card stays as it is while its request is pending, so typed answers are not lost on the next state update.
     private void RenderPermissions(string? task, JsonArray? pending)
@@ -93,11 +89,11 @@ public sealed partial class MainWindow
     private FrameworkElement PermissionCard(string task, string id, JsonNode permission)
     {
         var name = Presentation.Text(permission["name"]);
-        bool elicitation = Presentation.Text(permission["kind"]) == "elicitation", asking = name == "AskUserQuestion";
+        bool elicitation = Presentation.Text(permission["kind"]) == "elicitation", asking = name == "AskUserQuestion", plan = name == "ExitPlanMode";
         var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(new TextBlock
         {
-            Text = Presentation.Text(permission["title"]) ?? (asking ? "Claude 的问题" : elicitation ? "需要你的输入" : $"Claude 请求使用 {name}"),
+            Text = PermissionText.Title(permission),
             FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink, TextWrapping = TextWrapping.Wrap
         });
         if (Presentation.Text(permission["description"]) is { Length: > 0 } description)
@@ -136,32 +132,29 @@ public sealed partial class MainWindow
         }
         else
         {
-            var answers = new Dictionary<string, TextBox>();
+            var answers = new List<(string Question, List<string> Picked, TextBox Typed)>();
             if (asking)
                 foreach (var question in permission["input"]?["questions"] as JsonArray ?? [])
                 {
                     if (Presentation.Text(question?["question"]) is not { } label) continue;
                     bool multiple = question!["multiSelect"] is JsonValue multi && multi.TryGetValue<bool>(out var many) && many;
-                    var field = new TextBox { PlaceholderText = "输入你的回答，也可以选择上面的选项", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
-                    panel.Children.Add(new TextBlock { Text = label, FontSize = 13, Foreground = ink, TextWrapping = TextWrapping.Wrap });
+                    panel.Children.Add(new TextBlock { Text = label + (multiple ? "（可多选）" : ""), FontSize = 13, Foreground = ink, TextWrapping = TextWrapping.Wrap });
+                    var picked = new List<string>();
+                    var group = id + "-" + answers.Count;
                     foreach (var option in question["options"] as JsonArray ?? [])
                     {
                         if (Presentation.Text(option?["label"]) is not { } choice) continue;
-                        var pick = new Button { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 6, 10, 6) };
                         var text = new StackPanel();
                         text.Children.Add(new TextBlock { Text = choice, FontSize = 13, Foreground = ink, TextWrapping = TextWrapping.Wrap });
                         if (Presentation.Text(option!["description"]) is { Length: > 0 } hint) text.Children.Add(new TextBlock { Text = hint, FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
-                        pick.Content = text;
-                        pick.Click += (_, _) =>
-                        {
-                            if (!multiple) { field.Text = choice; return; }
-                            var chosen = field.Text.Split(", ", StringSplitOptions.RemoveEmptyEntries).ToList();
-                            if (!chosen.Remove(choice)) chosen.Add(choice);
-                            field.Text = string.Join(", ", chosen);
-                        };
+                        // The label is kept whole, so an option containing a comma stays one answer.
+                        Microsoft.UI.Xaml.Controls.Primitives.ToggleButton pick = multiple ? new CheckBox { Content = text } : new RadioButton { Content = text, GroupName = group };
+                        pick.Checked += (_, _) => { if (!multiple) picked.Clear(); if (!picked.Contains(choice)) picked.Add(choice); };
+                        pick.Unchecked += (_, _) => picked.Remove(choice);
                         panel.Children.Add(pick);
                     }
-                    answers[label] = field; panel.Children.Add(field);
+                    var typed = new TextBox { PlaceholderText = "或者直接写下你的回答", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
+                    answers.Add((label, picked, typed)); panel.Children.Add(typed);
                 }
             else
             {
@@ -177,24 +170,31 @@ public sealed partial class MainWindow
                 }
             }
             CheckBox? rules = null;
-            if (permission["suggestions"] is JsonArray { Count: > 0 } suggestions)
+            var lines = asking ? [] : PermissionText.RuleLines(permission["suggestions"]);
+            if (lines.Count > 0)
             {
-                var scopes = suggestions.Select(rule => Presentation.Text(rule?["destination"])).Where(scope => scope is not null).Select(scope => RuleScopes.GetValueOrDefault(scope!, scope!)).Distinct();
-                rules = new CheckBox { Content = "以后不再询问同类操作 · " + string.Join("、", scopes), FontSize = 12 };
-                ToolTipService.SetToolTip(rules, suggestions.ToJsonString(new() { WriteIndented = true }));
+                rules = new CheckBox { Content = "以后同类操作不再询问", FontSize = 12 };
                 panel.Children.Add(rules);
+                foreach (var line in lines)
+                    panel.Children.Add(new TextBlock { Text = (line.Widens ? "⚠ " : "") + line.Action + " · " + line.Scope, FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(28, -6, 0, 0) });
             }
-            var reason = new TextBox { PlaceholderText = "拒绝时可以告诉 Claude 该怎么改（可选）", FontSize = 13 };
+            var reason = new TextBox { PlaceholderText = plan ? "对计划的修改意见（选“拒绝”时发给 Claude）" : "补充说明（可选，拒绝时发给 Claude）", FontSize = 13 };
             if (!asking) panel.Children.Add(reason);
-            Choice(asking ? "跳过" : "拒绝", false, () => Answer(new { allow = false, reason = reason.Text }));
-            Choice(asking ? "提交" : "允许", true, () =>
+            var allowText = asking ? "提交回答" : plan ? "开始执行" : "允许这一次";
+            Choice("拒绝", false, () => Answer(new { allow = false, reason = reason.Text }));
+            var allow = Choice(allowText, true, () =>
             {
-                if (answers.Values.Any(field => string.IsNullOrWhiteSpace(field.Text))) { failure.Text = "请先回答每个问题"; failure.Visibility = Visibility.Visible; return Task.CompletedTask; }
+                if (answers.Any(answer => PermissionText.Answer(answer.Picked, answer.Typed.Text).Length == 0)) { failure.Text = "每个问题都需要回答"; failure.Visibility = Visibility.Visible; return Task.CompletedTask; }
                 // `answers` is merged into the tool's input on the server, so only a question gets it.
                 var answer = new JsonObject { ["allow"] = true, ["useSuggestedPermissions"] = rules?.IsChecked == true };
-                if (asking) answer["answers"] = new JsonObject(answers.Select(pair => KeyValuePair.Create(pair.Key, (JsonNode?)pair.Value.Text)));
+                if (asking) answer["answers"] = new JsonObject(answers.Select(item => KeyValuePair.Create(item.Question, (JsonNode?)PermissionText.Answer(item.Picked, item.Typed.Text))));
                 return Answer(answer);
             });
+            if (rules is not null)
+            {
+                rules.Checked += (_, _) => allow.Content = "允许并记住";
+                rules.Unchecked += (_, _) => allow.Content = allowText;
+            }
         }
         panel.Children.Add(failure); panel.Children.Add(buttons);
         return new Border

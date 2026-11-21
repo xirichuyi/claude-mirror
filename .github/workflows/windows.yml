@@ -1,9 +1,9 @@
 name: Windows native
 on:
   push:
-    paths: ['windows/**', 'src/**', '.github/workflows/windows.yml', 'macos/scripts/prepare-server.cjs', 'package-lock.json']
+    paths: ['windows/**', 'src/**', 'scripts/**', 'tsconfig*.json', 'package.json', 'package-lock.json', '.github/workflows/windows.yml', 'macos/scripts/prepare-server.cts']
   pull_request:
-    paths: ['windows/**', 'src/**', '.github/workflows/windows.yml']
+    paths: ['windows/**', 'src/**', 'scripts/**', 'tsconfig*.json', 'package.json', 'package-lock.json', '.github/workflows/windows.yml', 'macos/scripts/prepare-server.cts']
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -29,7 +29,7 @@ jobs:
       - run: npm ci --ignore-scripts
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      - run: node macos/scripts/prepare-server.cjs windows/Resources/server
+      - run: npm run prepare-server -- windows/Resources/server
       - run: dotnet test windows/ClaudeMirror.Tests -c Release
       - name: Read shared product version
         id: product
