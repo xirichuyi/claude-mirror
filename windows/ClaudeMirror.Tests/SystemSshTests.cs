@@ -107,7 +107,11 @@ public class SystemSshTests
     {
         using var link = new SystemSshLink(Host(alias), Config);
         var bytes = new byte[200_000]; new Random(11).NextBytes(bytes);
-        using (var echo = link.Run("cat", true, CancellationToken.None))
+        // Windows' own sshd stalls when a command answers while it is still being sent a lot of input (seen with cat and with node,
+        // at any size past a few tens of KB), so against that server the bytes go up first and come back afterwards.
+        // ssh.exe itself carried 2 MB each way at once against another server.
+        var command = OperatingSystem.IsWindows() ? "f=mirror-echo-$$; cat > $f && cat $f; s=$?; rm -f $f; exit $s" : "cat";
+        using (var echo = link.Run(command, true, CancellationToken.None))
         {
             var received = new MemoryStream(); var reading = echo.Output.CopyToAsync(received);
             using (var input = echo.Input) await input.WriteAsync(bytes);
