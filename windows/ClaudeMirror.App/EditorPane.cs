@@ -34,7 +34,9 @@ public sealed partial class MainWindow
         split.Children.Add(chat);Grid.SetColumn(editorTabs,1);split.Children.Add(editorTabs);
         Grid.SetColumn(split,1);root.Children.Add(split);
         editorTabs.TabCloseRequested+=async (_,e)=>await RunAsync(async ()=>{
-            var file=openFiles.FirstOrDefault(x=>x.Tab==e.Tab);if(file==null || file.Saving)return;
+            var file=openFiles.FirstOrDefault(x=>x.Tab==e.Tab);
+            if(file==null){editorTabs.TabItems.Remove(e.Tab);LayoutSplit();return;} // A changes, diff, search or PDF tab holds nothing to save.
+            if(file.Saving)return;
             if(file.Dirty && !await ConfirmDiscardAsync(file)) return;
             openFiles.Remove(file);editorTabs.TabItems.Remove(file.Tab);LayoutSplit();
         });
@@ -44,7 +46,7 @@ public sealed partial class MainWindow
     }
     private void LayoutSplit()
     {
-        bool visible=showEditor && openFiles.Count>0, narrow=split.ActualWidth<710;
+        bool visible=showEditor && editorTabs.TabItems.Count>0, narrow=split.ActualWidth<710;
         editorTabs.Visibility=visible?Visibility.Visible:Visibility.Collapsed;
         chatArea.Visibility=visible && narrow?Visibility.Collapsed:Visibility.Visible;
         split.ColumnDefinitions[0].Width=new GridLength(visible && narrow?0:1,GridUnitType.Star);

@@ -16,7 +16,7 @@ public sealed partial class MainWindow
     private void StartCheckingUpdates()
     {
         Closed += (_,_) => updateLifetime.Cancel();
-        if (!Environment.GetCommandLineArgs().Contains("--smoke-test"))
+        if (DemoScene is null && !Environment.GetCommandLineArgs().Contains("--smoke-test"))
             _ = CheckUpdatesAsync(false);
     }
     private async Task CheckUpdatesAsync(bool manual)
