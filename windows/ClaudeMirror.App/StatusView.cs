@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace ClaudeMirror.App;
 
-/// The status tab: account usage, context, MCP servers, plugins and background tasks of the open conversation's remote task.
+/// The status tab: account usage, conversation usage, context, MCP servers, plugins, Agents and background tasks of the open conversation's remote task.
 public sealed partial class MainWindow
 {
     private JsonArray backgroundTasks = [];
@@ -22,9 +22,32 @@ public sealed partial class MainWindow
         Note(host is null ? "未连接" : $"{host.Name} · {LocalState.HostKey(host)}");
         if (agent?.Hello is { } hello) Note($"{Presentation.Text(hello["hostname"])} · {Presentation.Text(hello["platform"])}/{Presentation.Text(hello["arch"])} · Node {Presentation.Text(hello["node"])} · Claude {(Presentation.Text(hello["claude"]) ?? "未安装")}");
         foreach (var issue in health) Note(issue.Title + "：" + issue.Detail, issue.Blocking);
+        void Items(List<StatusSummary.Item> items)
+        {
+            foreach (var item in items)
+            {
+                content.Children.Add(new TextBlock { Text = item.Name, FontSize = 13, Foreground = ink, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap });
+                if (item.Detail is not null) content.Children.Add(new TextBlock { Text = item.Detail, FontSize = 12, Foreground = muted, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, -6, 0, 0) });
+            }
+        }
+        // Agents come from the project's catalogue, so they are listed before any message is sent.
+        async Task Agents()
+        {
+            Title("Agents");
+            try
+            {
+                var known = StatusSummary.Agents(lastState?["capabilities"]);
+                if (known.Count == 0 && agent?.Connected == true)
+                    known = StatusSummary.Agents(await agent.CallAsync("task", new { operation = "inspect", digest = agent.Digest, directory = directory.Text, action = "catalogue", preferences = new { executionUser } }));
+                if (known.Count == 0) Note(agent?.Connected == true ? "这个项目没有可用的 Agent。" : "连接服务器后可查看。");
+                Items(known);
+            }
+            catch (Exception e) { Note("读取 Agent 列表失败：" + e.Message, true); }
+        }
         if (taskId is null || agent?.Connected != true)
         {
-            Title("会话"); Note("账号用量、MCP、插件和后台任务来自对话的远端任务。发送一条消息后再打开这里。");
+            await Agents();
+            Title("会话"); Note(agent?.Connected == true ? "账号用量、对话用量、MCP、插件和后台任务来自对话的远端任务。发送一条消息后再打开这里。" : "未连接服务器。连接后可查看账号用量、MCP、插件和后台任务。");
             return;
         }
         var remote = agent; var task = taskId;
@@ -46,6 +69,10 @@ public sealed partial class MainWindow
             }
             if (quota?["available"]?.GetValue<bool>() != true) Note("远端没有返回订阅额度（可能未登录订阅账号，或 Claude Code 版本较旧）。");
         });
+        Title("对话用量");
+        var spent = StatusSummary.Usage(lastState?["usage"]);
+        if (spent.Count == 0) Note("这个对话还没有完成的回复，回复结束后这里显示 token 和费用。");
+        Items(spent);
         await Section("上下文", async () =>
         {
             var usage = await Control("context");
@@ -71,12 +98,19 @@ public sealed partial class MainWindow
                 content.Children.Add(row);
                 if (Presentation.Text(server["error"]) is { Length: > 0 } error) Note(error, true);
             }
+            Title("插件");
+            var plugins = StatusSummary.Plugins(lastState);
+            if (plugins.Count == 0) Note("这个对话没有加载插件。");
+            Items(plugins);
             if (actions.Contains("reloadPlugins"))
-            {
-                Title("插件");
-                content.Children.Add(Button("重新加载插件", async () => { await Control("manageRuntime", new { action = "reloadPlugins" }); await StatusAsync(); }));
-            }
+                content.Children.Add(Button("重新加载插件", async () =>
+                {
+                    var result = await Control("manageRuntime", new { action = "reloadPlugins" });
+                    await StatusAsync();
+                    if (result?["held"]?.GetValue<bool>() == true) status.Text = "重新加载会让提示缓存失效，Claude 已推迟到下一次合适的时机";
+                }));
         });
+        await Agents();
         Title("后台任务");
         var running = backgroundTasks.Where(item => Presentation.Text(item?["status"]) == "running").ToList();
         if (running.Count == 0) Note("没有正在运行的后台任务。");
