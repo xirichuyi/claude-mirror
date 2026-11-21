@@ -28,7 +28,7 @@ jobs:
       - name: Render scenes
         run: |
           mkdir -p snapshots
-          for scene in chat home connect files diff settings tools; do
+          for scene in chat home connect files diff settings tools account; do
             sh macos/scripts/snapshot.sh "$PWD/snapshots/$scene-light" "$scene" light 1280x820 || echo "::warning::$scene light failed"
           done
           for scene in chat home; do

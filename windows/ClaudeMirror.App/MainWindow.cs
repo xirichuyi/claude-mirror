@@ -23,7 +23,7 @@ public sealed partial class MainWindow : Window
     private List<ModelChoice> availableModels = [];
     private List<string> availableCommands = [];
     private ModelChoice? selectedModel;
-    private readonly LocalState local = new(Environment.GetEnvironmentVariable("CLAUDE_MIRROR_STATE_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "claude-mirror"));
+    private readonly LocalState local = new(StateFolder());
     private readonly TextBox directory = new() { Text = "~", PlaceholderText = "远端工作目录" };
     private RemoteAgent? agent;
     private HostProfile? host;
@@ -32,10 +32,8 @@ public sealed partial class MainWindow : Window
     private string? taskKey;
     private bool busy;
     private MessageView? reply;
-    private readonly SemaphoreSlim permissionLock = new(1);
-    private readonly HashSet<string> approvalDialogs = [];
-    private ContentDialog? openApproval;
-    private string? openApprovalId;
+    private readonly SendQueue queue = new();
+    private bool sending;
     private sealed record ModelChoice(string Value, string Label);
     private static SolidColorBrush Brush(byte r, byte g, byte b) => new(Windows.UI.Color.FromArgb(255, r, g, b));
 
@@ -51,6 +49,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => agent?.Dispose();
         StartCheckingUpdates();
         RefreshWorkbench();
+        PrepareDemo();
     }
     private static StackPanel Row(params UIElement[] items)
     {
@@ -105,13 +104,29 @@ public sealed partial class MainWindow : Window
             note.Text = mode.SelectedIndex == 0 ? "密码只用于这次连接，不会保存。连接成功后可以一键设置免密登录。首次连接会请你确认服务器指纹。" : "使用所选私钥登录，私钥不会上传。首次连接会请你确认服务器指纹。";
         }
         mode.SelectionChanged += (_, _) => UpdateMode(); UpdateMode();
+        var jumpNote = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = danger, Visibility = Visibility.Collapsed };
         var advanced = new StackPanel { Spacing = 14 };
         foreach (var element in new UIElement[] { name, user, port }) advanced.Children.Add(element);
         var expander = new Expander { Header = "高级选项：名称、用户名、端口", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             IsExpanded = existing is not null && (existing.Port != 22 || existing.Name != existing.Host) };
+        var configured = existing is null ? ConfiguredHosts() : [];
+        var import = new ComboBox { Header = "从 SSH 配置导入", PlaceholderText = "选择 ~/.ssh/config 里的主机", ItemsSource = configured.Select(entry => entry.Alias).ToList(), HorizontalAlignment = HorizontalAlignment.Stretch, Visibility = configured.Count > 0 ? Visibility.Visible : Visibility.Collapsed };
+        import.SelectionChanged += (_, _) =>
+        {
+            if (import.SelectedIndex < 0) return;
+            var entry = configured[import.SelectedIndex];
+            // OpenSSH logs in as the local account when the config names no user.
+            var account = entry.User ?? Environment.UserName;
+            name.Text = entry.Alias; address.Text = account + "@" + entry.Host; port.Value = entry.Port;
+            key.Text = entry.KeyFile ?? ""; mode.SelectedIndex = entry.KeyFile is null ? 0 : 1;
+            // This client connects directly only; say so instead of failing later with a timeout.
+            jumpNote.Text = entry.ProxyJump is null ? "" : $"SSH 配置里这台主机要经过跳板机 {entry.ProxyJump} 连接。Windows 版暂不支持跳板机，只有这台电脑能直接连到 {entry.Host} 时才能连接。";
+            jumpNote.Visibility = entry.ProxyJump is null ? Visibility.Collapsed : Visibility.Visible;
+            expander.IsExpanded = entry.Port != 22;
+        };
         var panel = new StackPanel { Spacing = 14 };
         panel.Children.Add(new TextBlock { Text = "填写服务器地址和登录方式。Claude Code 和项目都在服务器上运行，本机只负责显示和操作。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
-        foreach (var element in new UIElement[] { address, mode, password, key, pick, phrase, note, expander }) panel.Children.Add(element);
+        foreach (var element in new UIElement[] { import, jumpNote, address, mode, password, key, pick, phrase, note, expander }) panel.Children.Add(element);
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = existing == null ? "添加服务器" : "连接服务器", Content = new ScrollViewer { Content = panel }, Background = canvas, PrimaryButtonText = "连接", CloseButtonText = "取消" };
         (string User, string Host) Target()
         {
@@ -130,8 +145,11 @@ public sealed partial class MainWindow : Window
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         var (login, server) = Target();
         var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? server : name.Text.Trim(), server, (int)port.Value, login, mode.SelectedIndex == 1 ? key.Text : null);
+        // Queued prompts cannot follow the user to another server.
+        if (host is not null && LocalState.HostKey(host) != LocalState.HostKey(profile)) await ConfirmLeavingQueueAsync();
         agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
-        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => { if (agent == next) { status.Text = ConnectionAdvice.Explain(error); busy = false; RefreshWorkbench(); } });
+        reconnecting?.Cancel();
+        next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
         RemoteSetupException? setup = null;
         var usedPassword = mode.SelectedIndex == 0;
         try { await next.ConnectAsync(profile, password.Password, phrase.Password, ServerResources, fingerprint => ConfirmHostAsync(profile, fingerprint)); }
@@ -166,16 +184,30 @@ public sealed partial class MainWindow : Window
     private async Task NewConversationAsync()
     {
         if (busy) throw new IOException("请先停止当前回复");
-        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); RefreshWorkbench(); RenderHistory();
+        await ConfirmLeavingQueueAsync();
+        conversation = null; taskId = null; taskKey = null; reply = null; messages.Children.Clear(); queue.Clear(); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
+    }
+    /// Queued prompts belong to the open conversation. Leaving it asks first; declining keeps the conversation and stops the caller.
+    private async Task ConfirmLeavingQueueAsync()
+    {
+        if (queue.Items.Count == 0) return;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = root.XamlRoot, Title = "还有未发送的消息", Content = $"队列里有 {queue.Items.Count} 条消息还没有发送，离开这个对话会丢弃它们。",
+            PrimaryButtonText = "丢弃并离开", CloseButtonText = "留在这里", DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) throw new IOException("已保留当前对话和未发送的消息");
     }
     private async Task SelectAsync(Conversation selected)
     {
         if (busy) throw new IOException("请先停止当前回复");
-        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null;
+        // Reopening the same conversation keeps its queued prompts.
+        if (!IsCurrent(selected)) { await ConfirmLeavingQueueAsync(); queue.Clear(); }
+        conversation = selected; directory.Text = selected.Directory; messages.Children.Clear(); reply = null; RenderQueue(); RenderPermissions(null, null);
         RefreshWorkbench(); RenderHistory();
         var page = await RequireAgent().CallAsync("history", new { operation = "messages", reference = selected.Reference });
-        foreach (var record in page["records"]!.AsArray()) AddMessage("", record?["type"]?.GetValue<string>() == "user").Show(record?["message"]);
+        foreach (var message in History.Messages(page["records"] as JsonArray)) AddMessage("", Presentation.Text(message["role"]) == "user").Show(message);
         taskKey = LocalState.HostKey(host!) + "|" + selected.SessionId;
         taskId = local.Tasks.GetValueOrDefault(taskKey);
         if (taskId is not null) await WatchCurrentAsync();
@@ -193,10 +225,19 @@ public sealed partial class MainWindow : Window
     }
     private async Task SendAsync()
     {
-        if (busy || string.IsNullOrWhiteSpace(prompt.Text)) return;
+        if (string.IsNullOrWhiteSpace(prompt.Text)) return;
         if (conversation is not null && directory.Text != conversation.Directory)
             throw new IOException("切换工作目录请新建对话");
-        var remote = RequireAgent(); var text = prompt.Text; prompt.Text = ""; busy = true; AddMessage(text, true); reply = AddMessage("正在回复…");
+        RequireAgent();
+        var text = prompt.Text; prompt.Text = "";
+        // The remote task refuses a second prompt while it is replying, so hold it here and send it when the reply ends.
+        if (busy) { queue.Add(text); RenderQueue(); return; }
+        queue.Resume();
+        await SendTextAsync(text);
+    }
+    private async Task SendTextAsync(string text)
+    {
+        var remote = RequireAgent(); busy = true; sending = true; AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
         var message = new { id = Guid.NewGuid().ToString(), role = "assistant", blocks = Array.Empty<object>() };
         try
         {
@@ -204,16 +245,18 @@ public sealed partial class MainWindow : Window
             {
                 taskId = Guid.NewGuid().ToString(); taskKey = LocalState.HostKey(host!) + "|" + (conversation?.SessionId ?? taskId);
                 local.Tasks[taskKey] = taskId; local.Save();
-                await remote.CallAsync("task", new { operation = "start", taskId, digest = remote.Digest, request = new { session = new { id = Guid.NewGuid().ToString(), host = host!.Host, directory = directory.Text, name = "Windows 对话", remoteSessionId = conversation?.SessionId, messages = new[] { message }, permissions = Array.Empty<object>(), preferences = new { selectedModel = selectedModel?.Value ?? "" } }, prompt = text } });
+                await remote.CallAsync("task", new { operation = "start", taskId, digest = remote.Digest, request = new { session = new { id = Guid.NewGuid().ToString(), host = host!.Host, directory = directory.Text, name = "Windows 对话", remoteSessionId = conversation?.SessionId, messages = new[] { message }, permissions = Array.Empty<object>(), preferences = new { selectedModel = selectedModel?.Value ?? "", permissionMode } }, prompt = text } });
                 await WatchCurrentAsync();
             }
             else
             {
                 await remote.TaskCommandAsync(taskId, new { kind = "control", action = "model", value = selectedModel?.Value ?? "" });
+                await remote.TaskCommandAsync(taskId, new { kind = "control", action = "permission", value = permissionMode });
                 await remote.TaskCommandAsync(taskId, new { kind = "send", prompt = text, message });
             }
         }
-        catch { busy = false; RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
+        catch { busy = false; queue.Pause(); RenderQueue(); RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
+        finally { sending = false; }
     }
     private Task WatchCurrentAsync()
     {
@@ -222,9 +265,14 @@ public sealed partial class MainWindow : Window
     }
     private void OnState(string watched, JsonObject state) => DispatcherQueue.TryEnqueue(async () =>
     {
-        if (taskId != watched) return; reply ??= AddMessage(""); reply.Show(state["message"]);
-        if (state["message"]?["error"] is not null) reply.SetError(state["message"]!["error"]!.GetValue<string>());
-        var value = state["status"]?.GetValue<string>(); busy = value is "working" or "connecting" or "permission" or "stopping";
+        if (taskId != watched) return;
+        var value = state["status"]?.GetValue<string>(); bool wasBusy = busy;
+        // The model and permission commands sent before a prompt publish idle snapshots; those must not release the next queued prompt.
+        busy = sending || value is "working" or "connecting" or "permission" or "stopping";
+        reply ??= AddMessage(""); reply.Show(state["message"], busy);
+        if (state["tasks"] is JsonArray tasks) backgroundTasks = (JsonArray)tasks.DeepClone();
+        // A reply that failed or was stopped keeps the queue until the user says to go on.
+        if (wasBusy && !busy && (state["message"]?["error"] is not null || state["message"]?["interrupted"]?.GetValue<bool>() == true)) queue.Pause();
         status.Text = busy ? "正在回复" : "就绪";
         if (state["remoteSessionId"] is JsonValue session && taskId is not null)
         {
@@ -238,160 +286,11 @@ public sealed partial class MainWindow : Window
             local.Save(); taskId = null; busy = false;
         }
         RefreshWorkbench();
-        if (state["permissions"] is JsonArray current)
-        {
-            // Requests the remote no longer has (answered elsewhere, stopped, timed out) close their dialog
-            // and are forgotten, so a stale dialog cannot answer a finished request.
-            var live = current.Select(item => item?["id"]?.GetValue<string>()).OfType<string>().ToHashSet();
-            if (openApprovalId is not null && !live.Contains(openApprovalId)) openApproval?.Hide();
-            approvalDialogs.IntersectWith(live);
-        }
-        foreach (var permission in state["permissions"]?.AsArray() ?? [])
-        {
-            var id = permission!["id"]!.GetValue<string>(); if (!approvalDialogs.Add(id)) continue;
-            await RunAsync(() => RequestPermissionAsync(watched, permission, id));
-        }
+        if (queue.Next(busy) is { } next) { RenderQueue(); RenderPermissions(watched, null); await RunAsync(() => SendTextAsync(next.Text)); return; }
+        RenderQueue();
+        RenderPermissions(watched, state["permissions"] as JsonArray);
     });
-    private async Task RequestPermissionAsync(string watched, JsonNode permission, string id)
-    {
-        await permissionLock.WaitAsync();
-        var answered = false;
-        try
-        {
-            // Withdrawn while waiting behind another dialog, or the user switched conversations.
-            if (taskId != watched || !approvalDialogs.Contains(id)) return;
-            string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
-            var name = Text(permission["name"]);
-            var elicitation = Text(permission["kind"]) == "elicitation";
-            var question = name == "AskUserQuestion";
-            var plan = name == "ExitPlanMode";
-            var panel = new StackPanel { Spacing = 12, MinWidth = 440 };
-
-            var description = elicitation ? Text(permission["request"]?["message"]) : Text(permission["description"]);
-            if (!string.IsNullOrWhiteSpace(description)) panel.Children.Add(Muted(description));
-
-            var answers = new List<(string Question, List<string> Picked, TextBox Typed)>();
-            if (question)
-            {
-                var index = 0;
-                foreach (var item in permission["input"]?["questions"]?.AsArray() ?? [])
-                {
-                    var label = Text(item?["question"]); if (label is null) continue;
-                    var multiple = item!["multiSelect"] is JsonValue flag && flag.TryGetValue<bool>(out var on) && on;
-                    var block = new StackPanel { Spacing = 6 };
-                    block.Children.Add(new TextBlock { Text = label + (multiple ? "（可多选）" : ""), TextWrapping = TextWrapping.Wrap, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                    var picked = new List<string>();
-                    var group = id + "-" + index++;
-                    foreach (var option in item["options"]?.AsArray() ?? [])
-                    {
-                        var text = Text(option?["label"]); if (text is null) continue;
-                        // The label is kept whole, so options containing commas stay one answer.
-                        Microsoft.UI.Xaml.Controls.Primitives.ToggleButton choice = multiple ? new CheckBox { Content = text } : new RadioButton { Content = text, GroupName = group };
-                        choice.Checked += (_, _) => { if (!multiple) picked.Clear(); if (!picked.Contains(text)) picked.Add(text); };
-                        choice.Unchecked += (_, _) => picked.Remove(text);
-                        if (Text(option?["description"]) is { Length: > 0 } hint) ToolTipService.SetToolTip(choice, hint);
-                        block.Children.Add(choice);
-                    }
-                    var typed = new TextBox { PlaceholderText = "或者直接写下你的回答", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
-                    block.Children.Add(typed);
-                    answers.Add((label, picked, typed));
-                    panel.Children.Add(block);
-                }
-            }
-            else if (elicitation)
-                panel.Children.Add(Muted("Windows 版暂不支持此类表单，只能取消；可在 macOS 版中填写。"));
-            else
-            {
-                var (label, body) = PermissionText.Summary(permission);
-                if (!string.IsNullOrWhiteSpace(body))
-                {
-                    if (label is not null) panel.Children.Add(Muted(label));
-                    panel.Children.Add(new Border
-                    {
-                        Background = ThemeBrush("CardBackgroundFillColorSecondaryBrush"), BorderBrush = ThemeBrush("CardStrokeColorDefaultBrush"),
-                        BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(12, 10, 12, 10),
-                        Child = new TextBlock { Text = body, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
-                    });
-                }
-            }
-
-            CheckBox? remember = null;
-            var rules = PermissionText.RuleLines(permission["suggestions"]);
-            if (!question && !elicitation && rules.Count > 0)
-            {
-                remember = new CheckBox { Content = "以后同类操作不再询问" };
-                var box = new StackPanel { Spacing = 4 };
-                box.Children.Add(remember);
-                foreach (var line in rules)
-                {
-                    var text = Muted((line.Widens ? "⚠ " : "") + line.Action + " · " + line.Scope);
-                    text.Margin = new Thickness(28, 0, 0, 0);
-                    box.Children.Add(text);
-                }
-                panel.Children.Add(new Border
-                {
-                    BorderBrush = ThemeBrush("CardStrokeColorDefaultBrush"), BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(6), Padding = new Thickness(12, 8, 12, 10), Child = box,
-                });
-            }
-
-            TextBox? reason = null;
-            if (!question && !elicitation)
-            {
-                reason = new TextBox { PlaceholderText = plan ? "对计划的修改意见（选「拒绝」时发给 Claude）" : "补充说明（可选，拒绝时发给 Claude）", TextWrapping = TextWrapping.Wrap };
-                panel.Children.Add(reason);
-            }
-            var error = new TextBlock { Foreground = Brush(0xC4, 0x2B, 0x1C), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-            panel.Children.Add(error);
-
-            var allowText = question ? "提交回答" : plan ? "开始执行" : "允许这一次";
-            var dialog = new ContentDialog
-            {
-                XamlRoot = root.XamlRoot, Title = PermissionText.Title(permission),
-                Content = new ScrollViewer { Content = panel, MaxHeight = 460 },
-                PrimaryButtonText = elicitation ? "" : allowText, CloseButtonText = elicitation ? "取消" : "拒绝",
-                // Approving is always a deliberate click; Enter never approves.
-                DefaultButton = ContentDialogButton.None,
-            };
-            if (remember is not null)
-            {
-                remember.Checked += (_, _) => dialog.PrimaryButtonText = "允许并记住";
-                remember.Unchecked += (_, _) => dialog.PrimaryButtonText = allowText;
-            }
-            dialog.PrimaryButtonClick += (_, e) =>
-            {
-                if (!answers.Any(a => PermissionText.Answer(a.Picked, a.Typed.Text).Length == 0)) return;
-                error.Text = "每个问题都需要回答"; error.Visibility = Visibility.Visible; e.Cancel = true;
-            };
-
-            openApproval = dialog; openApprovalId = id;
-            ContentDialogResult result;
-            try { result = await dialog.ShowAsync(); }
-            finally { openApproval = null; openApprovalId = null; }
-            // Closed because the remote withdrew the request, or the conversation changed: nothing to send.
-            if (taskId != watched || !approvalDialogs.Contains(id)) return;
-
-            var allow = result == ContentDialogResult.Primary;
-            object answer;
-            if (elicitation) answer = new { interaction = new { action = "cancel" } };
-            else if (question && allow) answer = new { allow = true, answers = answers.ToDictionary(a => a.Question, a => PermissionText.Answer(a.Picked, a.Typed.Text)) };
-            else answer = new { allow, useSuggestedPermissions = allow && remember?.IsChecked == true, reason = reason?.Text ?? "" };
-            await RequireAgent().TaskCommandAsync(watched, new { kind = "respond", permissionId = id, answer });
-            answered = true;
-        }
-        finally
-        {
-            // Not answered (switched away, send failed): forget the id so the next update asks again
-            // instead of leaving the remote task waiting on a dialog that will never reappear.
-            if (!answered) approvalDialogs.Remove(id);
-            permissionLock.Release();
-        }
-    }
-    private static TextBlock Muted(string text) =>
-        new() { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Foreground = ThemeBrush("TextFillColorSecondaryBrush") };
-    private static Microsoft.UI.Xaml.Media.Brush ThemeBrush(string key) =>
-        (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[key];
-    private async Task StopAsync() { if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
+    private async Task StopAsync() { queue.Pause(); RenderQueue(); if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
     private async Task<string?> PickAsync()
     {
         var picker = new FileOpenPicker(); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); picker.FileTypeFilter.Add("*");
@@ -404,6 +303,13 @@ public sealed partial class MainWindow : Window
         var remote = RequireAgent(); var path = new TextBox { Text = directory.Text }; var entries = new StackPanel { Spacing = 4 };
         var panel = new StackPanel { Spacing = 12 }; panel.Children.Add(path); panel.Children.Add(new ScrollViewer { Content = entries, MaxHeight = 400 });
         ContentDialog? browser = null; string? previewPath = null;
+        // The window's status line is behind this dialog, so a failed create, rename or delete is reported here.
+        var problem = new TextBlock { Foreground = danger, FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed }; panel.Children.Add(problem);
+        async Task Guard(Func<Task> action)
+        {
+            try { problem.Visibility = Visibility.Collapsed; await action(); }
+            catch (Exception e) { problem.Text = e.Message; problem.Visibility = Visibility.Visible; }
+        }
         async Task Load()
         {
             var result = await remote.CallAsync("file", new { operation = "list", path = path.Text, @base = directory.Text });
@@ -411,14 +317,32 @@ public sealed partial class MainWindow : Window
             entries.Children.Add(Button("↑ 上一级", async () => { path.Text = path.Text.TrimEnd('/')[..Math.Max(0, path.Text.TrimEnd('/').LastIndexOf('/'))]; if (path.Text.Length == 0) path.Text = "/"; await Load(); }));
             foreach (var entry in result["entries"]!.AsArray())
             {
-                var item = entry!.DeepClone(); entries.Children.Add(Button(item["name"]!.GetValue<string>(), async () =>
+                var item = entry!.DeepClone();
+                bool folder = item["directory"]?.GetValue<bool>() == true || item["type"]?.GetValue<string>() == "directory";
+                var row = Button(item["name"]!.GetValue<string>(), async () =>
                 {
-                    if (item["directory"]?.GetValue<bool>() == true || item["type"]?.GetValue<string>() == "directory") { path.Text = item["path"]!.GetValue<string>(); await Load(); }
+                    if (folder) { path.Text = item["path"]!.GetValue<string>(); await Load(); }
                     else { previewPath = item["path"]!.GetValue<string>(); browser!.Hide(); }
-                }));
+                });
+                row.ContextFlyout = EntryMenu(remote, row, item["path"]!.GetValue<string>(), item["name"]!.GetValue<string>(), folder, Load, Guard);
+                entries.Children.Add(row);
             }
         }
-        panel.Children.Add(Button("前往", Load)); await Load();
+        var create = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        create.Children.Add(Button("前往", Load));
+        foreach (var makeFolder in new[] { false, true })
+        {
+            var name = new TextBox { PlaceholderText = makeFolder ? "文件夹名称" : "文件名称", Width = 220 };
+            var add = Button(makeFolder ? "新建文件夹" : "新建文件", () => Task.CompletedTask);
+            var flyout = new Flyout();
+            flyout.Content = new StackPanel { Spacing = 8, Children = { name, Button("创建", () => { flyout.Hide(); return Guard(async () =>
+            {
+                await remote.CallAsync("file", new { operation = "create", directory = path.Text, name = name.Text.Trim(), folder = makeFolder });
+                name.Text = ""; await Load();
+            }); }) } };
+            add.Flyout = flyout; create.Children.Add(add);
+        }
+        panel.Children.Add(create); await Load();
         browser = new ContentDialog { XamlRoot = root.XamlRoot, Title = "远端文件", Content = panel, PrimaryButtonText = "设为工作目录", CloseButtonText = "关闭" };
         if (await browser.ShowAsync() == ContentDialogResult.Primary)
         {
@@ -426,11 +350,37 @@ public sealed partial class MainWindow : Window
         }
         if (previewPath is not null) await PreviewAsync(previewPath);
     }
+    /// Rename and delete for one entry of the remote file browser. Deleting asks again inside the menu, because a second dialog cannot open over the browser.
+    private MenuFlyout EntryMenu(RemoteAgent remote, FrameworkElement anchor, string path, string name, bool folder, Func<Task> reload, Func<Func<Task>, Task> guard)
+    {
+        var menu = new MenuFlyout();
+        var renamed = new TextBox { Text = name, Width = 240 };
+        var rename = new Flyout();
+        rename.Content = new StackPanel { Spacing = 8, Children = { renamed, Button("重命名", () => { rename.Hide(); return guard(async () =>
+        {
+            if (openFiles.Any(file => file.Path == path || file.Path.StartsWith(path + "/", StringComparison.Ordinal))) throw new IOException("请先关闭这个文件的标签，再重命名");
+            await remote.CallAsync("file", new { operation = "rename", path, name = renamed.Text.Trim() });
+            await reload();
+        }); }) } };
+        var start = new MenuFlyoutItem { Text = "重命名…", Icon = new FontIcon { Glyph = "\uE8AC" } };
+        start.Click += (_, _) => rename.ShowAt(anchor);
+        menu.Items.Add(start);
+        var delete = new MenuFlyoutSubItem { Text = "删除", Icon = new FontIcon { Glyph = "\uE74D" } };
+        delete.Items.Add(MenuItem(folder ? $"确认删除文件夹“{name}”及其全部内容" : $"确认删除“{name}”", "\uE74D", () => guard(async () =>
+        {
+            if (openFiles.Any(file => file.Dirty && (file.Path == path || file.Path.StartsWith(path + "/", StringComparison.Ordinal)))) throw new IOException("这个文件有未保存的更改，请先保存或关闭它的标签");
+            await remote.CallAsync("file", new { operation = "remove", path, recursive = folder });
+            await reload();
+        })));
+        menu.Items.Add(delete);
+        return menu;
+    }
     private async Task PreviewAsync(string path)
     {
         var remote = RequireAgent(); var preview = await remote.CallAsync("file", new { operation = "preview", path, @base = directory.Text });
         if (!ReferenceEquals(remote,agent) || host==null) return;
         if ((string?)preview["kind"]=="text") { OpenTextEditor(path,LocalState.HostKey(host),preview);return; }
+        if ((string?)preview["kind"]=="pdf") { await OpenPdfAsync(path);return; }
         UIElement content = new TextBlock { Text = preview["text"]?.GetValue<string>() ?? "此文件请下载后查看", IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap };
         if (preview["kind"]?.GetValue<string>() == "image")
         {
@@ -439,10 +389,13 @@ public sealed partial class MainWindow : Window
             File.Delete(file); content = new Image { Source = bitmap, MaxWidth = 700, MaxHeight = 500 };
         }
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = Path.GetFileName(path), Content = new ScrollViewer { Content = content, MaxHeight = 500 }, PrimaryButtonText = "下载", CloseButtonText = "关闭" };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-        {
-            var picker = new FileSavePicker { SuggestedFileName = Path.GetFileName(path) }; picker.FileTypeChoices.Add("文件", new List<string> { Path.GetExtension(path) is { Length: > 0 } ext ? ext : ".bin" });
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); var file = await picker.PickSaveFileAsync(); if (file is not null) await remote.DownloadAsync(path, file.Path);
-        }
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary) await SaveCopyAsync(path);
+    }
+    /// Downloads a server file to a place the user picks.
+    private async Task SaveCopyAsync(string path)
+    {
+        var remote = RequireAgent();
+        var picker = new FileSavePicker { SuggestedFileName = Path.GetFileName(path) }; picker.FileTypeChoices.Add("文件", new List<string> { Path.GetExtension(path) is { Length: > 0 } ext ? ext : ".bin" });
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); var file = await picker.PickSaveFileAsync(); if (file is not null) await remote.DownloadAsync(path, file.Path);
     }
 }

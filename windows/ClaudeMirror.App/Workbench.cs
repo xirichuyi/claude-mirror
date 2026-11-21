@@ -12,7 +12,7 @@ namespace ClaudeMirror.App;
 public sealed partial class MainWindow
 {
     private readonly SolidColorBrush canvas = new(), rail = new(), surface = new(), ink = new(),
-        muted = new(), edge = new(), bubble = new(), sage = new();
+        muted = new(), edge = new(), bubble = new(), sage = new(), danger = new(), amber = new(), added = new(), removed = new();
     private readonly Grid railPanel = new();
     private readonly StackPanel home = new() { Spacing = 16, MaxWidth = 620, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock title = new(), subtitle = new(), connection = new(), homeTitle = new(), homeHint = new();
@@ -82,7 +82,8 @@ public sealed partial class MainWindow
         foreach (var (brush, light, night) in new[] {
             (canvas,0xFAF6F2,0x242424), (rail,0xF0EAE3,0x1C1C1C), (surface,0xF6F1EB,0x2C2C2C),
             (ink,0x272727,0xEAEAEA), (muted,0x645E58,0xBBB6B0), (edge,0xDCD5CE,0x484848),
-            (bubble,0xEDE5DC,0x343434), (sage,0x566746,0xB4C49E) })
+            (bubble,0xEDE5DC,0x343434), (sage,0x566746,0xB4C49E), (danger,0xB3392C,0xF08A7C), (amber,0x9A6A12,0xE3B565),
+            (added,0xDDEBD3,0x2B3A27), (removed,0xF3D9D4,0x44292A) })
         {
             int rgb = dark ? night : light;
             brush.Color = Windows.UI.Color.FromArgb(255,(byte)(rgb >> 16),(byte)(rgb >> 8),(byte)rgb);
@@ -112,7 +113,7 @@ public sealed partial class MainWindow
     }
     private void BuildWorkbench()
     {
-        ApplyTheme(); root.ActualThemeChanged += (_,_) => ApplyTheme();
+        ApplySavedTheme(); ApplyTheme(); root.ActualThemeChanged += (_,_) => ApplyTheme();
         root.Background = canvas;
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
         root.ColumnDefinitions.Add(new ColumnDefinition());
@@ -184,6 +185,7 @@ public sealed partial class MainWindow
         var composeArea = new StackPanel { MaxWidth = 800, Spacing = 8, Margin = new Thickness(20,6,20,14) };
         composer.Child = composeArea; At(area,composer,2);
         connection.FontSize = 12; connection.Foreground = sage; composeArea.Children.Add(connection);
+        composeArea.Children.Add(permissionPanel); composeArea.Children.Add(queuePanel);
         var input = new StackPanel { Spacing = 6 }; prompt.MinHeight = 44;
         prompt.BorderThickness = new Thickness(0); prompt.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         foreach(var key in new[]{"TextControlBackground","TextControlBackgroundPointerOver","TextControlBackgroundFocused","TextControlBorderBrush","TextControlBorderBrushPointerOver","TextControlBorderBrushFocused"})
@@ -196,7 +198,7 @@ public sealed partial class MainWindow
         var toolbar = new Grid(); toolbar.ColumnDefinitions.Add(new ColumnDefinition()); toolbar.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
 
         commandMenu=PickerAction(false);modelMenu=PickerAction(true);UpdatePickerTitle();
-        toolbar.Children.Add(Row(ActionButton("附件","\uE723",UploadAsync),commandMenu));
+        toolbar.Children.Add(Row(ActionButton("附件","\uE723",UploadAsync),commandMenu,PermissionPicker()));
         send = ActionButton("发送","\uE74A",SendAsync); send.Background = ink; send.Foreground = canvas; send.CornerRadius = new CornerRadius(18);
         stop = ActionButton("停止","\uE71A",StopAsync);
         var actions = Row(modelMenu,stop,send); Grid.SetColumn(actions,1); toolbar.Children.Add(actions); input.Children.Add(toolbar);
@@ -205,9 +207,19 @@ public sealed partial class MainWindow
         project = ActionButton("工作目录","\uE838",() => Task.CompletedTask);
         directory.Width = 230; directory.Header = "远端工作目录";
         project.Flyout = new Flyout { Content = directory };
-        var editors = ActionButton("切换文件编辑器","\uE8A5",()=>{ if(openFiles.Count==0)return BrowseAsync(); showEditor=!showEditor;LayoutSplit();return Task.CompletedTask; });
+        var editors = ActionButton("切换文件编辑器","\uE8A5",()=>{ if(editorTabs.TabItems.Count==0)return BrowseAsync(); showEditor=!showEditor;LayoutSplit();return Task.CompletedTask; });
         var more=ActionButton("更多操作","\uE712",()=>Task.CompletedTask);
-        more.Flyout=new Flyout { Content=new StackPanel {Children={project,editors,update}} };
+        var tunnels=ActionButton("端口转发","\uE968",()=>Task.CompletedTask,true);
+        var tunnelFlyout=new Flyout { Content=TunnelPanel() }; tunnelFlyout.Opening+=(_,_)=>RenderTunnels(); tunnels.Flyout=tunnelFlyout;
+        var changes=ActionButton("Git 变更","\uE8F1",ChangesAsync,true);
+        var findInFiles=ActionButton("在文件中搜索","\uE721",SearchFilesAsync,true);
+        var quick=ActionButton("快速打开文件（Ctrl+P）","\uE8E5",QuickOpenAsync,true);
+        more.Flyout=new Flyout { Content=new StackPanel {Children={ActionButton("设置","\uE713",SettingsAsync,true),ActionButton("状态：用量、MCP、后台任务","\uE9D9",StatusAsync,true),changes,findInFiles,quick,project,editors,tunnels,update}} };
+        var quickKey=new KeyboardAccelerator { Key=VirtualKey.P, Modifiers=VirtualKeyModifiers.Control };
+        quickKey.Invoked+=async (_,e)=>{ e.Handled=true; await RunAsync(QuickOpenAsync); };
+        var findKey=new KeyboardAccelerator { Key=VirtualKey.F, Modifiers=VirtualKeyModifiers.Control|VirtualKeyModifiers.Shift };
+        findKey.Invoked+=async (_,e)=>{ e.Handled=true; await RunAsync(SearchFilesAsync); };
+        root.KeyboardAccelerators.Add(quickKey); root.KeyboardAccelerators.Add(findKey);
         restartButton=ActionButton("重启更新","\uE895",InstallUpdateAsync,true);
         restartButton.Visibility=Visibility.Collapsed;
         var headerActions = Row(restartButton,files,more);
@@ -224,28 +236,32 @@ public sealed partial class MainWindow
         railPanel.Visibility = sidebarOpen ? Visibility.Visible : Visibility.Collapsed;
         root.ColumnDefinitions[0].Width = new GridLength(sidebarOpen ? 240 : 0);
     }
+    private bool showArchived;
+    private string HostKeyOrEmpty => host == null ? "" : LocalState.HostKey(host);
+    private bool IsCurrent(Conversation c) => conversation is not null && (c.SessionId ?? c.Reference) == (conversation.SessionId ?? conversation.Reference) && c.Directory == conversation.Directory;
+
     private void RenderHistory()
     {
         projects.Children.Clear();
-        var list = history.Where(c => (c.Name+" "+c.Directory).Contains(search.Text,StringComparison.OrdinalIgnoreCase)).ToList();
+        var list = Sessions.Visible(history,local,HostKeyOrEmpty,search.Text);
+        var archive = Sessions.Visible(history,local,HostKeyOrEmpty,search.Text,true);
         projects.Children.Add(new TextBlock { Text = list.Count > 0 ? "项目" : search.Text.Length > 0 ? "没有找到匹配的对话" : "暂无历史对话", Foreground = muted, FontSize = 13 });
         if(history.Count == 0 && host == null) projects.Children.Add(new TextBlock { Text = "连接后自动同步这台机器的对话", Foreground = muted, FontSize = 12 });
+        var pinned = list.Where(entry => entry.Pinned).ToList();
+        if(pinned.Count > 0)
+        {
+            projects.Children.Insert(0,new TextBlock { Text="已固定", Foreground=muted, FontSize=13 });
+            for(int i=0;i<pinned.Count;i++) projects.Children.Insert(i+1,ConversationRow(pinned[i],"\uE718"));
+        }
         int index = 0;
-        foreach(var group in list.GroupBy(c=>c.Directory))
+        foreach(var group in Sessions.Projects(list))
         {
             var items = new StackPanel { Spacing = 2 };
-            items.Children.Add(ActionButton("新建对话","\uE710",async () => { directory.Text = group.Key; await NewConversationAsync(); },true));
-            foreach(var c in group)
-            {
-                var row = Button(c.Name,() => SelectAsync(c));
-                row.Content = new TextBlock {Text=c.Name,TextTrimming=TextTrimming.CharacterEllipsis};
-                row.HorizontalAlignment = HorizontalAlignment.Stretch; row.HorizontalContentAlignment = HorizontalAlignment.Left;
-                row.Background = c == conversation ? bubble : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-                row.BorderThickness = new Thickness(0); ToolTipService.SetToolTip(row,c.Name); items.Children.Add(row);
-            }
-            var path = group.Key; var groupId = (host == null ? "" : LocalState.HostKey(host)) + "|" + path;
+            var path = group.Directory; var groupId = HostKeyOrEmpty + "|" + path;
+            items.Children.Add(ActionButton("新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); },true));
+            foreach(var entry in group.Entries) items.Children.Add(ConversationRow(entry,null));
             var folder = ShortDirectory(path);
-            bool expanded = search.Text.Length>0 || (openGroups.TryGetValue(groupId,out var remembered) ? remembered : index < 2 || group.Any(c=>c==conversation));
+            bool expanded = search.Text.Length>0 || (openGroups.TryGetValue(groupId,out var remembered) ? remembered : index < 2 || group.Entries.Any(entry=>IsCurrent(entry.Conversation)));
             index++;
             var arrow = new FontIcon { FontSize=11 };
             void SetExpanded(bool value) { expanded=value;arrow.Glyph=value?"\uE70D":"\uE76C";items.Visibility=value?Visibility.Visible:Visibility.Collapsed; }
@@ -254,15 +270,21 @@ public sealed partial class MainWindow
             section.HorizontalContentAlignment=HorizontalAlignment.Left;section.HorizontalAlignment=HorizontalAlignment.Stretch;
             section.Background=new SolidColorBrush(Microsoft.UI.Colors.Transparent);section.BorderThickness=new Thickness(0);
             AutomationProperties.SetName(section,path);ToolTipService.SetToolTip(section,path);items.Margin=new Thickness(12,0,0,0);
+            var menu=new MenuFlyout();
+            menu.Items.Add(MenuItem("在此目录新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); }));
+            menu.Items.Add(MenuItem("把此项目的历史移到废纸篓…","\uE74D",() => TrashProjectAsync(path)));
+            section.ContextFlyout=menu;
             SetExpanded(expanded);projects.Children.Add(section);projects.Children.Add(items);
         }
         if(list.Count > 0 && search.Text.Length == 0) {
             projects.Children.Add(new TextBlock { Text="最近对话", Foreground=muted, FontSize=13, Margin=new Thickness(4,12,0,0) });
-            foreach(var c in list.Take(6)) {
-                var item=ActionButton(c.Name,"\uE81C",()=>SelectAsync(c),true);
-                item.HorizontalContentAlignment=HorizontalAlignment.Left;
-                projects.Children.Add(item);
-            }
+            foreach(var entry in list.Take(6)) projects.Children.Add(ConversationRow(entry,"\uE81C"));
+        }
+        if(archive.Count > 0)
+        {
+            var toggle=ActionButton(showArchived?$"隐藏已归档（{archive.Count}）":$"显示已归档（{archive.Count}）","\uE7B8",()=>{ showArchived=!showArchived; RenderHistory(); return Task.CompletedTask; },true);
+            toggle.Margin=new Thickness(0,12,0,0); projects.Children.Add(toggle);
+            if(showArchived) foreach(var entry in archive) projects.Children.Add(ConversationRow(entry,"\uE7B8"));
         }
     }
     private void RefreshWorkbench()
@@ -314,7 +336,8 @@ public sealed partial class MainWindow
     }
     private void UpdateActions()
     {
-        send.IsEnabled = agent?.Connected == true && !busy && !string.IsNullOrWhiteSpace(prompt.Text);
+        send.IsEnabled = agent?.Connected == true && !string.IsNullOrWhiteSpace(prompt.Text);
+        ToolTipService.SetToolTip(send, busy ? "加入队列，当前回复结束后发送" : "发送");
         stop.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
     }
 }

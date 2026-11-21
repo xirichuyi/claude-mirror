@@ -79,10 +79,13 @@ struct RootView: View {
         .task(id: "\(model.currentConfig?.key ?? ""):\(model.isConnected)") {
             let config = model.currentConfig
             let engine = model.engine
-            let loader: (() async throws -> JSON)?
+            var loader: (() async throws -> JSON)?
             if model.isConnected, let config, let engine {
                 loader = { try await engine.machineDetails(config, section: "accountStatus") }
-            } else { loader = nil }
+            }
+            #if DEBUG
+            if Bundle.main.bundleIdentifier == "local.claudemirror.demo" { loader = { DemoData.account } }
+            #endif
             await model.accountStore.observe(source: config?.key ?? "", loader: loader)
         }
         .onAppear {
