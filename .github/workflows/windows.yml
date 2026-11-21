@@ -13,6 +13,33 @@ on:
 permissions:
   contents: read
 jobs:
+  # The system SSH login end to end against a Unix server: remote agent, jump host, upload, download, port forward.
+  system-ssh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - run: npm run prepare-server -- "$RUNNER_TEMP/server"
+      - name: Remote agent over the system SSH client, directly and through a jump host
+        run: |
+          sudo mkdir -p /run/sshd
+          export CLAUDE_MIRROR_TEST_SSH_CONFIG="$(sh windows/ClaudeMirror.Tests/test-sshd.sh "$RUNNER_TEMP/mirror-sshd")"
+          export CLAUDE_MIRROR_TEST_RESOURCES="$RUNNER_TEMP/server"
+          ssh -F "$CLAUDE_MIRROR_TEST_SSH_CONFIG" -o BatchMode=yes mirror-jumped 'echo ready' || { cat "$RUNNER_TEMP/mirror-sshd/sshd.log"; exit 1; }
+          dotnet test windows/ClaudeMirror.Tests -c Release --filter "FullyQualifiedName~SystemSshTests" --logger "console;verbosity=normal" | tee "$RUNNER_TEMP/system-ssh.log"
+          # A skipped test here would mean the server was not reached at all.
+          ! grep -q "Skipped SystemSshTests" "$RUNNER_TEMP/system-ssh.log"
   native:
     runs-on: windows-2025
     steps:
@@ -31,6 +58,12 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: npm run prepare-server -- windows/Resources/server
       - run: dotnet test windows/ClaudeMirror.Tests -c Release
+      - name: System SSH transport against a local sshd (the real ssh.exe)
+        shell: pwsh
+        run: |
+          $env:CLAUDE_MIRROR_TEST_SSH_CONFIG = ./windows/ClaudeMirror.Tests/test-sshd.ps1 (Join-Path $env:RUNNER_TEMP 'mirror-sshd')
+          dotnet test windows/ClaudeMirror.Tests -c Release --no-build --filter "FullyQualifiedName~SystemSshTests" --logger "console;verbosity=normal"
+          if ($LASTEXITCODE) { throw 'System SSH tests failed' }
       - name: Read shared product version
         id: product
         shell: pwsh

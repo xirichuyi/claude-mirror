@@ -5,11 +5,8 @@ using Xunit;
 /// Runs against the sshd started by test-sshd.sh; skipped without it.
 public sealed class SystemSshFactAttribute : FactAttribute
 {
-    public SystemSshFactAttribute()
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLAUDE_MIRROR_TEST_SSH_CONFIG")))
-            Skip = "Start test-sshd.sh and set CLAUDE_MIRROR_TEST_SSH_CONFIG (and CLAUDE_MIRROR_TEST_RESOURCES) for the system SSH tests";
-    }
+    /// <param name="agent">The test starts the remote agent, which needs a Unix server and CLAUDE_MIRROR_TEST_RESOURCES.</param>
+    public SystemSshFactAttribute(bool agent = false) { Skip = SystemSshTests.Missing(agent); }
 }
 
 public class SystemSshTests
@@ -17,6 +14,80 @@ public class SystemSshTests
     private static string Config => Environment.GetEnvironmentVariable("CLAUDE_MIRROR_TEST_SSH_CONFIG")!;
     private static string Resources => Environment.GetEnvironmentVariable("CLAUDE_MIRROR_TEST_RESOURCES")!;
     private static HostProfile Host(string alias) => new(alias, alias, 0, "", SystemSsh: true);
+    internal static string? Missing(bool agent) =>
+        string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLAUDE_MIRROR_TEST_SSH_CONFIG")) ? "Start test-sshd.sh (or test-sshd.ps1) and set CLAUDE_MIRROR_TEST_SSH_CONFIG for the system SSH tests"
+        : agent && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLAUDE_MIRROR_TEST_RESOURCES")) ? "Set CLAUDE_MIRROR_TEST_RESOURCES to a prepared server folder for the remote agent tests" : null;
+    private static int ServerPort => int.Parse(File.ReadLines(Path.Combine(Path.GetDirectoryName(Config)!, "sshd_config")).First(line => line.StartsWith("Port ")).Split(' ')[1]);
+
+    /// The installed OpenSSH client reads every option this app passes. `ssh -G` parses the command line and prints the result without connecting,
+    /// so this runs against the real ssh.exe on a Windows build machine.
+    [Fact]
+    public async Task TheInstalledSshClientAcceptsTheseArguments()
+    {
+        var profile = new HostProfile("x", "target.example", 2200, "me", null, true, "ops@bastion.example:2222");
+        foreach (var arguments in new[] { SystemSsh.Arguments(profile, "echo hi"), SystemSsh.Arguments(profile, null, new Tunnel(18080, 3000)), SystemSsh.Arguments(Host("alias"), "echo hi") })
+        {
+            var info = new System.Diagnostics.ProcessStartInfo(SystemSsh.Executable()) { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, UseShellExecute = false };
+            info.ArgumentList.Add("-G"); foreach (var argument in arguments) info.ArgumentList.Add(argument);
+            System.Diagnostics.Process process;
+            try { process = System.Diagnostics.Process.Start(info)!; } catch (System.ComponentModel.Win32Exception) { return; } // No OpenSSH client on this machine.
+            process.StandardInput.Close();
+            var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            Assert.True(process.ExitCode == 0, await error);
+            var settings = (await output).ToLowerInvariant();
+            Assert.Contains("batchmode yes", settings);
+            Assert.Contains(arguments.Contains("alias") ? "hostname alias" : "hostname target.example", settings);
+            if (!arguments.Contains("alias")) { Assert.Contains("proxyjump ops@bastion.example:2222", settings); Assert.Contains("port 2200", settings); Assert.Contains("user me", settings); }
+        }
+    }
+
+    /// The transport alone, without the remote agent: bytes both ways, exit codes, errors, and a forwarded port.
+    [SystemSshTheory]
+    [InlineData("mirror-target")]
+    [InlineData("mirror-jumped")]
+    public async Task ACommandCarriesBytesBothWaysAndReportsItsExit(string alias)
+    {
+        using var link = new SystemSshLink(Host(alias), Config);
+        var bytes = new byte[200_000]; new Random(11).NextBytes(bytes);
+        using (var echo = link.Run("cat", true, CancellationToken.None))
+        {
+            var received = new MemoryStream(); var reading = echo.Output.CopyToAsync(received);
+            using (var input = echo.Input) await input.WriteAsync(bytes);
+            Assert.Equal(0, await echo.Exit.WaitAsync(TimeSpan.FromSeconds(60))); await reading;
+            Assert.Equal(bytes, received.ToArray());
+        }
+        using (var failing = link.Run("echo problem >&2; exit 7", false, CancellationToken.None))
+        {
+            Assert.Equal(7, await failing.Exit.WaitAsync(TimeSpan.FromSeconds(60)));
+            Assert.Contains("problem", failing.Error);
+        }
+        using var cancel = new CancellationTokenSource();
+        using (var waiting = link.Run("sleep 600", false, cancel.Token))
+        {
+            cancel.Cancel();
+            await waiting.Exit.WaitAsync(TimeSpan.FromSeconds(30)); // Cancelling ends the ssh process instead of leaving it behind.
+        }
+        int local = ServerPort + 2000 + (alias.Length % 2);
+        using (var forward = link.Forward(new Tunnel(local, ServerPort)))
+        {
+            using var client = new TcpClient(); await client.ConnectAsync("127.0.0.1", local);
+            var banner = new byte[4]; await client.GetStream().ReadExactlyAsync(banner);
+            Assert.Equal("SSH-", System.Text.Encoding.ASCII.GetString(banner));
+            Assert.True(forward.Alive);
+        }
+    }
+
+    [SystemSshFact]
+    public async Task AnUntrustedHostKeyFailsACommandWithoutPrompting()
+    {
+        using var link = new SystemSshLink(Host("mirror-unknown"), Config);
+        using var run = link.Run("echo should-not-run", false, CancellationToken.None);
+        using var reader = new StreamReader(run.Output); var output = reader.ReadToEndAsync();
+        Assert.NotEqual(0, await run.Exit.WaitAsync(TimeSpan.FromSeconds(60)));
+        Assert.DoesNotContain("should-not-run", await output);
+        Assert.Equal(SystemSshFailure.HostKey, SystemSsh.Explain(run.Error).Kind);
+    }
 
     [Fact]
     public void ArgumentsNeverPromptAndLeaveEmptyPartsToTheSshConfig()
@@ -63,7 +134,7 @@ public class SystemSshTests
         Assert.Equal("ssh -J bastion -p 2200 -l me 10.0.0.5", SystemSsh.TerminalCommand(new HostProfile("x", "10.0.0.5", 2200, "me", null, true, "bastion")));
     }
 
-    [SystemSshFact]
+    [SystemSshFact(agent: true)]
     public async Task AnUntrustedHostKeyIsRefusedWithoutPrompting()
     {
         using var agent = new RemoteAgent();
@@ -71,7 +142,7 @@ public class SystemSshTests
         Assert.Equal(SystemSshFailure.HostKey, failure.Kind);
     }
 
-    [SystemSshTheory]
+    [SystemSshTheory(agent: true)]
     [InlineData("mirror-target")]
     [InlineData("mirror-jumped")]
     public async Task TheAgentRunsOverSystemSshDirectlyAndThroughAJumpHost(string alias)
@@ -92,7 +163,7 @@ public class SystemSshTests
         await Assert.ThrowsAsync<IOException>(() => agent.DownloadAsync("/nonexistent/file", copy));
 
         // A forwarded port reaches the server's loopback: here, the test sshd itself.
-        var target = int.Parse(File.ReadLines(Path.Combine(Path.GetDirectoryName(Config)!, "sshd_config")).First(line => line.StartsWith("Port ")).Split(' ')[1]);
+        var target = ServerPort;
         var local = target + 1000 + (alias.Length % 2);
         await agent.ForwardAsync(new Tunnel(local, target));
         using (var client = new TcpClient())
@@ -106,7 +177,7 @@ public class SystemSshTests
         Directory.Delete(folder, true);
     }
 
-    [SystemSshFact]
+    [SystemSshFact(agent: true)]
     public async Task ALostChannelIsReported()
     {
         using var agent = new RemoteAgent();
@@ -122,8 +193,5 @@ public class SystemSshTests
 
 public sealed class SystemSshTheoryAttribute : TheoryAttribute
 {
-    public SystemSshTheoryAttribute()
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CLAUDE_MIRROR_TEST_SSH_CONFIG"))) Skip = "Needs test-sshd.sh";
-    }
+    public SystemSshTheoryAttribute(bool agent = false) { Skip = SystemSshTests.Missing(agent); }
 }
