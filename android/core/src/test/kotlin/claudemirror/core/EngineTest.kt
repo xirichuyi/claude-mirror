@@ -296,6 +296,19 @@ class EngineTest {
         assertFalse(current(session.id).queueHeld)
     }
 
+    @Test fun `a command left behind on the old machine no longer shows as running`() = engineTest {
+        val (session, task) = started()
+        agent.emit(task.id, """{"version":1,"status":"permission","permissions":[],"message":{"id":"${task.messageId}","role":"assistant","blocks":[
+            {"type":"tool","id":"t1","name":"Bash","status":"done"},
+            {"type":"tool","id":"t2","name":"Task","status":"running","children":[{"id":"c1","name":"Bash","status":"running"}]}]}}""")
+        until("the command waits") { current(session.id).status == "permission" }
+        engine.detach(testHost)
+        engine.endpointChanged(testHost.id)
+        val tools = current(session.id).messages.last().blocks!!
+        assertEquals(listOf("done", "stopped"), tools.map { it.status })
+        assertEquals("stopped", tools[1].children!!.single().status)
+    }
+
     @Test fun `a held message the worker would not take is still held`() = engineTest {
         val (session, task) = started()
         agent.emit(task.id, state(task, 1, "working"))

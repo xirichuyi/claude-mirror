@@ -137,6 +137,17 @@ class Engine(
     }
 
     /** The hold belongs to the messages that were waiting when the server moved; it ends with the last of them. */
+    /** A reply nobody is writing any more: whatever it was still running did not finish here. */
+    private fun ChatMessage.cutShort() = copy(
+        interrupted = true,
+        blocks = blocks?.map { block ->
+            block.copy(
+                status = if (block.status == "running") "stopped" else block.status,
+                children = block.children?.map { if (it.status == "running") it.copy(status = "stopped") else it },
+            )
+        },
+    )
+
     private fun ChatSession.withQueue(queue: List<QueuedMessage>) = copy(queue = queue, queueHeld = queueHeld && queue.isNotEmpty())
 
     fun cancelQueued(id: String, item: String) = update(id) { it.withQueue(it.queue.filter { queued -> queued.id != item }) }
@@ -370,7 +381,7 @@ class Engine(
 
         if (session.messages.none { it.id == messageId }) throw RemoteException("远端任务与本地消息不匹配")
         var message = MirrorJson.decodeFromJsonElement<ChatMessage>(remote["message"]!!)
-        if (done && status == "stopped") message = message.copy(interrupted = true)
+        if (done && status == "stopped") message = message.cutShort()
         val turnEnded = done || status in ENDED
         // Until the worker confirms the stop, states it wrote before hearing of it still say "working".
         if (!turnEnded && id in stopRequests && status != "stopping") status = "stopping"
@@ -444,7 +455,7 @@ class Engine(
             val reply = session.remoteTask?.messageId
             update(session.id) {
                 it.copy(
-                    messages = it.messages.map { message -> if (message.id == reply) message.copy(interrupted = true) else message },
+                    messages = it.messages.map { message -> if (message.id == reply) message.cutShort() else message },
                     status = if (it.isBusy) "stopped" else it.status, permissions = emptyList(), transportError = null,
                     remoteTask = null, remoteOwner = null, remoteSessionId = null,
                     queueHeld = it.queue.isNotEmpty(),
@@ -491,7 +502,7 @@ class Engine(
                 watchers.remove(id)?.kill()
                 update(id) {
                     it.copy(
-                        messages = it.messages.map { local -> if (local.id == task.messageId) local.copy(interrupted = true) else local },
+                        messages = it.messages.map { local -> if (local.id == task.messageId) local.cutShort() else local },
                         status = "stopped", remoteTask = null, queuePaused = true, transportError = null,
                     )
                 }
