@@ -4,30 +4,44 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>claude-mirror</title>
         <item>
-            <title>0.23.4</title>
-            <pubDate>Fri, 20 Nov 2026 09:26:04 +0000</pubDate>
-            <sparkle:version>17</sparkle:version>
-            <sparkle:shortVersionString>0.23.4</sparkle:shortVersionString>
+            <title>0.24.0</title>
+            <pubDate>Sat, 21 Nov 2026 07:43:23 +0000</pubDate>
+            <sparkle:version>18</sparkle:version>
+            <sparkle:shortVersionString>0.24.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Claude Mirror v0.23.4
+            <description sparkle:format="markdown"><![CDATA[# Claude Mirror v0.24.0
 
-本次更新修复 macOS 对话区的几处显示问题。
+本次更新补齐 Windows 客户端的大部分功能，并为 macOS 加入 Full Access。
 
-- 回复中的长代码块限制高度，在块内滚动，不再占满多屏；流式输出时保持显示最新几行。
-- 表格、代码和工具输出超出列宽时，右侧渐隐提示可以横向滚动。
-- 提示消息移到窗口顶部，不再压住输入区。
-- 引用块左侧显示竖线。
-- 「思考过程」一行与工具调用一行样式统一。
-- 拖选文字越过限高代码块时，先滚动代码块，可以选到块内被遮住的行。
-- 变更列表中未跟踪文件显示 `U`，不再显示 `??`。
+## Windows
 
-验证：自动化测试通过；在演示数据上核对了浅色、深色截图和流式输出场景。未通过真实 SSH 会话、Retina 屏幕和 120 Hz 屏幕验证。
+- 对话：工具调用卡片、可折叠的思考过程、代码着色；长代码块限高并在块内滚动；diff 展示。
+- 权限请求显示为输入框上方的卡片，可查看命令或 diff、选择选项、记住权限规则、拒绝时填写原因；可切换权限模式。
+- 回复进行中发送的消息进入队列；回复结束后可复制整条回复、回退文件改动。
+- 侧栏：对话可重命名、固定、归档、查看详情、从列表移除；可把项目的对话记录移到服务器的废纸篓。
+- 连接：断线自动重连（仅限无口令私钥登录的服务器）；从 `~/.ssh/config` 导入主机；端口转发。
+- 工作区：Git 变更列表和并排 diff、在项目文件中搜索（Ctrl+Shift+F）、按文件名快速打开（Ctrl+P）、新建 worktree、PDF 预览、文件新建、重命名和删除。
+- 状态页：服务器和环境检查、账号用量、上下文用量、MCP 服务器、重新加载插件、停止后台任务。
+- 设置页：外观可选浅色、深色或跟随系统，并保存在本机。
+
+Windows 暂不支持：Full Access、跳板机（ProxyJump）、ssh-agent 登录、多个对话同时回复、跨消息连续选择文本、已安装插件和 Agent 列表。SSH 配置中带 ProxyJump 的主机导入时会提示只能直连。
+
+## macOS
+
+- 新增 Full Access 权限模式。以 root 登录的服务器可改用单独的账号运行 Claude。
+- 权限请求、提问、计划和 MCP 表单改为应用内对话框，并显示权限规则和执行账号。
+
+## 其他
+
+- Node 代码迁移到 TypeScript。
+
+验证：自动化测试通过；Windows 版在构建流程中通过编译、启动检查和单元测试。Windows 的新界面未在真实 Windows 电脑上逐项操作过，也未连接真实 SSH 服务器验证。
 ]]></description>
-            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.23.4/claude-mirror-0.23.4-macOS-arm64.dmg" length="8897703" type="application/octet-stream" sparkle:edSignature="Cc2q+slrbobDBxrc/KsBQCoYVo5hA4phQB4/7/vNSOOfnxgrx4hwk/9fiexZyej0p5IZ2gQ1x9tLcbJUZOQnAw=="></enclosure>
+            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.24.0/claude-mirror-0.24.0-macOS-arm64.dmg" length="8975470" type="application/octet-stream" sparkle:edSignature="HdOW2CbckamBsx2Yr8EhGIixBQdo0e1JEAC7n3X8fdXlu3Z4hrWRvCmCBX4yNXGjEPTWBVj1hlYkZcF2JrvFCQ=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: dErUoQzEKem16csoqOpompkCzvTe90GbrUztTkcaGHK5CcTBzIORYUiPgsTqAKVjcusWyuaRPqyl44JDC4KUAg==
-length: 2025
+edSignature: tMiVsHmo/yQoeRy6hXPn76N0UDNchgLR7j9D6rz0XQwJQkokvISDilAs4+w/wfvj1om9pFSgc10bUgLFay1aDA==
+length: 3180
 -->
