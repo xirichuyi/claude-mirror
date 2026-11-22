@@ -55,7 +55,13 @@ data class ServerInfo(
     val nodeSupported: Boolean = true,
     val claude: String? = null,
     val persistenceWarning: String? = null,
+    val nodePath: String = "",
+    val agentPath: String = "",
 )
+
+/** A file on the server that goes with a message. */
+@Serializable
+data class Attachment(val name: String, val path: String, val size: Long = 0)
 
 @Serializable
 data class ChildTool(
@@ -84,6 +90,7 @@ data class Block(
     /** Set on a message inserted into a running reply until Claude has read it. */
     val pending: Boolean? = null,
     val cancelled: Boolean? = null,
+    val attachments: List<Attachment>? = null,
 )
 
 @Serializable
@@ -99,6 +106,7 @@ data class ChatMessage(
     val model: String? = null,
     val durationMs: Double? = null,
     val costUSD: Double? = null,
+    val attachments: List<Attachment>? = null,
 )
 
 @Serializable
@@ -133,7 +141,7 @@ data class RemoteModel(
 )
 
 @Serializable
-data class QueuedMessage(val id: String, val text: String)
+data class QueuedMessage(val id: String, val text: String, val attachments: List<Attachment> = emptyList())
 
 /** One reply being produced: the worker process [id] is answering [messageId]. */
 @Serializable

@@ -278,19 +278,18 @@ class Engine(
     // Sending and the queue
 
     /** Sends now when Claude is idle. During a reply the message waits in the queue, or with [steer] goes into the running reply. */
-    fun submit(id: String, text: String, steer: Boolean = false) {
-        if (require(id).remoteTask == null) return send(id, text)
-        val item = enqueue(id, text)
+    fun submit(id: String, text: String, attachments: List<Attachment> = emptyList(), steer: Boolean = false) {
+        if (require(id).remoteTask == null) return send(id, text, attachments)
+        val item = enqueue(id, text, attachments)
         if (steer) scope.launch { runCatching { steer(id, item.id) }.onFailure { onError?.invoke(it.message ?: "插队失败") } }
     }
 
     var onError: ((String) -> Unit)? = null
 
-    private fun enqueue(id: String, text: String): QueuedMessage {
-        val value = text.trim()
-        if (value.isEmpty() || text.length > MAX_LENGTH) throw RemoteException("消息不能为空或超过 20 万字符")
+    private fun enqueue(id: String, text: String, attachments: List<Attachment>): QueuedMessage {
+        val value = said(text, attachments)
         if (require(id).queue.size >= 20) throw RemoteException("最多排队 20 条消息")
-        val item = QueuedMessage(newId(), value)
+        val item = QueuedMessage(newId(), value, attachments)
         update(id) { it.copy(queue = it.queue + item) }
         return item
     }
@@ -323,7 +322,7 @@ class Engine(
         val item = session.queue.firstOrNull() ?: return
         if (session.remoteTask != null || session.queuePaused || session.queueHeld) return
         update(id) { it.copy(queue = it.queue.drop(1)) }
-        try { send(id, item.text) } catch (error: RemoteException) {
+        try { send(id, item.text, item.attachments) } catch (error: RemoteException) {
             update(id) { it.copy(queue = listOf(item) + it.queue, queuePaused = true) }
             onError?.invoke(error.message.orEmpty())
         }
@@ -339,7 +338,10 @@ class Engine(
         if (session.remoteTask == null) return resumeQueue(id)
         update(id) { it.withQueue(it.queue.filter { other -> other.id != item }) }
         try {
-            command(session, "steer", commandId = queued.id) { put("id", queued.id); put("text", queued.text); put("prompt", queued.text) }
+            command(session, "steer", commandId = queued.id) { 
+                put("id", queued.id); put("text", queued.text); put("prompt", prompt(queued.text, queued.attachments))
+                if (queued.attachments.isNotEmpty()) put("attachments", MirrorJson.encodeToJsonElement(queued.attachments))
+            }
         } catch (error: RemoteException) {
             // The acknowledgement can be lost after the worker took the message; the transcript then shows it.
             val delivered = session(id)?.messages?.any { message -> message.blocks.orEmpty().any { it.type == "user" && it.id == queued.id && it.cancelled != true } } == true
@@ -350,21 +352,27 @@ class Engine(
         }
     }
 
-    fun send(id: String, text: String) {
+    /** What the message reads as: one that is only files still needs words for Claude. */
+    private fun said(text: String, attachments: List<Attachment>): String {
+        val value = text.trim()
+        if ((value.isEmpty() && attachments.isEmpty()) || text.length > MAX_LENGTH) throw RemoteException("消息不能为空或超过 20 万字符")
+        return value.ifEmpty { ATTACHMENTS_ONLY }
+    }
+
+    fun send(id: String, text: String, attachments: List<Attachment> = emptyList()) {
         val session = require(id)
         if (session.remoteTask != null) throw RemoteException("Claude 正在回复，请先停止或等待完成")
-        val value = text.trim()
-        if (value.isEmpty() || text.length > MAX_LENGTH) throw RemoteException("消息不能为空或超过 20 万字符")
+        val value = said(text, attachments)
         hostOf(session)
         val reply = ChatMessage(id = newId(), role = "assistant", blocks = emptyList(), createdAt = now().toDouble())
         val owner = session.remoteOwner
         update(id) {
             it.copy(
                 name = if (it.messages.isEmpty() && it.name == ChatSession.NEW_NAME) value.take(28) else it.name,
-                messages = it.messages + ChatMessage(id = newId(), role = "user", text = value, createdAt = now().toDouble()) + reply,
+                messages = it.messages + ChatMessage(id = newId(), role = "user", text = value, createdAt = now().toDouble(), attachments = attachments.ifEmpty { null }) + reply,
                 status = "connecting", updatedAt = now(), queuePaused = false, transportError = null,
                 // Stored before anything is sent: after an unanswered request the same task ID is used again.
-                remoteTask = RemoteTask(id = owner?.id ?: newId(), prompt = value, messageId = reply.id, continuation = owner != null),
+                remoteTask = RemoteTask(id = owner?.id ?: newId(), prompt = prompt(value, attachments), messageId = reply.id, continuation = owner != null),
             )
         }
         dispatch { if (owner != null) continueTurn(id) else attach(id) }

@@ -17,6 +17,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -258,6 +261,8 @@ sealed interface ConnectionState {
 
 /** One agent per server, started on first use and shared by every conversation on that server. */
 class AgentPool(private val launcher: Launcher, val resources: ServerResources) {
+    private companion object { const val MAX_UPLOAD = 1L shl 30 }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val channels = HashMap<String, Deferred<AgentChannel>>()
     private val _states = MutableStateFlow<Map<String, ConnectionState>>(emptyMap())
@@ -301,6 +306,52 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
 
     suspend fun call(host: HostConfig, op: String, params: JsonObject, timeoutMs: Long = 60_000): JsonElement =
         channel(host).call(op, params, timeoutMs)
+
+    /**
+     * Puts a file where Claude can read it and says where that is. It is kept under what it
+     * contains ([digest], SHA-256), so a file the server already has is not sent again.
+     * The bytes travel on a channel of their own and never hold up a stop or an approval.
+     */
+    suspend fun upload(host: HostConfig, name: String, size: Long, digest: String, open: () -> InputStream, sent: (Long) -> Unit = {}): Attachment {
+        if (size > MAX_UPLOAD) throw RemoteException("文件超过 1 GB")
+        val file = name.replace(Regex("[\\x00-\\x1f/\\\\]"), "_").trim().takeUnless { it.isEmpty() || it == "." || it == ".." } ?: "file"
+        val known = call(host, "file", buildJsonObject { put("operation", "attachmentLookup"); put("name", file); put("digest", digest) }, 120_000).obj()?.get("file").obj()
+        known?.get("path").string()?.let { return Attachment(file, it, size) }
+        val server = channel(host).info ?: throw RemoteException("SSH 通道已断开", confirmed = false)
+        val request = buildJsonObject {
+            put("operation", "upload"); put("name", file); put("size", size); put("attachment", true); put("digest", digest)
+        }
+        val command = "${shellQuote(server.nodePath)} ${shellQuote(server.agentPath)} transfer ${shellQuote(request.toString())}"
+        return coroutineScope {
+            val process = withContext(Dispatchers.IO) { launcher.start(host, command) }
+            // The reads and writes below only end early when the command under them does.
+            val guard = launch(start = CoroutineStart.UNDISPATCHED) { try { awaitCancellation() } finally { process.kill() } }
+            try {
+                withContext(Dispatchers.IO) {
+                    try {
+                        var done = 0L
+                        open().use { source ->
+                            val chunk = ByteArray(64 * 1024)
+                            while (true) {
+                                val count = source.read(chunk)
+                                if (count < 0) break
+                                process.stdin.write(chunk, 0, count)
+                                done += count
+                                sent(done)
+                            }
+                        }
+                        process.stdin.close()
+                        val answer = process.stdout.readBytes().decodeToString()
+                        if (process.waitForExit() != 0) throw RemoteException(process.errorText().trim().ifEmpty { "上传失败" })
+                        val path = runCatching { MirrorJson.parseToJsonElement(answer).obj()?.get("path").string() }.getOrNull()
+                        Attachment(file, path ?: throw RemoteException("上传失败"), size)
+                    } catch (error: IOException) {
+                        throw RemoteException(process.errorText().trim().ifEmpty { error.message ?: "上传失败" }, confirmed = false)
+                    }
+                }
+            } finally { guard.cancel() }
+        }
+    }
 
     /** Drops the connection. Replies being produced on the server keep running there. */
     fun close(host: HostConfig) {

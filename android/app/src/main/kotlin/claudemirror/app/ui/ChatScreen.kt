@@ -100,7 +100,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Refresh
 import claudemirror.app.AppModel
+import claudemirror.app.Picked
+import claudemirror.core.ATTACHMENTS_ONLY
+import claudemirror.core.QueuedMessage
 import claudemirror.core.ChatSession
 import claudemirror.core.ConnectionState
 import kotlinx.serialization.json.JsonObject
@@ -119,6 +132,8 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
     }
     val connections by model.connections.collectAsStateWithLifecycle()
     var draft by rememberSaveable(sessionId) { mutableStateOf("") }
+    val picked by model.picked.collectAsStateWithLifecycle()
+    val files = picked[sessionId].orEmpty()
     val online = connections[session.hostId] is ConnectionState.Connected
     LaunchedEffect(sessionId, online) { if (online) model.refresh(sessionId) }
 
@@ -166,12 +181,16 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
                 Column(Modifier.weight(1f)) {
                     Transcript(session, Modifier.weight(1f), onEarlier = { model.loadEarlier(sessionId) }) { permission, answer -> model.respond(sessionId, permission, answer) }
                     // Editing a queued message must not throw away what is already being written.
-                    Queue(session, model, queueRoom, onEdit = { item -> draft = if (draft.isBlank()) item else draft.trimEnd() + "\n" + item })
+                    Queue(session, model, queueRoom, onEdit = { item ->
+                        val words = item.text.takeUnless { it == ATTACHMENTS_ONLY && item.attachments.isNotEmpty() }
+                        if (words != null) draft = if (draft.isBlank()) words else draft.trimEnd() + "\n" + words
+                        model.attach(sessionId, item.attachments)
+                    })
                 }
                 // Under a keyboard there is no room left for the request's card, so its answer comes down here.
                 if (compact) session.permissions.firstOrNull()?.let { permission -> PermissionBar(permission) { answer -> model.respond(sessionId, permission.id, answer) } }
                 Composer(
-                    session, model, draft, compact, wide, narrow, onDraft = { draft = it },
+                    session, model, draft, files, compact, wide, narrow, onDraft = { draft = it },
                     onSend = { steer -> if (model.submit(sessionId, draft, steer)) draft = "" },
                     onStop = { model.stop(sessionId) },
                 )
@@ -238,7 +257,7 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -
         items(rows.size, key = { rows[it].first }) { index ->
             val (_, message, part) = rows[index]
             when (part) {
-                -1 -> UserBubble(message.text.orEmpty())
+                -1 -> UserBubble(message.text.orEmpty(), message.attachments.orEmpty())
                 -2 -> Column(Modifier.padding(horizontal = 16.dp)) {
                     readableError(message.error)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     if (message.interrupted == true) Text("已停止", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
@@ -268,7 +287,7 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -
 
 /** Messages waiting for the current reply to end. Each can go into the reply now, back to the editor, or away. */
 @Composable
-private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (String) -> Unit) {
+private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (QueuedMessage) -> Unit) {
     if (session.queue.isEmpty()) return
     HorizontalDivider()
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp)) {
@@ -288,9 +307,13 @@ private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (Stri
         Column(Modifier.heightIn(max = room).verticalScroll(rememberScrollState())) {
             for (item in session.queue) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (item.attachments.isNotEmpty()) {
+                        Icon(Icons.Filled.AttachFile, "附件", Modifier.size(14.dp), tint = palette.muted)
+                        Text("${item.attachments.size} ", style = MaterialTheme.typography.labelMedium, color = palette.muted)
+                    }
                     Text(item.text, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                     if (session.remoteTask != null) IconButton(onClick = { model.steer(session.id, item.id) }) { Icon(Icons.Filled.Bolt, "插队") }
-                    IconButton(onClick = { model.cancelQueued(session.id, item.id); onEdit(item.text) }) { Icon(Icons.Filled.Edit, "编辑") }
+                    IconButton(onClick = { model.cancelQueued(session.id, item.id); onEdit(item) }) { Icon(Icons.Filled.Edit, "编辑") }
                     IconButton(onClick = { model.cancelQueued(session.id, item.id) }) { Icon(Icons.Filled.Close, "移除") }
                 }
             }
@@ -301,11 +324,12 @@ private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (Stri
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun Composer(
-    session: ChatSession, model: AppModel, draft: String, compact: Boolean, wide: Boolean, narrow: Boolean,
+    session: ChatSession, model: AppModel, draft: String, files: List<Picked>, compact: Boolean, wide: Boolean, narrow: Boolean,
     onDraft: (String) -> Unit, onSend: (steer: Boolean) -> Unit, onStop: () -> Unit,
 ) {
     val replying = session.remoteTask != null
-    val ready = draft.isNotBlank()
+    // A file still on its way holds the message back; one that failed is sent again or taken off first.
+    val ready = (draft.isNotBlank() || files.isNotEmpty()) && files.all { it.file != null }
     val actions: @Composable () -> Unit = {
         if (session.isBusy) Act(Icons.Filled.Stop, "停止", palette.error, enabled = session.status != "stopping", onClick = onStop)
         if (replying) Act(Icons.Filled.Bolt, "插队", palette.selection, palette.accent, ready) { onSend(true) }
@@ -343,6 +367,9 @@ private fun Composer(
     ) {
         // The field keeps its place in both layouts, so it keeps the keyboard when one turns into the other.
         Column(Modifier.padding(start = 8.dp, end = 6.dp, top = if (compact) 2.dp else 6.dp, bottom = if (compact) 2.dp else 4.dp)) {
+            if (files.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (file in files) PickedChip(file, onRetry = { model.retry(session.id, file.id) }, onRemove = { model.detach(session.id, file.id) })
+            }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 field(Modifier.weight(1f))
                 if (compact) {
@@ -351,12 +378,55 @@ private fun Composer(
                 }
             }
             if (!compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Attach { model.attach(session.id, it) }
                 ModeChip(session, model)
                 Box(Modifier.weight(1f)) { ModelChip(session, model) }
                 Meter(session, label = !narrow)
                 Spacer(Modifier.width(4.dp))
                 actions()
             }
+        }
+    }
+}
+
+/** Photos come from the system's picker, which needs no permission; anything else from its file browser. */
+@Composable
+private fun Attach(onPicked: (List<Uri>) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { if (it.isNotEmpty()) onPicked(it) }
+    val documents = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) onPicked(it) }
+    Box {
+        IconButton(onClick = { open = true }, Modifier.size(32.dp)) { Icon(Icons.Filled.Add, "附件", Modifier.size(20.dp), tint = palette.muted) }
+        DropdownMenu(open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("照片") }, leadingIcon = { Icon(Icons.Filled.Image, null) },
+                onClick = { open = false; photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            )
+            DropdownMenuItem(
+                text = { Text("文件") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null) },
+                onClick = { open = false; documents.launch(arrayOf("*/*")) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun PickedChip(file: Picked, onRetry: () -> Unit, onRemove: () -> Unit) {
+    val failed = file.error != null
+    val tint = if (failed) palette.error else palette.text
+    Surface(
+        shape = MaterialTheme.shapes.small, color = palette.selection, border = if (failed) BorderStroke(1.dp, palette.error) else null,
+        modifier = if (failed) Modifier.clip(MaterialTheme.shapes.small).clickable(role = Role.Button, onClickLabel = "重试", onClick = onRetry) else Modifier,
+    ) {
+        Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            when {
+                failed -> Icon(Icons.Filled.Refresh, "重试", Modifier.size(16.dp), tint = tint)
+                file.file != null -> Icon(fileIcon(file.name), null, Modifier.size(16.dp), tint = palette.muted)
+                file.size > 0 -> CircularProgressIndicator({ file.sent.toFloat() / file.size }, Modifier.size(16.dp).semantics { contentDescription = "上传中" }, strokeWidth = 2.dp)
+                else -> CircularProgressIndicator(Modifier.size(16.dp).semantics { contentDescription = "上传中" }, strokeWidth = 2.dp)
+            }
+            Text(file.name, Modifier.widthIn(max = 140.dp), style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+            IconButton(onClick = onRemove, Modifier.size(28.dp)) { Icon(Icons.Filled.Close, "移除 ${file.name}", Modifier.size(14.dp), tint = palette.muted) }
         }
     }
 }

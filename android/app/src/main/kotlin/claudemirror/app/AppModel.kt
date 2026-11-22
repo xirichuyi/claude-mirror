@@ -1,6 +1,9 @@
 package claudemirror.app
 
 import android.app.Application
+import android.net.Uri
+import android.provider.OpenableColumns
+import claudemirror.core.Attachment
 import claudemirror.core.alerts
 import claudemirror.core.AgentPool
 import claudemirror.core.Alert
@@ -17,10 +20,13 @@ import claudemirror.core.SshLauncher
 import claudemirror.core.SshSecret
 import claudemirror.core.UnknownHostKeyException
 import java.io.File
+import java.io.IOException
+import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -32,12 +38,20 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 
 /** A server seen for the first time, waiting for the user to accept its key. */
 data class TrustRequest(val host: HostConfig, val fingerprint: String)
+
+/** A file picked for the next message: on its way to the server, there ([file]), or refused ([error]). */
+data class Picked(
+    val id: String, val name: String, val source: Uri? = null, val size: Long = 0, val sent: Long = 0,
+    val file: Attachment? = null, val error: String? = null,
+)
 
 /** Lives as long as the process, so that a reply can be followed while no screen is open. */
 class AppModel(private val application: Application) {
@@ -58,6 +72,10 @@ class AppModel(private val application: Application) {
     val trust = MutableStateFlow<TrustRequest?>(null)
     /** Short messages for the snackbar. */
     val snackbar = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
+    /** The files picked for each conversation's next message. */
+    val picked = MutableStateFlow<Map<String, List<Picked>>>(emptyMap())
+    private val uploads = HashMap<String, Job>()
 
     /** The conversation to show, asked for from a notification. */
     val target = MutableStateFlow<String?>(null)
@@ -246,8 +264,95 @@ class AppModel(private val application: Application) {
         _hosts.value = _hosts.value.map { if (it.id == id) it.copy(projects = change(it.projects)) else it }
         hostStore.save(_hosts.value)
     }
-    fun removeSession(id: String) = engine.remove(id)
-    fun submit(id: String, text: String, steer: Boolean = false) = runCatching { engine.submit(id, text, steer) }.onFailure { snackbar.tryEmit(it.message ?: "发送失败") }.isSuccess
+    fun removeSession(id: String) {
+        picked.value[id].orEmpty().forEach { uploads.remove(it.id)?.cancel() }
+        picked.update { it - id }
+        engine.remove(id)
+    }
+
+    /** Sends the text with the files picked for it; nothing goes while one of them is not on the server. */
+    fun submit(id: String, text: String, steer: Boolean = false): Boolean {
+        val files = picked.value[id].orEmpty()
+        if (files.any { it.file == null }) return false
+        return runCatching { engine.submit(id, text, files.map { it.file!! }, steer) }
+            .onSuccess { picked.update { it - id } }
+            .onFailure { snackbar.tryEmit(it.message ?: "发送失败") }.isSuccess
+    }
+
+    private fun pick(id: String, change: (List<Picked>) -> List<Picked>) = picked.update { all ->
+        val files = change(all[id].orEmpty())
+        if (files.isEmpty()) all - id else all + (id to files)
+    }
+
+    private fun pick(id: String, item: String, change: (Picked) -> Picked) = pick(id) { files -> files.map { if (it.id == item) change(it) else it } }
+
+    /** Starts sending the chosen files to the conversation's server. */
+    fun attach(id: String, sources: List<Uri>) {
+        val room = MAX_FILES - picked.value[id].orEmpty().size
+        if (sources.size > room) snackbar.tryEmit("最多 $MAX_FILES 个")
+        for (source in sources.take(room.coerceAtLeast(0))) {
+            val item = Picked(UUID.randomUUID().toString(), name(source), source)
+            pick(id) { it + item }
+            upload(id, item)
+        }
+    }
+
+    /** Files that are on the server already: those of a queued message taken back for editing. */
+    fun attach(id: String, files: Collection<Attachment>) = pick(id) { all ->
+        all + files.filter { file -> all.none { it.file == file } }.map { Picked(UUID.randomUUID().toString(), it.name, size = it.size, sent = it.size, file = it) }
+    }
+
+    fun detach(id: String, item: String) {
+        uploads.remove(item)?.cancel()
+        pick(id) { files -> files.filter { it.id != item } }
+    }
+
+    fun retry(id: String, item: String) {
+        val file = picked.value[id]?.firstOrNull { it.id == item && it.error != null } ?: return
+        pick(id, item) { it.copy(error = null, sent = 0) }
+        upload(id, file)
+    }
+
+    private fun upload(id: String, item: Picked) {
+        val source = item.source ?: return
+        val host = sessions.value.firstOrNull { it.id == id }?.let { host(it.hostId) } ?: return
+        val content = application.contentResolver
+        uploads[item.id] = scope.launch {
+            try {
+                // Read once to know what it is, so that a file the server already has is not sent again.
+                val (size, digest) = withContext(Dispatchers.IO) {
+                    val hash = MessageDigest.getInstance("SHA-256")
+                    var total = 0L
+                    (content.openInputStream(source) ?: throw IOException()).use { input ->
+                        val chunk = ByteArray(64 * 1024)
+                        while (true) {
+                            val count = input.read(chunk)
+                            if (count < 0) break
+                            hash.update(chunk, 0, count)
+                            total += count
+                        }
+                    }
+                    total to hash.digest().joinToString("") { "%02x".format(it) }
+                }
+                pick(id, item.id) { it.copy(size = size) }
+                var shown = 0L
+                val file = pool.upload(host, item.name, size, digest, { content.openInputStream(source) ?: throw IOException() }) { sent ->
+                    // A step of a twentieth is all the ring can show.
+                    if (sent - shown >= size / 20) { shown = sent; pick(id, item.id) { it.copy(sent = sent) } }
+                }
+                pick(id, item.id) { it.copy(sent = size, file = file) }
+            } catch (error: CancellationException) { throw error } catch (error: Exception) {
+                val message = (error.message ?: "").ifBlank { "上传失败" }
+                pick(id, item.id) { it.copy(error = message) }
+                snackbar.tryEmit(message)
+            } finally { uploads.remove(item.id, coroutineContext[Job]) }
+        }
+    }
+
+    private fun name(source: Uri): String =
+        runCatching {
+            application.contentResolver.query(source, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: source.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "file"
     fun steer(id: String, item: String) = act { engine.steer(id, item) }
     fun cancelQueued(id: String, item: String) = engine.cancelQueued(id, item)
     fun clearQueue(id: String) = engine.clearQueue(id)
@@ -277,4 +382,6 @@ class AppModel(private val application: Application) {
     /** Whether the server's models are known after asking. A failure shows where they were asked for. */
     suspend fun fetchModels(id: String): Boolean =
         try { engine.loadModels(id); true } catch (error: CancellationException) { throw error } catch (error: Exception) { false }
+
+    private companion object { const val MAX_FILES = 10 }
 }

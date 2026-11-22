@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /** A conversation Claude Code keeps on the server, whoever started it. */
 @Serializable
@@ -37,6 +38,29 @@ fun historyUserText(text: String): String {
     }
     commandOutput.find(text)?.let { return it.groupValues[1].trim() }
     return text.replace(reminder, "").trim()
+}
+
+/** The same words every client puts between a message and the files sent with it. */
+private const val ATTACHED = "\n\n用户附加的远端文件（已上传或在远端选定，可通过 Read 等工具访问，包括图片）：\n"
+
+/** What a message that is only files says. */
+const val ATTACHMENTS_ONLY = "请查看附件。"
+
+/** What Claude is given: the files are named by where they are on the server. */
+fun prompt(text: String, attachments: List<Attachment>): String =
+    if (attachments.isEmpty()) text
+    else text + ATTACHED + attachments.joinToString("\n") { "- " + MirrorJson.encodeToString(JsonPrimitive(it.path)) }
+
+/** The reverse of [prompt], for a message read back from Claude Code's transcript. */
+fun attached(prompt: String): Pair<String, List<Attachment>> {
+    val at = prompt.lastIndexOf(ATTACHED)
+    if (at < 0) return prompt to emptyList()
+    val files = prompt.substring(at + ATTACHED.length).lines().map { line ->
+        val path = runCatching { MirrorJson.parseToJsonElement(line.removePrefix("- ")).string() }.getOrNull()
+        if (!line.startsWith("- ") || path.isNullOrEmpty()) return prompt to emptyList()
+        Attachment(name = path.substringAfterLast('/'), path = path)
+    }
+    return prompt.substring(0, at) to files
 }
 
 /** A short title for a conversation found on the server. */
@@ -86,7 +110,10 @@ fun historyPage(records: List<JsonElement>): HistoryPage {
             if (text.isEmpty()) continue
             messages += if ("<local-command-stdout>" in raw && "<command-name>" !in raw) {
                 ChatMessage(id = id, role = "assistant", blocks = listOf(Block(type = "text", text = text, format = "command")), createdAt = time)
-            } else ChatMessage(id = id, role = "user", text = text, createdAt = time)
+            } else {
+                val (words, files) = attached(text)
+                ChatMessage(id = id, role = "user", text = words, createdAt = time, attachments = files.ifEmpty { null })
+            }
         } else {
             val blocks = content.mapNotNull { block ->
                 when (block["type"].string()) {

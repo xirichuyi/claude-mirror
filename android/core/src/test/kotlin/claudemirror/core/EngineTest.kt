@@ -54,6 +54,34 @@ class EngineTest {
         assertEquals(1, agent.starts().size)
     }
 
+    @Test fun `files go with a prompt, a queued message and an inserted one`() = engineTest {
+        val photo = Attachment("photo.png", "/tmp/claudock-attachments-1000/ab/photo.png", 12)
+        val session = engine.create(testHost, "/srv/app")
+        engine.send(session.id, "  ", listOf(photo))
+        until("the task starts") { agent.starts().isNotEmpty() }
+        val told = "请查看附件。\n\n用户附加的远端文件（已上传或在远端选定，可通过 Read 等工具访问，包括图片）：\n- \"/tmp/claudock-attachments-1000/ab/photo.png\""
+        assertEquals(told, agent.starts().single()["request"]!!.jsonObject["prompt"].string())
+        val shown = current(session.id).messages.first()
+        assertEquals("请查看附件。", shown.text)
+        assertEquals(listOf(photo), shown.attachments)
+        assertEquals("" to emptyList<Attachment>(), attached(""))
+        assertEquals("请查看附件。" to listOf(photo.copy(size = 0)), attached(told))
+
+        val task = current(session.id).remoteTask!!
+        agent.emit(task.id, state(task, 1, "working"))
+        until("working") { current(session.id).status == "working" }
+        engine.submit(session.id, "and this", listOf(photo), steer = true)
+        until("the worker takes it") { agent.commands("steer").isNotEmpty() }
+        val steer = agent.commands("steer").single()["command"]!!.jsonObject
+        assertEquals("and this", steer["text"].string())
+        assertEquals(prompt("and this", listOf(photo)), steer["prompt"].string())
+        assertEquals("photo.png", steer["attachments"]!!.jsonArray.single().jsonObject["name"].string())
+
+        engine.submit(session.id, "later", listOf(photo))
+        assertEquals(listOf(photo), current(session.id).queue.single().attachments)
+        assertTrue(runCatching { engine.send(engine.create(testHost, "/srv/app").id, " ") }.isFailure)
+    }
+
     @Test fun `a message inserted into the running reply leaves the queue once and is never sent again`() = engineTest {
         val (session, task) = started()
         agent.emit(task.id, state(task, 1, "working"))

@@ -16,7 +16,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FactCheck
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -51,6 +53,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import claudemirror.core.ATTACHMENTS_ONLY
+import claudemirror.core.Attachment
 import claudemirror.core.Block
 import claudemirror.core.ToolKind
 import claudemirror.core.diffLines
@@ -78,16 +82,27 @@ private fun JsonElement?.text(key: String): String? = ((this as? JsonObject)?.ge
 
 private fun clipped(text: String, limit: Int = 6000) = if (text.length > limit) text.take(limit) + "\n…（其余 ${text.length - limit} 个字符未显示）" else text
 
+private val Pictures = setOf("png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "svg")
+
+fun fileIcon(name: String): ImageVector =
+    if (name.substringAfterLast('.', "").lowercase() in Pictures) Icons.Filled.Image else Icons.AutoMirrored.Filled.InsertDriveFile
+
 @Composable
-fun UserBubble(text: String, caption: String? = null, faded: Boolean = false) {
+fun UserBubble(text: String, files: List<Attachment> = emptyList(), caption: String? = null, faded: Boolean = false) {
     Box(Modifier.fillMaxWidth().padding(start = 56.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), contentAlignment = Alignment.CenterEnd) {
         Column(horizontalAlignment = Alignment.End) {
             Surface(
                 color = palette.selection.copy(alpha = if (faded) 0.5f else 1f),
                 shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 6.dp),
             ) {
-                SelectionContainer {
-                    Text(text, Modifier.widthIn(max = 520.dp).padding(horizontal = 14.dp, vertical = 9.dp), color = palette.text.copy(alpha = if (faded) 0.7f else 1f))
+                val tint = palette.text.copy(alpha = if (faded) 0.7f else 1f)
+                Column(Modifier.widthIn(max = 520.dp).padding(horizontal = 14.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // The words a message of only files is given say nothing its files do not.
+                    if (files.isEmpty() || text != ATTACHMENTS_ONLY) SelectionContainer { Text(text, color = tint) }
+                    for (file in files) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(fileIcon(file.name), null, Modifier.size(16.dp), tint = palette.muted)
+                        Text(file.name, style = MaterialTheme.typography.bodyMedium, color = tint, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                    }
                 }
             }
             if (caption != null) Text(caption, style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = Modifier.padding(top = 3.dp, end = 4.dp))
@@ -104,7 +119,7 @@ fun BlockView(block: Block) {
         "notice" -> readableError(block.text)?.let { Notice(it, error = block.level == "error") }
         // A message the user inserted while this reply was being written.
         "user" -> UserBubble(
-            block.text.orEmpty(),
+            block.text.orEmpty(), block.attachments.orEmpty(),
             caption = when {
                 block.cancelled == true -> "已停止，未送达"
                 block.pending == true -> "等待 Claude 读取…"
