@@ -1,6 +1,5 @@
 package claudemirror.app
 
-import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -163,7 +162,10 @@ class Answer : BroadcastReceiver() {
         val allow = intent.getBooleanExtra(ALLOW, false)
         val session = intent.getStringExtra(SESSION) ?: return
         val permission = intent.getStringExtra(PERMISSION) ?: return
-        if (allow && context.getSystemService(KeyguardManager::class.java).isDeviceLocked) return
+        // From Android 12 the system has the phone unlocked before it sends 允许, and asking the
+        // keyguard here would refuse it: the lock is still being lifted when this arrives. Before
+        // that 允许 is not offered on a notification at all.
+        if (allow && Build.VERSION.SDK_INT < 31) return
         // The process is kept until the answer has been sent.
         val pending = goAsync()
         model.answer(session, permission, buildJsonObject {
