@@ -11,7 +11,6 @@ enum AppPresentation: Identifiable {
     case rewind(session: String, checkpoint: String)
     case accountUsage
     case worktree
-    case usage
     case activity
     case connect
     case editMachine(ConnectionConfig)
@@ -34,7 +33,6 @@ enum AppPresentation: Identifiable {
         case .account: return "account"
         case .accountUsage: return "accountUsage"
         case .worktree: return "worktree"
-        case .usage: return "usage"
         case .activity: return "activity"
         case .editMachine(let config): return "editMachine:" + config.key
         case .connect: return "connect"
@@ -73,13 +71,6 @@ extension AppModel {
         set {
             if newValue { presentation = .worktree }
             else if showWorktree { presentation = nil }
-        }
-    }
-    var showUsage: Bool {
-        get { presentation?.id == "usage" }
-        set {
-            if newValue { presentation = .usage }
-            else if showUsage { presentation = nil }
         }
     }
     var showActivity: Bool {
@@ -167,7 +158,6 @@ struct AppSheet: View {
             case .account: AccountStatusSheet(store: model.accountStore)
             case .accountUsage: AccountUsageSheet()
             case .worktree: WorktreeSheet()
-            case .usage: UsageSheet()
             case .activity: ActivitySheet()
             case .connect: ConnectSheet()
             case .editMachine(let config): ConnectSheet(machine: config)

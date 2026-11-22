@@ -32,7 +32,6 @@ struct SessionDetailsView: View {
                         } else {
                             Text("回复完成后显示上下文用量").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
                         }
-                        Button("查看用量明细") { model.showUsage = true }
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
