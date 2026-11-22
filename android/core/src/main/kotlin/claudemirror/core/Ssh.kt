@@ -109,7 +109,13 @@ class SshLauncher(
             try { client.connect(host.host, host.port) } catch (error: IOException) {
                 val seen = offered
                 if (seen != null && seen != host.hostKey) throw if (host.hostKey == null) UnknownHostKeyException(seen) else HostKeyChangedException(seen)
-                throw RemoteException("无法连接 ${host.host}:${host.port}：${error.message ?: error.javaClass.simpleName}", confirmed = false)
+                val why = when (error) {
+                    is java.net.UnknownHostException -> "找不到主机"
+                    is java.net.SocketTimeoutException -> "超时"
+                    is java.net.ConnectException -> "被拒绝"
+                    else -> null
+                }
+                throw RemoteException("无法连接 ${host.host}:${host.port}" + (why?.let { "：$it" } ?: ""), confirmed = false)
             }
             client.connection.keepAlive.keepAliveInterval = 15
             val secret = secret(host)
@@ -123,7 +129,7 @@ class SshLauncher(
             } catch (error: UserAuthException) {
                 throw RemoteException(if (host.auth == AuthMethod.Key) "服务器拒绝了这个私钥" else "用户名或密码不正确", confirmed = false)
             } catch (error: IOException) {
-                throw RemoteException("登录失败：${error.message ?: error.javaClass.simpleName}", confirmed = false)
+                throw RemoteException("登录失败", confirmed = false)
             }
             // Once logged in, quiet periods are normal; keep-alives notice a dead connection.
             client.socket.soTimeout = 0
