@@ -194,15 +194,17 @@ class Engine(
         val said = original.messages.drop(original.messages.indexOfLast { it.id == original.historyTail } + 1)
         // Only what the transcript gained since counts: an older prompt with the same words proves nothing.
         val news = incoming.drop(incoming.indexOfLast { it.id == original.historyTail } + 1)
-        val prompts = news.filter { it.role == "user" }.mapTo(HashSet()) { it.text }
+        // Each of the transcript's prompts stands for one said here, however many share its words.
+        val arrived = HashMap<String?, Int>()
+        for (message in news) if (message.role == "user") arrived.merge(message.text, 1, Int::plus)
+        fun reached(prompt: ChatMessage) = (arrived[prompt.text] ?: 0) > 0 && arrived.merge(prompt.text, -1, Int::plus) != null
         fun ChatMessage.failed() = role == "assistant" && error != null && blocks.isNullOrEmpty()
+        val (doubtful, sure) = said.withIndex().filter { it.value.role == "user" }.partition { said.getOrNull(it.index + 1)?.failed() == true }
+        // A prompt that was answered is in the transcript, or the transcript is behind and is not shown.
+        if (sure.any { !reached(it.value) }) return
         // A prompt whose reply failed before it began, and that the transcript does not have,
         // never reached Claude: it is not waited for, and it stays, at the end.
-        val unsent = said.filterIndexed { at, message ->
-            val prompt = if (message.failed()) said.getOrNull(at - 1) else message.takeIf { said.getOrNull(at + 1)?.failed() == true }
-            prompt?.role == "user" && prompt.text !in prompts
-        }
-        if (said.any { it.role == "user" && it !in unsent && it.text !in prompts }) return
+        val unsent = doubtful.filter { !reached(it.value) }.flatMap { listOf(it.value, said[it.index + 1]) }
         val first = incoming.indexOfFirst { it.id in shown }
         // Nothing in common: the latest part replaces what is shown.
         val kept = if (first < 0) emptyList() else original.messages.take(original.messages.indexOfFirst { it.id == incoming[first].id })

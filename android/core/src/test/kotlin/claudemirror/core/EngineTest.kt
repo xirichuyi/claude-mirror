@@ -68,6 +68,7 @@ class EngineTest {
         assertEquals("请查看附件。" to listOf(photo.copy(size = 0)), attached(told))
 
         val task = current(session.id).remoteTask!!
+        until("the worker is followed") { agent.follows(task.id) }
         agent.emit(task.id, state(task, 1, "working"))
         until("working") { current(session.id).status == "working" }
         engine.submit(session.id, "and this", listOf(photo), steer = true)
@@ -566,6 +567,22 @@ class EngineTest {
             agent.onHistory = { json("""{"records":[${record("m1", "user", "first")},${record("m2", "assistant", "one")},${record("m3", "user", "elsewhere")},${record("m4", "user", "lost on the way")},${record("m5", "assistant", "got it")}],"directory":"/srv/app","before":null}""") }
             engine.refresh("c1")
             assertEquals(listOf("m1", "m2", "m3", "m4", "m5"), current("c1").messages.map { it.id })
+        }
+    }
+
+    @Test fun `a failed prompt that repeats one sent just before it is kept`() {
+        val adopted = ChatSession(
+            id = "c1", hostId = testHost.id, directory = "/srv/app", createdAt = 1, updatedAt = 1, remoteSessionId = "s1", historyRef = "p/s1.jsonl", historyTail = "m2",
+            messages = listOf(
+                ChatMessage(id = "m1", role = "user", text = "first"), ChatMessage(id = "m2", role = "assistant", blocks = listOf(Block(type = "text", text = "one"))),
+                ChatMessage(id = "l1", role = "user", text = "again"), ChatMessage(id = "l2", role = "assistant", blocks = listOf(Block(type = "text", text = "two"))),
+                ChatMessage(id = "l3", role = "user", text = "again"), ChatMessage(id = "l4", role = "assistant", blocks = emptyList(), error = "连接中断"),
+            ),
+        )
+        engineTest(store = MemoryStore(listOf(adopted))) {
+            agent.onHistory = { json("""{"records":[${record("m1", "user", "first")},${record("m2", "assistant", "one")},${record("m3", "user", "again")},${record("m4", "assistant", "two")}],"directory":"/srv/app","before":null}""") }
+            engine.refresh("c1")
+            assertEquals(listOf("m1", "m2", "m3", "m4", "l3", "l4"), current("c1").messages.map { it.id })
         }
     }
 
