@@ -215,8 +215,14 @@ class Engine(
             val here = said.flatMap { message -> if (message.role == "user") listOf(message.text) else message.blocks.orEmpty().filter { it.type == "user" }.map { it.text } }
             val news = incoming.drop(incoming.indexOfLast { it.id == original.historyTail } + 1)
             if (news.none { it.role == "user" && it.text !in here }) return
-            command(original, "close")
+            // Let go of the worker before telling it to close: a prompt sent in the meantime
+            // starts a new worker instead of reaching one that is on its way out.
+            val free = session(id)?.let { it.remoteTask == null && it.messages == original.messages && it.remoteOwner?.id == owner.id } == true
+            if (!free) return
+            update(id) { it.copy(remoteOwner = null) }
             watchers.remove(id)?.kill()
+            // If this fails the worker lingers until it tires of waiting; nothing reaches it any more.
+            try { command(original, "close") } catch (error: CancellationException) { throw error } catch (_: Exception) {}
         }
         update(id) { current ->
             val moved = current.remoteTask != null || current.messages != original.messages || (current.remoteOwner != null && current.remoteOwner.id != owner?.id)

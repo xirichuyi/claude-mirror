@@ -490,6 +490,30 @@ class EngineTest {
         assertEquals("s1", agent.starts().last()["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"].string())
     }
 
+    @Test fun `a prompt sent while the transcript is being read keeps its worker`() = engineTest {
+        var transcript = listOf(record("m1", "user", "first"), record("m2", "assistant", "one"))
+        var sendFirst: (() -> Unit)? = null
+        agent.onHistory = { sendFirst?.invoke(); json("""{"records":[${transcript.joinToString(",")}],"directory":"/srv/app","before":null}""") }
+        val session = engine.adopt(testHost, RemoteConversation("p/s1.jsonl", "s1", "/srv/app", "first"))
+        engine.send(session.id, "from the phone")
+        val task = current(session.id).remoteTask!!
+        until("the worker is followed") { agent.follows(task.id) }
+        agent.emit(task.id, state(task, 1, "idle", "two", ""","resident":true"""))
+        until("the reply ends") { current(session.id).remoteTask == null }
+
+        transcript = transcript + record("m3", "user", "from the phone") + record("m4", "assistant", "two") + record("m5", "user", "from the terminal")
+        // The answer about the transcript is held back until the next prompt has gone to the worker.
+        sendFirst = {
+            sendFirst = null
+            val sending = scope.launch { engine.send(session.id, "again") }
+            while (!sending.isCompleted) Thread.sleep(5)
+        }
+        engine.refresh(session.id)
+        assertTrue(agent.commands("close").isEmpty())
+        assertEquals("again", current(session.id).messages.last { it.role == "user" }.text)
+        assertEquals(task.id, current(session.id).remoteOwner?.id)
+    }
+
     @Test fun `a prompt that never reached Claude neither holds back the transcript nor is lost`() {
         val adopted = ChatSession(
             id = "c1", hostId = testHost.id, directory = "/srv/app", createdAt = 1, updatedAt = 1, remoteSessionId = "s1", historyRef = "p/s1.jsonl", historyTail = "m2",
