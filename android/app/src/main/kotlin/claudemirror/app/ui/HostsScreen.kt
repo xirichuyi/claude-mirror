@@ -189,7 +189,7 @@ fun HostEditScreen(model: AppModel, id: String, onDone: () -> Unit) {
                     )
                     onDone()
                 },
-                enabled = valid, modifier = field,
+                enabled = valid, modifier = field, colors = fillColors(),
             ) { Text("保存") }
             if (existing != null) {
                 var confirm by remember { mutableStateOf(false) }

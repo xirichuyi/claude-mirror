@@ -96,7 +96,7 @@ fun FolderPicker(model: AppModel, host: HostConfig, onDismiss: () -> Unit, onPic
                 )
             },
             bottomBar = {
-                Button(onClick = { listing?.let { onPick(it.path) } }, enabled = listing != null, modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp)) { Text("选这里") }
+                Button(onClick = { listing?.let { onPick(it.path) } }, enabled = listing != null, modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp), colors = fillColors()) { Text("选这里") }
             },
         ) { padding ->
             Loading(state, Modifier.fillMaxSize().padding(padding), onRetry = { attempt++ }) { shown ->

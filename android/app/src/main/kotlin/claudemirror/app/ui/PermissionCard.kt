@@ -77,7 +77,7 @@ fun PermissionBar(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit)
         TextButton(onClick = { onAnswer(Refusal) }) { Text("拒绝", color = palette.muted) }
         Button(
             onClick = { onAnswer(buildJsonObject { put("allow", true); put("useSuggestedPermissions", false) }) },
-            Modifier.height(34.dp), contentPadding = PaddingValues(horizontal = 16.dp),
+            Modifier.height(34.dp), contentPadding = PaddingValues(horizontal = 16.dp), colors = fillColors(),
         ) { Text(if (permission.name == "ExitPlanMode") "执行" else "允许") }
     }
 }
@@ -86,7 +86,7 @@ fun PermissionBar(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit)
 private fun Actions(refuse: String, accept: String?, enabled: Boolean = true, onRefuse: () -> Unit, onAccept: () -> Unit = {}) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onRefuse) { Text(refuse, color = palette.muted) }
-        if (accept != null) Button(onClick = onAccept, enabled = enabled) { Text(accept) }
+        if (accept != null) Button(onClick = onAccept, enabled = enabled, colors = fillColors()) { Text(accept) }
     }
 }
 
