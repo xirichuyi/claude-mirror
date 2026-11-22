@@ -139,7 +139,7 @@ class AgentChannel internal constructor(
                             val reason = try {
                                 reader.forEachLine(::receive)
                                 child.errorText().trim()
-                            } catch (error: IOException) { error.message.orEmpty() }
+                            } catch (error: IOException) { "" }
                             shutdown(reason.ifEmpty { "SSH 通道已断开" })
                         }
                         return true
@@ -187,7 +187,7 @@ class AgentChannel internal constructor(
         val line = (value.toString() + "\n").toByteArray()
         writer.execute {
             try { child.stdin.write(line); child.stdin.flush() }
-            catch (error: IOException) { shutdown(error.message ?: "SSH 通道已断开") }
+            catch (error: IOException) { shutdown("SSH 通道已断开") }
         }
     }
 

@@ -73,11 +73,11 @@ class SshLauncher(
         val session = try { client.startSession() } catch (error: IOException) {
             val stale = synchronized(clients) { if (clients[host.id] === client) clients.remove(host.id) else null }
             runCatching { stale?.close() }
-            throw RemoteException(error.message ?: "SSH 通道已断开", confirmed = false)
+            throw RemoteException("SSH 通道已断开", confirmed = false)
         }
         val running = try { session.exec(command) } catch (error: IOException) {
             runCatching { session.close() }
-            throw RemoteException(error.message ?: "SSH 通道已断开", confirmed = false)
+            throw RemoteException("SSH 通道已断开", confirmed = false)
         }
         val errors = StringBuffer()
         thread(isDaemon = true, name = "ssh-stderr") {

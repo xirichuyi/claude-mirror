@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,6 +37,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.dropWhile
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -330,6 +333,15 @@ class AppModel(private val application: Application) {
         val host = sessions.value.firstOrNull { it.id == id }?.let { host(it.hostId) } ?: return
         val content = application.contentResolver
         uploads[item.id] = scope.launch {
+            val sending = coroutineContext[Job]
+            // A transfer only notices a lost connection when SSH itself gives up, half a minute later.
+            val watch = scope.launch {
+                connections.map { it[host.id] is ConnectionState.Connected }.distinctUntilChanged().dropWhile { !it }.first { !it }
+                if (uploads.remove(item.id, sending)) {
+                    pick(id, item.id) { it.copy(error = INTERRUPTED) }
+                    sending?.cancel()
+                }
+            }
             try {
                 // Read once to know what it is, so that a file the server already has is not sent again.
                 val (size, digest) = withContext(Dispatchers.IO) {
@@ -354,10 +366,12 @@ class AppModel(private val application: Application) {
                 }
                 pick(id, item.id) { it.copy(sent = size, file = file) }
             } catch (error: CancellationException) { throw error } catch (error: Exception) {
+                // Taken back or cut off meanwhile: that has been shown already.
+                ensureActive()
                 val message = (error.message ?: "").ifBlank { "上传失败" }
                 pick(id, item.id) { it.copy(error = message) }
                 snackbar.tryEmit(message)
-            } finally { uploads.remove(item.id, coroutineContext[Job]) }
+            } finally { watch.cancel(); uploads.remove(item.id, sending) }
         }
     }
 
@@ -395,5 +409,5 @@ class AppModel(private val application: Application) {
     suspend fun fetchModels(id: String): Boolean =
         try { engine.loadModels(id); true } catch (error: CancellationException) { throw error } catch (error: Exception) { false }
 
-    private companion object { const val MAX_FILES = 10 }
+    private companion object { const val MAX_FILES = 10; const val INTERRUPTED = "上传中断" }
 }
