@@ -1,8 +1,15 @@
 package claudemirror.core
 
 import java.io.File
+import java.io.InputStream
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -22,8 +29,13 @@ class AgentTest {
             val resources = ServerResources.read { name -> server!!.resolve(name).inputStream() }
             val launches = ArrayList<String>()
             val local = LocalLauncher(home)
+            val killers = CopyOnWriteArrayList<String>()
             val pool = AgentPool(object : Launcher {
-                override fun start(host: HostConfig, command: String): RemoteProcess { launches += command; return local.start(host, command) }
+                override fun start(host: HostConfig, command: String): RemoteProcess {
+                    launches += command
+                    val process = local.start(host, command)
+                    return object : RemoteProcess by process { override fun kill() { killers += Thread.currentThread().name; process.kill() } }
+                }
             }, resources)
 
             val channel = pool.channel(testHost)
@@ -55,6 +67,31 @@ class AgentTest {
                 val refused = runCatching { pool.upload(testHost, "other.bin", bytes.size.toLong(), "0".repeat(64), { bytes.inputStream() }) }.exceptionOrNull()
                 assertTrue(refused is RemoteException)
             } finally { File(first.path).parentFile!!.deleteRecursively() }
+
+            // Taking a file back while it is being sent ends the command, from a thread that may talk to the server.
+            val caller = Executors.newSingleThreadExecutor { Thread(it, "caller") }
+            try {
+                val reached = CountDownLatch(1)
+                val release = CountDownLatch(1)
+                val slow = object : InputStream() {
+                    private var given = false
+                    override fun read(): Int = throw UnsupportedOperationException()
+                    override fun read(target: ByteArray, offset: Int, length: Int): Int {
+                        if (given) { reached.countDown(); release.await() } else given = true
+                        return if (release.count == 0L) -1 else length.also { target.fill(1, offset, offset + length) }
+                    }
+                }
+                killers.clear()
+                val sending = launch(caller.asCoroutineDispatcher()) { pool.upload(testHost, "slow.bin", 1_000_000, "1".repeat(64), { slow }) }
+                assertTrue(reached.await(30, TimeUnit.SECONDS))
+                sending.cancel()
+                val deadline = System.currentTimeMillis() + 30_000
+                while (killers.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
+                release.countDown()
+                sending.join()
+                assertEquals(1, killers.size)
+                assertTrue(killers.single(), killers.single() != "caller")
+            } finally { caller.shutdown() }
 
             pool.close(testHost)
             assertTrue(pool.states.value[testHost.id] is ConnectionState.Disconnected)

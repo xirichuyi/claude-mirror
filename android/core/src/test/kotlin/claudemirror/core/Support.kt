@@ -28,7 +28,7 @@ class LocalLauncher(private val home: File) : Launcher {
         return object : RemoteProcess {
             override val stdout: InputStream = process.inputStream
             override val stdin: OutputStream = process.outputStream
-            override fun errorText(): String = if (process.isAlive) "" else process.errorStream.bufferedReader().readText()
+            override fun errorText(): String = if (process.isAlive) "" else runCatching { process.errorStream.bufferedReader().readText() }.getOrDefault("")
             override fun waitForExit(): Int = process.waitFor()
             override fun kill() { process.destroy() }
         }

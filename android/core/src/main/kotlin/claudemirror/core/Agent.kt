@@ -19,6 +19,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -329,8 +330,9 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
         return transfers.withPermit {
             coroutineScope {
                 val process = withContext(Dispatchers.IO) { launcher.start(host, command) }
-                // The reads and writes below only end early when the command under them does.
-                val guard = launch(start = CoroutineStart.UNDISPATCHED) { try { awaitCancellation() } finally { process.kill() } }
+                // The reads and writes below only end early when the command under them does. Ending it
+                // talks to the server, which the caller's thread (the main one, in the app) may not do.
+                val guard = launch(Dispatchers.IO, start = CoroutineStart.ATOMIC) { try { awaitCancellation() } finally { process.kill() } }
                 try {
                     withContext(Dispatchers.IO) {
                         try {
@@ -352,6 +354,8 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
                             val path = runCatching { MirrorJson.parseToJsonElement(answer).obj()?.get("path").string() }.getOrNull()
                             Attachment(file, path ?: throw RemoteException("上传失败"), size)
                         } catch (error: IOException) {
+                            // Taken back by the caller: nothing failed.
+                            ensureActive()
                             // The command gave up first, and says why once it has ended.
                             runCatching { process.stdin.close() }
                             process.waitForExit()
