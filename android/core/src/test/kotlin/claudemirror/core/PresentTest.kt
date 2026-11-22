@@ -47,5 +47,9 @@ class PresentTest {
         assertNull(readableError("[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"))
         assertEquals("API 出错", readableError("API 出错\n[ede_diagnostic] result_type=user"))
         assertNull(readableError(null))
+        assertEquals("Opus 5.5", modelName("claude-opus-5-5"))
+        assertEquals("Sonnet 3.5", modelName("claude-3-5-sonnet-20241022"))
+        assertEquals("Opus 5.5", modelName("claude-opus-5-5[1m]"))
+        assertEquals("gpt-x", modelName("gpt-x"))
     }
 }

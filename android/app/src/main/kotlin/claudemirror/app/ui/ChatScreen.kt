@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -74,6 +75,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import claudemirror.core.modelName
 import claudemirror.core.readableError
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.mutableIntStateOf
@@ -121,7 +123,7 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
                 title = {
                     Column {
                         Text(session.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        (session.statusLabel() ?: session.model)?.let {
+                        (session.statusLabel() ?: session.model?.let(::modelName))?.let {
                             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
@@ -154,10 +156,12 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
                 }
                 // The composer keeps its place below, however short the window and however much waits above it.
                 Column(Modifier.weight(1f)) {
-                    Transcript(session, compact, Modifier.weight(1f)) { permission, answer -> model.respond(sessionId, permission, answer) }
+                    Transcript(session, Modifier.weight(1f)) { permission, answer -> model.respond(sessionId, permission, answer) }
                     // Editing a queued message must not throw away what is already being written.
                     Queue(session, model, queueRoom, onEdit = { item -> draft = if (draft.isBlank()) item else draft.trimEnd() + "\n" + item })
                 }
+                // Under a keyboard there is no room left for the request's card, so its answer comes down here.
+                if (compact) session.permissions.firstOrNull()?.let { permission -> PermissionBar(permission) { answer -> model.respond(sessionId, permission.id, answer) } }
                 Composer(
                     session, model, draft, compact, wide, narrow, onDraft = { draft = it },
                     onSend = { steer -> if (model.submit(sessionId, draft, steer)) draft = "" },
@@ -169,7 +173,7 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
 }
 
 @Composable
-private fun Transcript(session: ChatSession, compact: Boolean, modifier: Modifier, onAnswer: (permission: String, JsonObject) -> Unit) {
+private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (permission: String, JsonObject) -> Unit) {
     val list = rememberLazyListState()
     // One row per block, so a long reply only redraws the part that is still being written.
     val rows = remember(session.messages) {
@@ -214,12 +218,8 @@ private fun Transcript(session: ChatSession, compact: Boolean, modifier: Modifie
     }
     // A request Claude is waiting on is brought into view, wherever the reader was, and stays there.
     val asked = session.permissions.firstOrNull()?.id
-    LaunchedEffect(asked, compact) {
-        if (asked == null) return@LaunchedEffect
-        following = true
-        list.scrollToItem(rows.size)
-        // With little room, the answer buttons at the end are what must not be out of reach.
-        if (compact) list.scrollToItem(rows.size + session.permissions.size, Int.MAX_VALUE / 2)
+    LaunchedEffect(asked) {
+        if (asked != null) { following = true; list.scrollToItem(rows.size) }
     }
     LazyColumn(modifier.fillMaxWidth().nestedScroll(reader), state = list) {
         items(rows.size, key = { rows[it].first }) { index ->
@@ -411,14 +411,15 @@ private fun ModelChip(session: ChatSession, model: AppModel) {
     val chosen = session.preferences.selectedModel
     val current = models.firstOrNull { it.value == chosen }
     val effort = session.preferences.effort
-    val name = current?.displayName ?: chosen ?: session.model ?: "模型"
+    val name = current?.displayName ?: (chosen ?: session.model)?.let(::modelName) ?: "模型"
     Chip(if (effort != null && Efforts[effort] != null) "$name · ${Efforts[effort]}" else name) { open = true }
     if (!open) return
     var attempt by remember { mutableIntStateOf(0) }
     var failed by remember { mutableStateOf(false) }
     LaunchedEffect(attempt) { failed = false; failed = !model.fetchModels(session.id) }
     val idle = session.remoteTask == null
-    ModalBottomSheet(onDismissRequest = { open = false }, containerColor = palette.popup) {
+    // Opened whole: half open, the last row would sit under the gesture bar.
+    ModalBottomSheet(onDismissRequest = { open = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = palette.popup) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
             if (models.isEmpty()) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                 if (failed) TextButton(onClick = { attempt++ }) { Text("重试") } else CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)

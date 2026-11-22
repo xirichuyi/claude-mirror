@@ -136,6 +136,15 @@ fun ruleLines(suggestions: JsonElement?): List<RuleLine> = (suggestions as? Json
     }
 }
 
+/** A model ID as a name: "claude-opus-5-5-20260101" reads "Opus 5.5". Anything else is left as it is. */
+fun modelName(id: String): String {
+    if (!id.startsWith("claude-")) return id
+    val parts = id.removePrefix("claude-").substringBefore('[').split('-').filter { it.isNotEmpty() && !(it.length == 8 && it.all(Char::isDigit)) }
+    val (numbers, words) = parts.partition { it.all(Char::isDigit) }
+    if (words.isEmpty()) return id
+    return (words.joinToString(" ") { it.replaceFirstChar(Char::uppercase) } + " " + numbers.joinToString(".")).trim()
+}
+
 /** The permission mode the server's suggestions switch the conversation to, if they do. */
 fun suggestedMode(suggestions: JsonElement?): String? =
     (suggestions as? JsonArray).orEmpty().lastOrNull { it.field("type") == "setMode" }?.field("mode")
