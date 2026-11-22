@@ -65,7 +65,7 @@ private suspend fun <T> load(ask: suspend () -> T): Loaded<T> =
 @Composable
 private fun <T> Loading(state: Loaded<T>, modifier: Modifier, onRetry: () -> Unit, content: @Composable (T) -> Unit) {
     when (state) {
-        is Loaded.Ready -> content(state.value)
+        is Loaded.Ready -> Box(modifier) { content(state.value) }
         Loaded.Waiting -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) }
         is Loaded.Failed -> Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(state.reason, color = palette.error, style = MaterialTheme.typography.bodySmall)
