@@ -136,14 +136,15 @@ class Engine(
     suspend fun adopt(host: HostConfig, item: RemoteConversation): ChatSession {
         fun known() = state.value.firstOrNull { it.hostId == host.id && it.remoteSessionId == item.sessionId }
         known()?.let { return it }
-        val page = transcript(host, item.reference)
-        val directory = page["directory"].string()?.takeIf { it.startsWith("/") } ?: throw RemoteException("这个对话没有记录工作目录")
+        val reply = transcript(host, item.reference)
+        val page = historyPage(reply.list("records"))
+        val directory = reply["directory"].string()?.takeIf { it.startsWith("/") } ?: throw RemoteException("这个对话没有记录工作目录")
         known()?.let { return it }
         val time = if (item.updatedAt > 0) item.updatedAt.toLong() else now()
         return added(ChatSession(
             id = newId(), hostId = host.id, name = historyTitle(item.name), directory = directory, createdAt = time, updatedAt = time,
-            messages = historyMessages(page.list("records")), remoteSessionId = item.sessionId,
-            historyRef = item.reference, historyBefore = page["before"].string(),
+            messages = page.messages, remoteSessionId = item.sessionId, historyRef = item.reference,
+            historyBefore = reply["before"].string(), historyTail = page.messages.lastOrNull()?.id, historyLoose = page.loose,
         ))
     }
 
@@ -152,11 +153,15 @@ class Engine(
         val session = require(id)
         val reference = session.historyRef ?: return
         val before = session.historyBefore ?: return
-        val page = transcript(hostOf(session), reference, before)
+        val reply = transcript(hostOf(session), reference, before)
+        val page = historyPage(reply.list("records"))
         update(id) { current ->
             if (current.historyBefore != before) return@update current
             val shown = current.messages.mapTo(HashSet()) { it.id }
-            current.copy(messages = historyMessages(page.list("records")).filter { it.id !in shown } + current.messages, historyBefore = page["before"].string())
+            current.copy(
+                messages = page.messages.answered(current.historyLoose).filter { it.id !in shown } + current.messages,
+                historyBefore = reply["before"].string(), historyLoose = page.loose,
+            )
         }
     }
 
@@ -168,27 +173,30 @@ class Engine(
         val original = require(id)
         val reference = original.historyRef ?: return
         if (original.remoteTask != null || original.remoteOwner != null) return
-        val page = transcript(hostOf(original), reference)
-        val incoming = historyMessages(page.list("records"))
+        val reply = transcript(hostOf(original), reference)
+        val page = historyPage(reply.list("records"))
+        val incoming = page.messages
         update(id) { current ->
-            if (current.remoteTask != null || current.remoteOwner != null || current.messages != original.messages) return@update current
+            if (incoming.isEmpty() || current.remoteTask != null || current.remoteOwner != null || current.messages != original.messages) return@update current
+            // What was said here follows the transcript's last message and carries other IDs than
+            // Claude gives it. Until the transcript has it, the transcript is behind and is not shown.
+            val said = current.messages.drop(current.messages.indexOfLast { it.id == current.historyTail } + 1)
+            // A prompt whose reply failed before it began never reached Claude; it stays, at the end.
+            val unsent = said.filterIndexed { at, message ->
+                val next = said.getOrNull(at + 1)
+                val failed = next?.role == "assistant" && next.error != null && next.blocks.isNullOrEmpty()
+                (message.role == "user" && failed) || (message.role == "assistant" && message.error != null && message.blocks.isNullOrEmpty() && said.getOrNull(at - 1)?.role == "user")
+            }
+            val prompts = incoming.filter { it.role == "user" }.mapTo(HashSet()) { it.text }
+            if (said.any { it.role == "user" && it !in unsent && it.text !in prompts }) return@update current
             val shown = current.messages.mapTo(HashSet()) { it.id }
             val first = incoming.indexOfFirst { it.id in shown }
-            val anchor = if (first < 0) 0 else current.messages.indexOfFirst { it.id == incoming[first].id }
-            // What was sent from here carries other IDs in Claude's transcript. Until the transcript
-            // has all of it, the transcript is behind and must not replace what is shown.
-            val written = incoming.mapTo(HashSet()) { it.id }
-            val prompts = incoming.filter { it.role == "user" }.mapTo(HashSet()) { it.text }
-            val behind = current.messages.drop(anchor).any { it.role == "user" && it.id !in written && it.text !in prompts }
-            when {
-                incoming.isEmpty() || behind -> current
-                // Too much happened to join up with what is shown: show the latest part instead.
-                first < 0 -> current.copy(messages = incoming, historyBefore = page["before"].string(), updatedAt = now())
-                else -> {
-                    val merged = current.messages.take(anchor) + incoming.drop(first)
-                    if (merged == current.messages) current else current.copy(messages = merged, updatedAt = now())
-                }
-            }
+            // Nothing in common: too much happened elsewhere to join up, so the latest part replaces what is shown.
+            val kept = if (first < 0) emptyList() else current.messages.take(current.messages.indexOfFirst { it.id == incoming[first].id })
+            val merged = kept.answered(page.loose) + incoming.drop(maxOf(first, 0)) + unsent
+            if (merged == current.messages) current
+            else if (first < 0) current.copy(messages = merged, historyBefore = reply["before"].string(), historyLoose = page.loose, historyTail = incoming.last().id, updatedAt = now())
+            else current.copy(messages = merged, historyTail = incoming.last().id, updatedAt = now())
         }
     }
 
@@ -581,6 +589,8 @@ class Engine(
                     messages = it.messages.map { message -> if (message.id == reply) message.cutShort() else message },
                     status = if (it.isBusy) "stopped" else it.status, permissions = emptyList(), transportError = null,
                     remoteTask = null, remoteOwner = null, remoteSessionId = null,
+                    // Claude's transcript is on the old machine too.
+                    historyRef = null, historyBefore = null, historyTail = null, historyLoose = emptyList(),
                     queueHeld = it.queue.isNotEmpty(),
                 )
             }

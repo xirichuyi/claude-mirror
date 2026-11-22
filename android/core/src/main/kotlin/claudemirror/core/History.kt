@@ -43,9 +43,28 @@ fun historyUserText(text: String): String {
 fun historyTitle(text: String): String =
     historyUserText(text).replace(Regex("<[^>]+>"), "").replace(Regex("\\s+"), " ").trim().take(80).ifEmpty { "未命名" }
 
+/** A page of Claude Code's transcript: its messages, and the tool results whose calls are on the page before it. */
+class HistoryPage(val messages: List<ChatMessage>, val loose: List<Block>)
+
+fun historyMessages(records: List<JsonElement>): List<ChatMessage> = historyPage(records).messages
+
+/** Gives tools the results that a later page of the transcript held for them. */
+fun List<ChatMessage>.answered(results: List<Block>): List<ChatMessage> {
+    if (results.isEmpty()) return this
+    val byTool = results.associateBy { it.id }
+    return map { message ->
+        if (message.blocks?.any { it.type == "tool" && it.id in byTool } != true) message
+        else message.copy(blocks = message.blocks.map { block ->
+            val result = byTool[block.id]?.takeIf { block.type == "tool" } ?: return@map block
+            block.copy(output = result.output, status = result.status ?: block.status)
+        })
+    }
+}
+
 /** Turns Claude Code's own transcript records into messages. */
-fun historyMessages(records: List<JsonElement>): List<ChatMessage> {
+fun historyPage(records: List<JsonElement>): HistoryPage {
     val messages = ArrayList<ChatMessage>()
+    val loose = ArrayList<Block>()
     for (record in records) {
         val event = record.obj() ?: continue
         val id = event["uuid"].string() ?: UUID.randomUUID().toString()
@@ -55,14 +74,12 @@ fun historyMessages(records: List<JsonElement>): List<ChatMessage> {
             for (result in content) {
                 if (result["type"].string() != "tool_result") continue
                 val tool = result["tool_use_id"].string() ?: continue
-                val at = messages.indexOfLast { message -> message.blocks?.any { it.id == tool } == true }
-                if (at < 0) continue
                 val output = result["content"].string() ?: (result["content"] as? JsonArray)?.joinToString("\n") { item ->
                     item.obj()?.get("text").string() ?: "[${item.obj()?.get("type").string() ?: "…"}]"
                 }
-                messages[at] = messages[at].copy(blocks = messages[at].blocks?.map {
-                    if (it.id == tool) it.copy(output = output, status = if (result["is_error"].truthy) "error" else it.status) else it
-                })
+                val answer = Block(type = "tool", id = tool, output = output, status = if (result["is_error"].truthy) "error" else null)
+                val at = messages.indexOfLast { message -> message.blocks?.any { it.id == tool } == true }
+                if (at < 0) loose += answer else messages[at] = listOf(messages[at]).answered(listOf(answer)).single()
             }
             val raw = content.filter { it["type"].string() == "text" }.mapNotNull { it["text"].string() }.joinToString("\n")
             val text = historyUserText(raw)
@@ -85,7 +102,7 @@ fun historyMessages(records: List<JsonElement>): List<ChatMessage> {
                 error = if (failed) detail.ifEmpty { event["error"].string() ?: "请求失败" } else null)
         }
     }
-    return messages
+    return HistoryPage(messages, loose)
 }
 
 internal fun JsonObject.list(key: String): List<JsonElement> = (this[key] as? JsonArray).orEmpty()

@@ -192,6 +192,10 @@ data class ChatSession(
     val historyRef: String? = null,
     /** Where the earlier part of that transcript continues, when there is more. */
     val historyBefore: String? = null,
+    /** The last message that came from that transcript; what follows it was said here. */
+    val historyTail: String? = null,
+    /** Results of tools whose calls are in the earlier part, not loaded yet. */
+    val historyLoose: List<Block> = emptyList(),
 ) {
     val isBusy: Boolean get() = status in BUSY
 

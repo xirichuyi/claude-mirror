@@ -42,4 +42,19 @@ class HistoryTest {
         assertEquals("fix the build", historyTitle("<system-reminder>r</system-reminder> fix\n the   build"))
         assertEquals("未命名", historyTitle("  "))
     }
+
+    @Test fun `a result whose tool is on the page before waits for it`() {
+        val later = historyPage(records("""[
+            {"type":"user","uuid":"u2","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a.txt"},{"type":"tool_result","tool_use_id":"t0","content":"no","is_error":true}]}},
+            {"type":"assistant","uuid":"a2","message":{"content":[{"type":"text","text":"Done."}]}}
+        ]"""))
+        assertEquals(listOf("a2"), later.messages.map { it.id })
+        assertEquals(listOf("t1", "t0"), later.loose.map { it.id })
+
+        val earlier = historyPage(records("""[
+            {"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","id":"t0","name":"Read","input":{}},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}
+        ]""")).messages.answered(later.loose)
+        assertEquals(listOf("error", "history"), earlier.single().blocks!!.map { it.status })
+        assertEquals(listOf("no", "a.txt"), earlier.single().blocks!!.map { it.output })
+    }
 }

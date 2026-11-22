@@ -439,4 +439,53 @@ class EngineTest {
         engine.send(session.id, "hello")
         assertEquals("renamed", current(session.id).name)
     }
+
+    @Test fun `more than a page said elsewhere replaces what is shown`() = engineTest {
+        var reply = """{"records":[${record("m1", "user", "first")},${record("m2", "assistant", "one")}],"directory":"/srv/app","before":null}"""
+        agent.onHistory = { json(reply) }
+        val session = engine.adopt(testHost, RemoteConversation("p/s1.jsonl", "s1", "/srv/app", "first"))
+
+        reply = """{"records":[${record("n1", "user", "much later")},${record("n2", "assistant", "yes")}],"directory":"/srv/app","before":"n1"}"""
+        engine.refresh(session.id)
+        assertEquals(listOf("n1", "n2"), current(session.id).messages.map { it.id })
+        assertEquals("n1", current(session.id).historyBefore)
+    }
+
+    @Test fun `a prompt that never reached Claude neither holds back the transcript nor is lost`() {
+        val adopted = ChatSession(
+            id = "c1", hostId = testHost.id, directory = "/srv/app", createdAt = 1, updatedAt = 1, remoteSessionId = "s1", historyRef = "p/s1.jsonl", historyTail = "m2",
+            messages = listOf(
+                ChatMessage(id = "m1", role = "user", text = "first"), ChatMessage(id = "m2", role = "assistant", blocks = listOf(Block(type = "text", text = "one"))),
+                ChatMessage(id = "l1", role = "user", text = "lost on the way"), ChatMessage(id = "l2", role = "assistant", blocks = emptyList(), error = "连接中断"),
+            ),
+        )
+        engineTest(store = MemoryStore(listOf(adopted))) {
+            agent.onHistory = { json("""{"records":[${record("m1", "user", "first")},${record("m2", "assistant", "one")},${record("m3", "user", "elsewhere")}],"directory":"/srv/app","before":null}""") }
+            engine.refresh("c1")
+            assertEquals(listOf("m1", "m2", "m3", "l1", "l2"), current("c1").messages.map { it.id })
+            engine.refresh("c1")
+            assertEquals(listOf("m1", "m2", "m3", "l1", "l2"), current("c1").messages.map { it.id })
+        }
+    }
+
+    @Test fun `the earlier part gets the results the later part held for its tools`() = engineTest {
+        agent.onHistory = { request ->
+            if (request["before"].string() == "u2") json("""{"records":[{"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}],"directory":"/srv/app","before":null}""")
+            else json("""{"records":[{"type":"user","uuid":"u2","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a.txt"}]}},${record("a2", "assistant", "Done.")}],"directory":"/srv/app","before":"u2"}""")
+        }
+        val session = engine.adopt(testHost, RemoteConversation("p/s1.jsonl", "s1", "/srv/app", "first"))
+        engine.loadEarlier(session.id)
+        assertEquals(listOf("a1", "a2"), current(session.id).messages.map { it.id })
+        assertEquals("a.txt", current(session.id).messages.first().blocks!!.single().output)
+        assertTrue(current(session.id).historyLoose.isEmpty())
+    }
+
+    @Test fun `a server entry pointed elsewhere forgets the old machine's transcript`() = engineTest {
+        agent.onHistory = { json("""{"records":[${record("m1", "user", "first")}],"directory":"/srv/app","before":null}""") }
+        val session = engine.adopt(testHost, RemoteConversation("p/s1.jsonl", "s1", "/srv/app", "first"))
+        engine.endpointChanged(testHost.id)
+        assertNull(current(session.id).historyRef)
+        engine.refresh(session.id)
+        assertEquals(1, agent.calls.count { it.operation == "history:messages" })
+    }
 }
