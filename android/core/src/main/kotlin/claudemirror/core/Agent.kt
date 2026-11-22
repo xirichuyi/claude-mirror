@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
@@ -329,7 +330,8 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
         // A server allows only so many commands on one connection (sshd's MaxSessions, 10 unless changed).
         return transfers.withPermit {
             coroutineScope {
-                val process = withContext(Dispatchers.IO) { launcher.start(host, command) }
+                // Not given up half way: a command started while the upload is being called off must still reach the guard that ends it.
+                val process = withContext(Dispatchers.IO + NonCancellable) { launcher.start(host, command) }
                 // The reads and writes below only end early when the command under them does. Ending it
                 // talks to the server, which the caller's thread (the main one, in the app) may not do.
                 val guard = launch(Dispatchers.IO, start = CoroutineStart.ATOMIC) { try { awaitCancellation() } finally { process.kill() } }
