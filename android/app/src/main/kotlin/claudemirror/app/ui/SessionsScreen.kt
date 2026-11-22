@@ -123,7 +123,7 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
                 Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text(state.error.message ?: "连接失败", color = MaterialTheme.colorScheme.onErrorContainer)
-                        TextButton(onClick = { model.reconnect(host) }) { Text("重试") }
+                        TextButton(onClick = { model.reconnect(host) }) { Text("重试", color = MaterialTheme.colorScheme.onErrorContainer) }
                     }
                 }
             }
