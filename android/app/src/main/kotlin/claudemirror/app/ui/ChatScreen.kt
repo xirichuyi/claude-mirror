@@ -182,9 +182,10 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
                     Transcript(session, Modifier.weight(1f), onEarlier = { model.loadEarlier(sessionId) }) { permission, answer -> model.respond(sessionId, permission, answer) }
                     // Editing a queued message must not throw away what is already being written.
                     Queue(session, model, queueRoom, onEdit = { item ->
-                        val words = item.text.takeUnless { it == ATTACHMENTS_ONLY && item.attachments.isNotEmpty() }
-                        if (words != null) draft = if (draft.isBlank()) words else draft.trimEnd() + "\n" + words
-                        model.attach(sessionId, item.attachments)
+                        model.attach(sessionId, item.attachments).also { fits ->
+                            val words = item.text.takeUnless { it == ATTACHMENTS_ONLY && item.attachments.isNotEmpty() }
+                            if (fits && words != null) draft = if (draft.isBlank()) words else draft.trimEnd() + "\n" + words
+                        }
                     })
                 }
                 // Under a keyboard there is no room left for the request's card, so its answer comes down here.
@@ -285,9 +286,9 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -
     }
 }
 
-/** Messages waiting for the current reply to end. Each can go into the reply now, back to the editor, or away. */
+/** Messages waiting for the current reply to end. Each can go into the reply now, back to the editor (when its files fit there), or away. */
 @Composable
-private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (QueuedMessage) -> Unit) {
+private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (QueuedMessage) -> Boolean) {
     if (session.queue.isEmpty()) return
     HorizontalDivider()
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp)) {
@@ -313,7 +314,7 @@ private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (Queu
                     }
                     Text(item.text, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                     if (session.remoteTask != null) IconButton(onClick = { model.steer(session.id, item.id) }) { Icon(Icons.Filled.Bolt, "插队") }
-                    IconButton(onClick = { model.cancelQueued(session.id, item.id); onEdit(item) }) { Icon(Icons.Filled.Edit, "编辑") }
+                    IconButton(onClick = { if (onEdit(item)) model.cancelQueued(session.id, item.id) }) { Icon(Icons.Filled.Edit, "编辑") }
                     IconButton(onClick = { model.cancelQueued(session.id, item.id) }) { Icon(Icons.Filled.Close, "移除") }
                 }
             }

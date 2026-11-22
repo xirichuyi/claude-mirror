@@ -305,9 +305,13 @@ class AppModel(private val application: Application) {
         }
     }
 
-    /** Files that are on the server already: those of a queued message taken back for editing. */
-    fun attach(id: String, files: Collection<Attachment>) = pick(id) { all ->
-        all + files.filter { file -> all.none { it.file == file } }.map { Picked(UUID.randomUUID().toString(), it.name, size = it.size, sent = it.size, file = it) }
+    /** Files that are on the server already: those of a queued message taken back for editing. False when they do not fit. */
+    fun attach(id: String, files: Collection<Attachment>): Boolean {
+        val held = picked.value[id].orEmpty()
+        val added = files.filter { file -> held.none { it.file == file } }
+        if (held.size + added.size > MAX_FILES) return false.also { snackbar.tryEmit("最多 $MAX_FILES 个") }
+        pick(id) { all -> all + added.map { Picked(UUID.randomUUID().toString(), it.name, size = it.size, sent = it.size, file = it) } }
+        return true
     }
 
     fun detach(id: String, item: String) {
