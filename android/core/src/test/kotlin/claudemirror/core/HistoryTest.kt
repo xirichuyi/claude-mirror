@@ -41,6 +41,7 @@ class HistoryTest {
     @Test fun `titles drop the markup`() {
         assertEquals("fix the build", historyTitle("<system-reminder>r</system-reminder> fix\n the   build"))
         assertEquals("未命名", historyTitle("  "))
+        assertEquals("look at this", historyTitle(prompt("look at this", listOf(Attachment("a.png", "/tmp/x/a.png"))).take(60)))
     }
 
     @Test fun `a result whose tool is on the page before waits for it`() {

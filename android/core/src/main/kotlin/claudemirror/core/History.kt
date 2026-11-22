@@ -65,7 +65,7 @@ fun attached(prompt: String): Pair<String, List<Attachment>> {
 
 /** A short title for a conversation found on the server. */
 fun historyTitle(text: String): String =
-    historyUserText(text).replace(Regex("<[^>]+>"), "").replace(Regex("\\s+"), " ").trim().take(80).ifEmpty { "未命名" }
+    historyUserText(text.substringBefore(ATTACHED.trimEnd())).replace(Regex("<[^>]+>"), "").replace(Regex("\\s+"), " ").trim().take(80).ifEmpty { "未命名" }
 
 /** A page of Claude Code's transcript: its messages, and the tool results whose calls are on the page before it. */
 class HistoryPage(val messages: List<ChatMessage>, val loose: List<Block>)
