@@ -21,7 +21,6 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -31,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 
 /** A server seen for the first time, waiting for the user to accept its key. */
@@ -251,11 +251,19 @@ class AppModel(private val application: Application) {
     /**
      * An answer given from a notification. The connection may have been given up by then, and no
      * screen is there to open it again, so the reply is joined first: its end is still to be told.
+     * [settled] is called when the answer has been sent, or after the few seconds Android gives a
+     * broadcast; a slow connection is then waited for as long as the process lasts.
      */
-    fun answer(id: String, permission: String, answer: JsonObject): Job = scope.launch {
-        val host = sessions.value.firstOrNull { it.id == id }?.let { host(it.hostId) } ?: return@launch
-        if (connections.value[host.id] !is ConnectionState.Connected && !open(host)) return@launch
-        try { engine.respond(id, permission, answer) } catch (error: CancellationException) { throw error } catch (_: Exception) {}
+    fun answer(id: String, permission: String, answer: JsonObject, settled: () -> Unit) {
+        val sending = scope.launch {
+            val host = sessions.value.firstOrNull { it.id == id }?.let { host(it.hostId) } ?: return@launch
+            if (connections.value[host.id] !is ConnectionState.Connected && !open(host)) return@launch
+            try { engine.respond(id, permission, answer) } catch (error: CancellationException) { throw error } catch (_: Exception) {}
+        }
+        scope.launch {
+            withTimeoutOrNull(8_000) { sending.join() }
+            settled()
+        }
     }
     fun configure(id: String, preferences: Preferences) = act { engine.configure(id, preferences) }
     val models = engine.models

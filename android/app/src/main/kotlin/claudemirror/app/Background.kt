@@ -166,6 +166,6 @@ class Answer : BroadcastReceiver() {
         model.answer(session, permission, buildJsonObject {
             put("allow", allow)
             if (allow) put("useSuggestedPermissions", false) else put("reason", "")
-        }).invokeOnCompletion { pending.finish() }
+        }, pending::finish)
     }
 }
