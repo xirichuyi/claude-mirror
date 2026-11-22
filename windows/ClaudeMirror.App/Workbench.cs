@@ -138,8 +138,9 @@ public sealed partial class MainWindow
     {
         var button = Button(name,action);
         var icon = new FontIcon { Glyph = glyph, FontSize = 14 };
-        var content = Row(icon,new TextBlock { Text = name, FontSize = 13 }); content.Spacing = 6;
-        button.Content = showLabel ? content : icon;
+        // An element has one parent: the row is built only when the label is shown.
+        if(showLabel) { var content = Row(icon,new TextBlock { Text = name, FontSize = 13 }); content.Spacing = 6; button.Content = content; }
+        else button.Content = icon;
         Flat(button); button.MinWidth = 28; button.MinHeight = 28;
         button.Padding = showLabel ? new Thickness(8,4,8,4) : new Thickness(6,4,6,4);
         AutomationProperties.SetName(button,name); ToolTipService.SetToolTip(button,name);
