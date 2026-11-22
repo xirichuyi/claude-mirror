@@ -104,7 +104,15 @@ public final class RemoteFiles: @unchecked Sendable {
         }
     }
 
-    private func fetchPreview(_ config: ConnectionConfig, _ file: String, original: Bool) async throws -> FilePreview {
+    /// Fetches an image's thumbnail before it is asked for. An original is never downloaded for this.
+    public func warm(_ config: ConnectionConfig, _ file: String) async {
+        let key = "warm:" + previewKey(config, file, original: false)
+        _ = try? await previewRequests.value(for: key) {
+            try await self.fetchPreview(config, file, original: false, thumbnailOnly: true)
+        }
+    }
+
+    private func fetchPreview(_ config: ConnectionConfig, _ file: String, original: Bool, thumbnailOnly: Bool = false) async throws -> FilePreview {
         let key = previewKey(config, file, original: original)
         let previous = await cachedPreview(config, file, original: original)
         var params: [String: JSON] = ["path": .string(file), "inlineMedia": .bool(true), "thumbnail": .bool(!original), "textLimit": .number(65536)]
@@ -113,6 +121,7 @@ public final class RemoteFiles: @unchecked Sendable {
         try Task.checkCancellation()
         var info = try response.decode(FilePreview.self)
         if info.notModified == true, let previous { return previous }
+        if thumbnailOnly && info.thumbnail != true { throw CancellationError() }
         if info.kind == "image" || info.kind == "pdf" {
             let inline = response["inlineData"]?.string.flatMap { Data(base64Encoded: $0) }
             info.data = try Data(contentsOf: try await cached(config, info, inline: inline), options: .mappedIfSafe)

@@ -67,16 +67,10 @@ function imageType(magic) {
   return null;
 }
 
-// Optional Pillow support. Never install packages or block the agent event loop.
-let thumbnailUnavailableUntil = 0;
-const thumbnailJobs = new Map();
-async function thumbnail(filename, version) {
-  if (Date.now() < thumbnailUnavailableUntil) return null;
-  const key = filename + ':' + version;
-  if (thumbnailJobs.has(key)) return thumbnailJobs.get(key);
-  if (thumbnailJobs.size >= 2) return null;
-  const job = new Promise(done => {
-    const script = `import sys, io, warnings
+// A small copy of an image, so a preview does not wait for megabytes of original. Made by whatever
+// the server already has: Pillow, ImageMagick or ffmpeg. A PNG needs none of them. Nothing is
+// installed, and the work is done in a child process so the agent keeps answering meanwhile.
+const PILLOW = `import sys, io, warnings
 warnings.simplefilter('error')
 from PIL import Image, ImageOps
 Image.MAX_IMAGE_PIXELS = 40000000
@@ -93,15 +87,114 @@ with Image.open(sys.argv[1]) as im:
  if output.tell() > 96 * 1024: raise ValueError('thumbnail too large')
  sys.stdout.buffer.write(output.getvalue())
 `;
-    execFile('python3', ['-c', script, filename], { encoding: 'buffer', timeout: 5000, maxBuffer: 512 * 1024 }, (error, output, stderr) => {
-      if (error) {
-        if (error.code === 'ENOENT' || String(stderr || '').includes('No module named')) thumbnailUnavailableUntil = Date.now() + 60000;
-        done(null);
-      } else done(output);
+const THUMBNAIL_LIMIT = 400 * 1024;
+const magick = (file, coder) => [coder + ':' + file, '-auto-orient', '-thumbnail', '1024x1024>', '-background', '#faf6f2', '-flatten', '-strip', '-quality', '75', 'jpg:-'];
+const thumbnailers = [
+  { name: 'pillow', command: 'python3', args: file => ['-c', PILLOW, file] },
+  { name: 'magick', command: 'magick', args: magick },
+  { name: 'convert', command: 'convert', args: magick },
+  { name: 'ffmpeg', command: 'ffmpeg', args: file => ['-v', 'error', '-i', file, '-frames:v', '1',
+    '-vf', "scale='min(1024,iw)':'min(1024,ih)':force_original_aspect_ratio=decrease", '-q:v', '6', '-f', 'image2pipe', '-c:v', 'mjpeg', 'pipe:1'] },
+  { name: 'node', command: process.execPath, args: file => [__filename, 'thumbnail', file], only: 'image/png' },
+];
+const thumbnailMissing = new Map();
+const thumbnailJobs = new Map();
+async function thumbnail(filename, version, mime) {
+  const key = filename + ':' + version;
+  if (thumbnailJobs.has(key)) return thumbnailJobs.get(key);
+  while (thumbnailJobs.size >= 3) await Promise.race(thumbnailJobs.values());
+  if (thumbnailJobs.has(key)) return thumbnailJobs.get(key);
+  const attempt = tool => new Promise<Buffer | null>(done => {
+    execFile(tool.command, tool.args(filename, mime.slice(6)), { encoding: 'buffer', timeout: 8000, maxBuffer: 2 * MEGABYTE }, (error, output, stderr) => {
+      // A tool this server does not have is not asked again for a while.
+      if (error && ((error as NodeJS.ErrnoException).code === 'ENOENT' || String(stderr || '').includes('No module named'))) thumbnailMissing.set(tool.name, Date.now() + 600000);
+      done(error || !output.length || output.length > THUMBNAIL_LIMIT ? null : output);
     });
-  }).finally(() => thumbnailJobs.delete(key));
+  });
+  const job = (async () => {
+    for (const tool of thumbnailers) {
+      if ((tool.only && tool.only !== mime) || Date.now() < (thumbnailMissing.get(tool.name) || 0)) continue;
+      const data = await attempt(tool);
+      if (data) return { data, mime: imageType(data.subarray(0, 16)) || 'image/jpeg' };
+    }
+    return null;
+  })().finally(() => thumbnailJobs.delete(key));
   thumbnailJobs.set(key, job);
   return job;
+}
+
+const CRC = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+function pngChunk(type, data) {
+  const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+  let crc = 0xffffffff;
+  for (const byte of body) crc = CRC[(crc ^ byte) & 255] ^ (crc >>> 8);
+  const head = Buffer.alloc(4), tail = Buffer.alloc(4);
+  head.writeUInt32BE(data.length); tail.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+  return Buffer.concat([head, body, tail]);
+}
+
+// Shrinks an 8-bit, non-interlaced PNG to fit `edge` pixels, on the same pale background as the other tools.
+function shrinkPNG(source: Buffer, edge: number) {
+  let offset = 8, header = null, palette = null, alpha = null;
+  const parts = [];
+  while (offset + 12 <= source.length) {
+    const length = source.readUInt32BE(offset), type = source.toString('latin1', offset + 4, offset + 8);
+    const data = source.subarray(offset + 8, offset + 8 + length);
+    if (type === 'IHDR') header = data; else if (type === 'PLTE') palette = data; else if (type === 'tRNS') alpha = data; else if (type === 'IDAT') parts.push(data);
+    else if (type === 'IEND') break;
+    offset += 12 + length;
+  }
+  if (!header) throw new Error('not a PNG');
+  const width = header.readUInt32BE(0), height = header.readUInt32BE(4), kind = header[9];
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[kind];
+  if (header[8] !== 8 || header[12] !== 0 || !channels || !width || !height || width * height > 40000000) throw new Error('unsupported PNG');
+  const stride = width * channels, raw = zlib.inflateSync(Buffer.concat(parts));
+  if (raw.length < (stride + 1) * height) throw new Error('truncated PNG');
+  const scale = Math.max(1, Math.max(width, height) / edge);
+  const columns = Math.max(1, Math.round(width / scale)), rows = Math.max(1, Math.round(height / scale));
+  const column = Uint32Array.from({ length: width }, (_, x) => Math.min(columns - 1, Math.floor(x * columns / width)) * 3);
+  const sums = new Float64Array(columns * rows * 3), counts = new Uint32Array(columns * rows);
+  let previous = new Uint8Array(stride), current = new Uint8Array(stride);
+  for (let y = 0; y < height; y++) {
+    const start = y * (stride + 1), filter = raw[start];
+    for (let i = 0; i < stride; i++) {
+      const left = i >= channels ? current[i - channels] : 0, up = previous[i], corner = i >= channels ? previous[i - channels] : 0;
+      let predicted = 0;
+      if (filter === 1) predicted = left; else if (filter === 2) predicted = up; else if (filter === 3) predicted = (left + up) >> 1;
+      else if (filter === 4) { const p = left + up - corner, a = Math.abs(p - left), b = Math.abs(p - up), c = Math.abs(p - corner); predicted = a <= b && a <= c ? left : b <= c ? up : corner; }
+      current[i] = (raw[start + 1 + i] + predicted) & 255;
+    }
+    const row = Math.min(rows - 1, Math.floor(y * rows / height)) * columns;
+    for (let x = 0; x < width; x++) {
+      const i = x * channels;
+      let r, g, b, a = 255;
+      if (kind === 3) { const index = current[i]; r = palette[index * 3]; g = palette[index * 3 + 1]; b = palette[index * 3 + 2]; a = alpha && index < alpha.length ? alpha[index] : 255; }
+      else if (kind === 0 || kind === 4) { r = g = b = current[i]; if (kind === 4) a = current[i + 1]; }
+      else { r = current[i]; g = current[i + 1]; b = current[i + 2]; if (kind === 6) a = current[i + 3]; }
+      const target = row * 3 + column[x], clear = 255 - a;
+      sums[target] += (r * a + 250 * clear) / 255; sums[target + 1] += (g * a + 246 * clear) / 255; sums[target + 2] += (b * a + 242 * clear) / 255;
+      counts[row + column[x] / 3]++;
+    }
+    [previous, current] = [current, previous];
+  }
+  const lines = Buffer.alloc((columns * 3 + 1) * rows);
+  for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
+    const from = (y * columns + x) * 3, to = y * (columns * 3 + 1) + 1 + x * 3, count = counts[y * columns + x] || 1;
+    for (let c = 0; c < 3; c++) lines[to + c] = Math.round(sums[from + c] / count);
+  }
+  const head = Buffer.alloc(13);
+  head.writeUInt32BE(columns, 0); head.writeUInt32BE(rows, 4); head[8] = 8; head[9] = 2;
+  return Buffer.concat([source.subarray(0, 8), pngChunk('IHDR', head), pngChunk('IDAT', zlib.deflateSync(lines, { level: 6 })), pngChunk('IEND', Buffer.alloc(0))]);
+}
+
+function thumbnailCommand(filename) {
+  // Each smaller size is made from the one before, so the original is decoded once.
+  let small = fs.readFileSync(filename);
+  for (const edge of [1024, 768, 512, 384]) {
+    small = shrinkPNG(small, edge);
+    if (small.length <= THUMBNAIL_LIMIT) break;
+  }
+  process.stdout.write(small);
 }
 
 async function preview(request) {
@@ -115,10 +208,10 @@ async function preview(request) {
     await source.read(header, 0, header.length, 0);
     const detected = imageType(header);
     if (request.thumbnail === true && ['image/png', 'image/jpeg', 'image/webp'].includes(detected) && info.size > 256 * 1024 && info.size <= 20 * MEGABYTE) {
-      const small = await thumbnail(filename, info.version);
+      const small = await thumbnail(filename, info.version, detected);
       const current = await metadata(filename);
       if (current.version !== info.version) throw new Error('远端文件已变化，请重试');
-      if (small && small.length < info.size) return { ...info, kind: 'image', mime: 'image/jpeg', thumbnail: true, inlineData: small.toString('base64') };
+      if (small && small.data.length < info.size) return { ...info, kind: 'image', mime: small.mime, thumbnail: true, inlineData: small.data.toString('base64') };
     }
     const inline = request.inlineMedia === true && info.size <= 256 * 1024;
     if (detected && !inline) {
@@ -1301,8 +1394,10 @@ if (require.main === module) {
       process.stderr.write(error.message + '\n');
       process.exitCode = 1;
     });
+  } else if (process.argv[2] === 'thumbnail') {
+    try { thumbnailCommand(process.argv[3]); } catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
   } else serve();
 }
 
 module.exports = { fileOperations, historyOperations, historyScope, accountHistory, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
-  processCommand, persistenceWarning, workerCommand, parseAuthStatus };
+  processCommand, persistenceWarning, workerCommand, parseAuthStatus, shrinkPNG };

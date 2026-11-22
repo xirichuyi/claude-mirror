@@ -61,6 +61,7 @@ public struct TreeRow: Identifiable, Equatable {
     private var directoryLoads: [String: UUID] = [:]
     private var git: [String: String] = [:]
     private var generation = 0
+    private var warming: Task<Void, Never>?
 
     public init(files: RemoteFiles, agents: AgentClient, config: ConnectionConfig) {
         self.files = files; self.agents = agents; self.config = config
@@ -69,6 +70,25 @@ public struct TreeRow: Identifiable, Equatable {
     public var activeTab: EditorTab? { tabs.first { $0.id == activeTabId } }
     public var hasUnsavedEdits: Bool { tabs.contains(where: \.isDirty) }
     private func changed() { onChange?() }
+
+    /// Fetches thumbnails for the first images of a folder that was just opened, one at a time,
+    /// so clicking one shows it at once. Stops when another folder is opened.
+    private func warm(_ listing: DirectoryListing) {
+        let images = listing.entries.filter {
+            !$0.directory && $0.size > 256 * 1024 && $0.size <= 20 * 1024 * 1024
+                && ["png", "jpg", "jpeg", "webp"].contains(URL(fileURLWithPath: $0.name).pathExtension.lowercased())
+        }.prefix(8)
+        warming?.cancel()
+        guard !images.isEmpty else { return }
+        let files = self.files, config = self.config
+        warming = Task(priority: .utility) {
+            for image in images {
+                if Task.isCancelled { return }
+                if let cached = await files.cachedPreview(config, image.path), cached.version == image.version { continue }
+                await files.warm(config, image.path)
+            }
+        }
+    }
 
     public func browse(_ folder: String, force: Bool = false) async {
         directoryLoads.removeAll()
@@ -81,6 +101,7 @@ public struct TreeRow: Identifiable, Equatable {
             if root != listing.path { expanded = []; directories = [:]; root = listing.path }
             directories[listing.path] = listing
             rebuild() // Show the root immediately, before refreshing expanded children.
+            warm(listing)
             let files = self.files, config = self.config, hidden = showHidden
             var pending = Array(expanded).makeIterator()
             var failed = false
@@ -148,6 +169,7 @@ public struct TreeRow: Identifiable, Equatable {
             let listing = try await files.list(config, directory, hidden: showHidden)
             guard generation == version, directoryLoads[directory] == request else { return }
             directories[directory] = listing
+            warm(listing)
         } catch {
             guard generation == version, directoryLoads[directory] == request else { return }
             expanded.remove(directory)
