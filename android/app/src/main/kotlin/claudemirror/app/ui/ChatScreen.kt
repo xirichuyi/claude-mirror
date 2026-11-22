@@ -100,7 +100,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -336,6 +335,12 @@ private fun Composer(
         if (replying) Act(Icons.Filled.Bolt, "插队", palette.selection, palette.accent, ready) { onSend(true) }
         if (!session.isBusy || replying) Act(Icons.Filled.ArrowUpward, if (replying) "排队" else "发送", MaterialTheme.colorScheme.primary, enabled = ready) { onSend(false) }
     }
+    // One place for both layouts: what is picked while the window turns still arrives.
+    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { if (it.isNotEmpty()) model.attach(session.id, it) }
+    val documents = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) model.attach(session.id, it) }
+    val attach: @Composable () -> Unit = {
+        Attach(onPhotos = { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, onFiles = { documents.launch(arrayOf("*/*")) })
+    }
     val field: @Composable (Modifier) -> Unit = { modifier ->
         BasicTextField(
             draft, onDraft,
@@ -372,6 +377,7 @@ private fun Composer(
                 for (file in files) PickedChip(file, onRetry = { model.retry(session.id, file.id) }, onRemove = { model.detach(session.id, file.id) })
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (compact) attach()
                 field(Modifier.weight(1f))
                 if (compact) {
                     if (wide) Meter(session)
@@ -379,7 +385,7 @@ private fun Composer(
                 }
             }
             if (!compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                Attach { model.attach(session.id, it) }
+                attach()
                 ModeChip(session, model)
                 Box(Modifier.weight(1f)) { ModelChip(session, model) }
                 Meter(session, label = !narrow)
@@ -392,21 +398,13 @@ private fun Composer(
 
 /** Photos come from the system's picker, which needs no permission; anything else from its file browser. */
 @Composable
-private fun Attach(onPicked: (List<Uri>) -> Unit) {
+private fun Attach(onPhotos: () -> Unit, onFiles: () -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { if (it.isNotEmpty()) onPicked(it) }
-    val documents = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) onPicked(it) }
     Box {
         IconButton(onClick = { open = true }, Modifier.size(32.dp)) { Icon(Icons.Filled.Add, "附件", Modifier.size(20.dp), tint = palette.muted) }
         DropdownMenu(open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text("照片") }, leadingIcon = { Icon(Icons.Filled.Image, null) },
-                onClick = { open = false; photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            )
-            DropdownMenuItem(
-                text = { Text("文件") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null) },
-                onClick = { open = false; documents.launch(arrayOf("*/*")) },
-            )
+            DropdownMenuItem(text = { Text("照片") }, leadingIcon = { Icon(Icons.Filled.Image, null) }, onClick = { open = false; onPhotos() })
+            DropdownMenuItem(text = { Text("文件") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null) }, onClick = { open = false; onFiles() })
         }
     }
 }
