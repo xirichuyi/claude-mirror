@@ -70,15 +70,11 @@ class AppModel(private val application: Application) {
     private val recovering = MutableStateFlow(emptySet<String>())
 
     /**
-     * Conversations being followed: a reply is running, or a queued message is about to start
-     * one, on a server that is connected or about to be again. While there are any, the app stays
-     * connected out of sight.
+     * Replies being followed: those of servers that are connected or about to be again. While
+     * there are any, the app stays connected out of sight.
      */
     val running: StateFlow<List<ChatSession>> = combine(sessions, connections, recovering) { all, states, again ->
-        all.filter { session ->
-            (session.remoteTask != null || session.queue.isNotEmpty() && !session.queuePaused) &&
-                (session.hostId in again || states[session.hostId].let { it is ConnectionState.Connected || it is ConnectionState.Connecting })
-        }
+        all.filter { it.remoteTask != null && (it.hostId in again || states[it.hostId].let { state -> state is ConnectionState.Connected || state is ConnectionState.Connecting }) }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
@@ -109,8 +105,8 @@ class AppModel(private val application: Application) {
             // Only who is running matters here, not every word of a reply as it arrives.
             running.map { all -> all.map { it.name } }.distinctUntilChanged().collectLatest { names ->
                 if (names.isEmpty()) {
-                    // A moment between two replies is not the end: once stopped out of sight,
-                    // Android does not let the service start again.
+                    // The moment between a reply and the queued message that follows it is not the
+                    // end: once stopped out of sight, Android does not let the service start again.
                     delay(3_000)
                     if (kept) KeepAlive.stop(application)
                 } else if (kept) notices.update(running.value) else KeepAlive.start(application)

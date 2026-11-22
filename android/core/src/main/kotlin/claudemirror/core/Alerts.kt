@@ -10,6 +10,9 @@ sealed interface Alert {
     data class Failed(override val session: ChatSession, val reason: String) : Alert
 }
 
+/** Whether a queued message starts by itself once the reply before it has ended. */
+val ChatSession.queueFollows: Boolean get() = queue.isNotEmpty() && !queuePaused && !queueHeld
+
 /**
  * What happened between two states of the conversations. A reply the user stopped is not news to
  * them, and neither is one that the next queued message follows.
@@ -22,7 +25,7 @@ fun alerts(before: List<ChatSession>, after: List<ChatSession>): List<Alert> {
         if (was == null || was === now) return@flatMap emptyList()
         val known = was.permissions.mapTo(HashSet()) { it.id }
         val asked = now.permissions.filter { it.id !in known }.map { Alert.Asked(now, it) }
-        val ended = was.remoteTask != null && now.remoteTask == null && was.status != "stopping" && (now.queue.isEmpty() || now.queuePaused)
+        val ended = was.remoteTask != null && now.remoteTask == null && was.status != "stopping" && !now.queueFollows
         val reply = now.messages.lastOrNull { it.role == "assistant" }
         asked + when {
             !ended -> emptyList()

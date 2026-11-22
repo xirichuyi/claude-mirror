@@ -29,6 +29,7 @@ class AlertsTest {
         assertTrue(alerts(listOf(session("working", true)), listOf(queued)).isEmpty())
         // A queue that waits for the user does not follow by itself.
         assertEquals(1, alerts(listOf(session("working", true)), listOf(queued.copy(queuePaused = true))).size)
+        assertEquals(1, alerts(listOf(session("working", true)), listOf(queued.copy(queueHeld = true))).size)
     }
 
     @Test fun `a request is told once`() {
