@@ -158,9 +158,11 @@ class Engine(
         update(id) { current ->
             if (current.historyBefore != before) return@update current
             val shown = current.messages.mapTo(HashSet()) { it.id }
+            val called = page.messages.flatMapTo(HashSet()) { message -> message.blocks.orEmpty().filter { it.type == "tool" }.map { it.id } }
             current.copy(
                 messages = page.messages.answered(current.historyLoose).filter { it.id !in shown } + current.messages,
-                historyBefore = reply["before"].string(), historyLoose = page.loose,
+                // A result whose call is further back still is kept for the page that has it.
+                historyBefore = reply["before"].string(), historyLoose = page.loose + current.historyLoose.filter { it.id !in called },
             )
         }
     }
@@ -216,8 +218,13 @@ class Engine(
             // The worker kept alive for this conversation remembers only what was said here. While
             // nothing else was said it stays; once something was, the next prompt needs a worker
             // that reads the transcript again.
-            val here = said.flatMap { message -> if (message.role == "user") listOf(message.text) else message.blocks.orEmpty().filter { it.type == "user" }.map { it.text } }
-            if (news.none { it.role == "user" && it.text !in here }) return
+            // Counted, not looked up: the same words typed elsewhere are one prompt more than was said here.
+            val here = HashMap<String?, Int>()
+            for (message in said) {
+                if (message.role == "user") here.merge(message.text, 1, Int::plus)
+                else for (block in message.blocks.orEmpty()) if (block.type == "user") here.merge(block.text, 1, Int::plus)
+            }
+            if (news.none { it.role == "user" && here.merge(it.text, -1, Int::plus)!! < 0 }) return
             // Let go of the worker before telling it to close: a prompt sent in the meantime
             // starts a new worker instead of reaching one that is on its way out.
             val free = session(id)?.let { it.remoteTask == null && it.messages == original.messages && it.remoteOwner?.id == owner.id } == true

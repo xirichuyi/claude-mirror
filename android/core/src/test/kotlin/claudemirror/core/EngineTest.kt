@@ -519,6 +519,45 @@ class EngineTest {
         assertEquals("s1", agent.starts().last()["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"].string())
     }
 
+    @Test fun `the same words said elsewhere are one prompt more than was said here`() = engineTest {
+        var transcript = listOf(record("m1", "user", "first"), record("m2", "assistant", "one"))
+        agent.onHistory = { json("""{"records":[${transcript.joinToString(",")}],"directory":"/srv/app","before":null}""") }
+        val session = engine.adopt(testHost, RemoteConversation("p/s1.jsonl", "s1", "/srv/app", "first"))
+        engine.send(session.id, "go on")
+        val task = current(session.id).remoteTask!!
+        until("the worker is followed") { agent.follows(task.id) }
+        agent.emit(task.id, state(task, 1, "idle", "two", ""","resident":true"""))
+        until("the reply ends") { current(session.id).remoteTask == null }
+
+        transcript = transcript + record("m3", "user", "go on") + record("m4", "assistant", "two")
+        engine.refresh(session.id)
+        assertTrue(agent.commands("close").isEmpty())
+
+        transcript = transcript + record("m5", "user", "go on") + record("m6", "assistant", "three")
+        engine.refresh(session.id)
+        until("the worker is let go") { agent.commands("close").isNotEmpty() }
+        assertNull(current(session.id).remoteOwner)
+        assertEquals("m6", current(session.id).messages.last().id)
+    }
+
+    @Test fun `a tool result waits for its call however many pages back it is`() = engineTest {
+        val call = """{"type":"assistant","uuid":"m1","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"""
+        val result = """{"type":"user","uuid":"m5","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"listing"}]}}"""
+        agent.onHistory = { request ->
+            when (request["before"].string()) {
+                "m3" -> json("""{"records":[$call,${record("m2", "assistant", "one")}],"directory":"/srv/app","before":null}""")
+                "m5" -> json("""{"records":[${record("m3", "user", "second")},${record("m4", "assistant", "two")}],"directory":"/srv/app","before":"m3"}""")
+                else -> json("""{"records":[$result,${record("m6", "assistant", "three")}],"directory":"/srv/app","before":"m5"}""")
+            }
+        }
+        val session = engine.adopt(testHost, RemoteConversation("p/s1.jsonl", "s1", "/srv/app", "first"))
+        engine.loadEarlier(session.id)
+        engine.loadEarlier(session.id)
+        val tool = current(session.id).messages.first { it.id == "m1" }.blocks!!.single { it.type == "tool" }
+        assertEquals("listing", tool.output)
+        assertTrue(current(session.id).historyLoose.isEmpty())
+    }
+
     @Test fun `a prompt sent while the transcript is being read keeps its worker`() = engineTest {
         var transcript = listOf(record("m1", "user", "first"), record("m2", "assistant", "one"))
         var sendFirst: (() -> Unit)? = null
