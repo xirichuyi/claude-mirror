@@ -148,8 +148,12 @@ function shrinkPNG(source: Buffer, edge: number) {
   const width = header.readUInt32BE(0), height = header.readUInt32BE(4), kind = header[9];
   const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[kind];
   if (header[8] !== 8 || header[12] !== 0 || !channels || !width || !height || width * height > 40000000) throw new Error('unsupported PNG');
-  const stride = width * channels, raw = zlib.inflateSync(Buffer.concat(parts));
+  // The size the header declares is all the pixel data may inflate to, whatever the stream holds.
+  const stride = width * channels, raw = zlib.inflateSync(Buffer.concat(parts), { maxOutputLength: (stride + 1) * height });
   if (raw.length < (stride + 1) * height) throw new Error('truncated PNG');
+  // Without an alpha channel, one colour named in tRNS is the transparent one.
+  const clearGrey = kind === 0 && alpha?.length >= 2 ? alpha.readUInt16BE(0) : -1;
+  const clearColour = kind === 2 && alpha?.length >= 6 ? [alpha.readUInt16BE(0), alpha.readUInt16BE(2), alpha.readUInt16BE(4)] : null;
   const scale = Math.max(1, Math.max(width, height) / edge);
   const columns = Math.max(1, Math.round(width / scale)), rows = Math.max(1, Math.round(height / scale));
   const column = Uint32Array.from({ length: width }, (_, x) => Math.min(columns - 1, Math.floor(x * columns / width)) * 3);
@@ -169,8 +173,11 @@ function shrinkPNG(source: Buffer, edge: number) {
       const i = x * channels;
       let r, g, b, a = 255;
       if (kind === 3) { const index = current[i]; r = palette[index * 3]; g = palette[index * 3 + 1]; b = palette[index * 3 + 2]; a = alpha && index < alpha.length ? alpha[index] : 255; }
-      else if (kind === 0 || kind === 4) { r = g = b = current[i]; if (kind === 4) a = current[i + 1]; }
-      else { r = current[i]; g = current[i + 1]; b = current[i + 2]; if (kind === 6) a = current[i + 3]; }
+      else if (kind === 0 || kind === 4) { r = g = b = current[i]; if (kind === 4) a = current[i + 1]; else if (r === clearGrey) a = 0; }
+      else {
+        r = current[i]; g = current[i + 1]; b = current[i + 2];
+        if (kind === 6) a = current[i + 3]; else if (clearColour && r === clearColour[0] && g === clearColour[1] && b === clearColour[2]) a = 0;
+      }
       const target = row * 3 + column[x], clear = 255 - a;
       sums[target] += (r * a + 250 * clear) / 255; sums[target + 1] += (g * a + 246 * clear) / 255; sums[target + 2] += (b * a + 242 * clear) / 255;
       counts[row + column[x] / 3]++;
