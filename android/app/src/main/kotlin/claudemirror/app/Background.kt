@@ -1,5 +1,6 @@
 package claudemirror.app
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -87,8 +88,10 @@ class Notices(private val context: Context) {
                 val plain = request.kind != "elicitation" && request.name != "ExitPlanMode" && (input?.get("questions") as? JsonArray).isNullOrEmpty()
                 if (plain) {
                     builder.addAction(0, "拒绝", answer(session.id, request.id, false))
-                    // Allowing a command takes the person who can unlock the phone.
-                    builder.addAction(NotificationCompat.Action.Builder(0, "允许", answer(session.id, request.id, true)).setAuthenticationRequired(true).build())
+                    // Allowing a command takes the person who can unlock the phone. Before Android 12
+                    // a notification cannot ask for that, so there it is allowed in the app.
+                    val allow = if (Build.VERSION.SDK_INT >= 31) answer(session.id, request.id, true) else open(session.id)
+                    builder.addAction(NotificationCompat.Action.Builder(0, "允许", allow).setAuthenticationRequired(true).build())
                 }
             }
         }
@@ -155,6 +158,7 @@ class Answer : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val model = (context.applicationContext as MirrorApplication).model
         val allow = intent.getBooleanExtra(ALLOW, false)
+        if (allow && context.getSystemService(KeyguardManager::class.java).isDeviceLocked) return
         model.respond(intent.getStringExtra(SESSION) ?: return, intent.getStringExtra(PERMISSION) ?: return, buildJsonObject {
             put("allow", allow)
             if (allow) put("useSuggestedPermissions", false) else put("reason", "")
