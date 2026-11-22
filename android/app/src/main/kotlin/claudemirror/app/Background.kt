@@ -158,10 +158,14 @@ class Answer : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val model = (context.applicationContext as MirrorApplication).model
         val allow = intent.getBooleanExtra(ALLOW, false)
+        val session = intent.getStringExtra(SESSION) ?: return
+        val permission = intent.getStringExtra(PERMISSION) ?: return
         if (allow && context.getSystemService(KeyguardManager::class.java).isDeviceLocked) return
-        model.respond(intent.getStringExtra(SESSION) ?: return, intent.getStringExtra(PERMISSION) ?: return, buildJsonObject {
+        // The process is kept until the answer has been sent.
+        val pending = goAsync()
+        model.answer(session, permission, buildJsonObject {
             put("allow", allow)
             if (allow) put("useSuggestedPermissions", false) else put("reason", "")
-        })
+        }).invokeOnCompletion { pending.finish() }
     }
 }

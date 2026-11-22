@@ -21,6 +21,7 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -246,6 +247,16 @@ class AppModel(private val application: Application) {
     fun resumeQueue(id: String) = engine.resumeQueue(id)
     fun stop(id: String) = act { engine.stop(id) }
     fun respond(id: String, permission: String, answer: JsonObject) = act { engine.respond(id, permission, answer) }
+
+    /**
+     * An answer given from a notification. The connection may have been given up by then, and no
+     * screen is there to open it again, so the reply is joined first: its end is still to be told.
+     */
+    fun answer(id: String, permission: String, answer: JsonObject): Job = scope.launch {
+        val host = sessions.value.firstOrNull { it.id == id }?.let { host(it.hostId) } ?: return@launch
+        if (connections.value[host.id] !is ConnectionState.Connected && !open(host)) return@launch
+        try { engine.respond(id, permission, answer) } catch (error: CancellationException) { throw error } catch (_: Exception) {}
+    }
     fun configure(id: String, preferences: Preferences) = act { engine.configure(id, preferences) }
     val models = engine.models
     /** Whether the server's models are known after asking. A failure shows where they were asked for. */
