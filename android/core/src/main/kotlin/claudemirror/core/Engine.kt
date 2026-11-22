@@ -181,13 +181,14 @@ class Engine(
             // What was said here follows the transcript's last message and carries other IDs than
             // Claude gives it. Until the transcript has it, the transcript is behind and is not shown.
             val said = current.messages.drop(current.messages.indexOfLast { it.id == current.historyTail } + 1)
-            // A prompt whose reply failed before it began never reached Claude; it stays, at the end.
-            val unsent = said.filterIndexed { at, message ->
-                val next = said.getOrNull(at + 1)
-                val failed = next?.role == "assistant" && next.error != null && next.blocks.isNullOrEmpty()
-                (message.role == "user" && failed) || (message.role == "assistant" && message.error != null && message.blocks.isNullOrEmpty() && said.getOrNull(at - 1)?.role == "user")
-            }
             val prompts = incoming.filter { it.role == "user" }.mapTo(HashSet()) { it.text }
+            fun ChatMessage.failed() = role == "assistant" && error != null && blocks.isNullOrEmpty()
+            // A prompt whose reply failed before it began, and that the transcript does not have,
+            // never reached Claude: it is not waited for, and it stays, at the end.
+            val unsent = said.filterIndexed { at, message ->
+                val prompt = if (message.failed()) said.getOrNull(at - 1) else message.takeIf { said.getOrNull(at + 1)?.failed() == true }
+                prompt?.role == "user" && prompt.text !in prompts
+            }
             if (said.any { it.role == "user" && it !in unsent && it.text !in prompts }) return@update current
             val shown = current.messages.mapTo(HashSet()) { it.id }
             val first = incoming.indexOfFirst { it.id in shown }

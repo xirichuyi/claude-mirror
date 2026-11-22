@@ -465,6 +465,11 @@ class EngineTest {
             assertEquals(listOf("m1", "m2", "m3", "l1", "l2"), current("c1").messages.map { it.id })
             engine.refresh("c1")
             assertEquals(listOf("m1", "m2", "m3", "l1", "l2"), current("c1").messages.map { it.id })
+
+            // It did arrive after all: the transcript's own record of it is the one shown.
+            agent.onHistory = { json("""{"records":[${record("m1", "user", "first")},${record("m2", "assistant", "one")},${record("m3", "user", "elsewhere")},${record("m4", "user", "lost on the way")},${record("m5", "assistant", "got it")}],"directory":"/srv/app","before":null}""") }
+            engine.refresh("c1")
+            assertEquals(listOf("m1", "m2", "m3", "m4", "m5"), current("c1").messages.map { it.id })
         }
     }
 
