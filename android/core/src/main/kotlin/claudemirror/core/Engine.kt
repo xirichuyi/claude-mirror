@@ -475,6 +475,8 @@ class Engine(
      */
     fun endpointChanged(host: String) {
         installs.remove(host)
+        // What the old machine offered says nothing about the new one.
+        catalogue.value = catalogue.value - host
         for (session in state.value.filter { it.hostId == host }) {
             watchers.remove(session.id)?.kill()
             val reply = session.remoteTask?.messageId

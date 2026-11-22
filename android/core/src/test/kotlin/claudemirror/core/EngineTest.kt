@@ -363,4 +363,17 @@ class EngineTest {
         assertEquals("new machine", agent.starts()[1]["request"]!!.jsonObject["prompt"].string())
         assertNull(agent.starts()[1]["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"])
     }
+
+    @Test fun `a server entry pointed elsewhere asks the new machine for its models`() = engineTest {
+        val session = engine.create(testHost)
+        agent.inspection = json("""{"models":[{"value":"opus"}]}""")
+        engine.loadModels(session.id)
+        assertEquals(listOf("opus"), engine.models.value[testHost.id]?.map { it.value })
+
+        engine.endpointChanged(testHost.id)
+        assertNull(engine.models.value[testHost.id])
+        agent.inspection = json("""{"models":[{"value":"sonnet"}]}""")
+        engine.loadModels(session.id)
+        assertEquals(listOf("sonnet"), engine.models.value[testHost.id]?.map { it.value })
+    }
 }

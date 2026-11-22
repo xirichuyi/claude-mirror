@@ -43,6 +43,7 @@ class FakeAgent : Launcher {
     /** Answers a task command; the default accepts it. */
     @Volatile var onCommand: (JsonObject) -> JsonObject = { json("""{"ok":true}""") }
     @Volatile var status: JsonObject = json("""{"done":false}""")
+    @Volatile var inspection: JsonObject = json("{}")
     @Volatile var launches = 0
     @Volatile var installedDelay = 0L
     private val subscriptions = HashMap<String, String>()
@@ -101,6 +102,7 @@ class FakeAgent : Launcher {
                         json("""{"installed":true}""")
                     }
                     "status" -> status
+                    "inspect" -> inspection
                     "command" -> onCommand(params)
                     else -> json("{}")
                 }
