@@ -56,6 +56,7 @@ import claudemirror.core.ToolKind
 import claudemirror.core.diffLines
 import claudemirror.core.replacements
 import claudemirror.core.todos
+import claudemirror.core.readableError
 import claudemirror.core.toolLook
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
@@ -100,7 +101,7 @@ fun BlockView(block: Block) {
         "text" -> if (!block.text.isNullOrBlank()) Prose(block.text!!)
         "thinking" -> Thinking(block)
         "tool" -> ToolRow(block)
-        "notice" -> Notice(block.text.orEmpty(), error = block.level == "error")
+        "notice" -> readableError(block.text)?.let { Notice(it, error = block.level == "error") }
         // A message the user inserted while this reply was being written.
         "user" -> UserBubble(
             block.text.orEmpty(),
@@ -254,7 +255,11 @@ fun ToolInput(name: String?, input: JsonElement?) {
         shown += listOf("file_path", "notebook_path", "path")
     }
     when (look.kind) {
-        ToolKind.Command -> input.text("command")?.let { CodeBox(it, "bash", title = "命令"); shown += "command" }
+        ToolKind.Command -> {
+            input.text("description")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted) }
+            input.text("command")?.let { CodeBox(it, "bash", title = "命令") }
+            shown += listOf("command", "description")
+        }
         ToolKind.Write -> {
             path()
             input.text("content")?.let { content -> DiffBox(remember(content) { diffLines("", content) }); shown += "content" }

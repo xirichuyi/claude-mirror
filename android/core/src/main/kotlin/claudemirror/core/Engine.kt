@@ -135,6 +135,7 @@ class Engine(
             put("operation", "inspect"); put("digest", agents.resources.bundleDigest); put("action", "catalogue")
             put("directory", session.directory); put("preferences", MirrorJson.encodeToJsonElement(session.preferences))
         }))
+        if (host.id !in catalogue.value) throw RemoteException("服务器没有返回模型")
     }
 
     // Sending and the queue
@@ -541,7 +542,10 @@ class Engine(
     suspend fun respond(id: String, permission: String, answer: JsonObject) {
         val session = require(id)
         if (session.permissions.none { it.id == permission }) throw RemoteException("该请求已结束")
+        val mode = suggestedMode(session.permissions.first { it.id == permission }.suggestions).takeIf { answer["useSuggestedPermissions"].truthy }
         command(session, "respond") { put("permissionId", permission); put("answer", answer) }
+        // The server has changed the mode with the rules it saved; the conversation's own setting follows.
+        if (mode != null) update(id) { it.copy(preferences = it.preferences.copy(permissionMode = mode.takeIf { name -> name != "default" })) }
     }
 
     private companion object {

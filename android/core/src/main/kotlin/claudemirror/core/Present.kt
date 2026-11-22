@@ -108,11 +108,11 @@ fun diffLines(old: String, new: String): List<DiffLine> {
 data class RuleLine(val action: String, val scope: String, val widens: Boolean)
 
 private val Scopes = mapOf(
-    "session" to "本次运行", "localSettings" to "此项目的本地设置", "projectSettings" to "此项目的共享设置",
-    "userSettings" to "服务器用户的所有项目", "cliArg" to "本次启动参数",
+    "session" to "本次", "localSettings" to "本项目", "projectSettings" to "本项目（共享）",
+    "userSettings" to "所有项目", "cliArg" to "本次",
 )
 val PermissionModeNames = mapOf(
-    "default" to "默认", "acceptEdits" to "自动接受编辑", "bypassPermissions" to "跳过所有确认", "plan" to "计划模式", "dontAsk" to "拒绝未授权操作",
+    "default" to "询问", "acceptEdits" to "自动编辑", "bypassPermissions" to "Full Access", "plan" to "计划", "dontAsk" to "不询问",
 )
 
 fun ruleLines(suggestions: JsonElement?): List<RuleLine> = (suggestions as? JsonArray).orEmpty().map { update ->
@@ -124,17 +124,21 @@ fun ruleLines(suggestions: JsonElement?): List<RuleLine> = (suggestions as? Json
     }
     val directories = (update.obj()?.get("directories") as? JsonArray).orEmpty().mapNotNull { it.string() }.joinToString("、")
     val behavior = update.field("behavior")
-    val verb = when (behavior) { "deny" -> "始终拒绝"; "ask" -> "始终询问"; else -> "自动允许" }
+    val verb = when (behavior) { "deny" -> "始终拒绝"; "ask" -> "始终询问"; else -> "始终允许" }
     when (update.field("type")) {
         "addRules" -> RuleLine("$verb $rules", scope, behavior == "allow")
         "replaceRules" -> RuleLine("改为$verb $rules", scope, behavior == "allow")
-        "removeRules" -> RuleLine("移除规则 $rules", scope, behavior == "deny" || behavior == "ask")
-        "setMode" -> update.field("mode").orEmpty().let { RuleLine("权限模式切换为「${PermissionModeNames[it] ?: it}」", scope, it == "acceptEdits" || it == "bypassPermissions") }
-        "addDirectories" -> RuleLine("允许访问目录 $directories", scope, true)
+        "removeRules" -> RuleLine("移除 $rules", scope, behavior == "deny" || behavior == "ask")
+        "setMode" -> update.field("mode").orEmpty().let { RuleLine("切到${PermissionModeNames[it] ?: it}", scope, it == "acceptEdits" || it == "bypassPermissions") }
+        "addDirectories" -> RuleLine("目录 $directories", scope, true)
         "removeDirectories" -> RuleLine("移除目录 $directories", scope, false)
         else -> RuleLine(update.toString(), scope, true)
     }
 }
+
+/** The permission mode the server's suggestions switch the conversation to, if they do. */
+fun suggestedMode(suggestions: JsonElement?): String? =
+    (suggestions as? JsonArray).orEmpty().lastOrNull { it.field("type") == "setMode" }?.field("mode")
 
 /** An error as the user should read it: Claude Code's internal diagnostic lines are left out. */
 fun readableError(text: String?): String? =

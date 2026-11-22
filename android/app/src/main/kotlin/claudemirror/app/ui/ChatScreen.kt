@@ -72,7 +72,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import claudemirror.core.readableError
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.input.key.onPreInterceptKeyBeforeSoftKeyboard
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -129,6 +135,8 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
             // What is left of a phone on its side, or under its keyboard: the composer takes one line.
             val compact = maxHeight < 320.dp
             val wide = maxWidth >= 600.dp
+            // Larger type needs the room a wider window has.
+            val narrow = maxWidth < 380.dp * LocalDensity.current.fontScale
             val queueRoom = minOf(maxHeight / 4, 144.dp)
             Column(Modifier.fillMaxSize()) {
                 if (session.status == "detached" || session.transportError != null) {
@@ -136,7 +144,8 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
                     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                session.transportError ?: (connections[session.hostId] as? ConnectionState.Failed)?.error?.message ?: "连接已断开",
+                                // Why a connection could not be made is worth reading; how an open one broke is not.
+                                (connections[session.hostId] as? ConnectionState.Failed)?.error?.message ?: "已断开",
                                 Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall,
                             )
                             if (host != null) TextButton(onClick = { model.reconnect(host) }) { Text("重连") }
@@ -145,12 +154,12 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
                 }
                 // The composer keeps its place below, however short the window and however much waits above it.
                 Column(Modifier.weight(1f)) {
-                    Transcript(session, Modifier.weight(1f)) { permission, answer -> model.respond(sessionId, permission, answer) }
+                    Transcript(session, compact, Modifier.weight(1f)) { permission, answer -> model.respond(sessionId, permission, answer) }
                     // Editing a queued message must not throw away what is already being written.
                     Queue(session, model, queueRoom, onEdit = { item -> draft = if (draft.isBlank()) item else draft.trimEnd() + "\n" + item })
                 }
                 Composer(
-                    session, model, draft, compact, wide, onDraft = { draft = it },
+                    session, model, draft, compact, wide, narrow, onDraft = { draft = it },
                     onSend = { steer -> if (model.submit(sessionId, draft, steer)) draft = "" },
                     onStop = { model.stop(sessionId) },
                 )
@@ -160,7 +169,7 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
 }
 
 @Composable
-private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (permission: String, JsonObject) -> Unit) {
+private fun Transcript(session: ChatSession, compact: Boolean, modifier: Modifier, onAnswer: (permission: String, JsonObject) -> Unit) {
     val list = rememberLazyListState()
     // One row per block, so a long reply only redraws the part that is still being written.
     val rows = remember(session.messages) {
@@ -205,8 +214,12 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
     }
     // A request Claude is waiting on is brought into view, wherever the reader was, and stays there.
     val asked = session.permissions.firstOrNull()?.id
-    LaunchedEffect(asked) {
-        if (asked != null) { following = true; list.scrollToItem(rows.size) }
+    LaunchedEffect(asked, compact) {
+        if (asked == null) return@LaunchedEffect
+        following = true
+        list.scrollToItem(rows.size)
+        // With little room, the answer buttons at the end are what must not be out of reach.
+        if (compact) list.scrollToItem(rows.size + session.permissions.size, Int.MAX_VALUE / 2)
     }
     LazyColumn(modifier.fillMaxWidth().nestedScroll(reader), state = list) {
         items(rows.size, key = { rows[it].first }) { index ->
@@ -214,7 +227,7 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
             when (part) {
                 -1 -> UserBubble(message.text.orEmpty())
                 -2 -> Column(Modifier.padding(horizontal = 16.dp)) {
-                    message.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    readableError(message.error)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     if (message.interrupted == true) Text("已停止", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 }
                 else -> BlockView(message.blocks!![part])
@@ -271,9 +284,10 @@ private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (Stri
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun Composer(
-    session: ChatSession, model: AppModel, draft: String, compact: Boolean, wide: Boolean,
+    session: ChatSession, model: AppModel, draft: String, compact: Boolean, wide: Boolean, narrow: Boolean,
     onDraft: (String) -> Unit, onSend: (steer: Boolean) -> Unit, onStop: () -> Unit,
 ) {
     val replying = session.remoteTask != null
@@ -286,7 +300,10 @@ private fun Composer(
     val field: @Composable (Modifier) -> Unit = { modifier ->
         BasicTextField(
             draft, onDraft,
-            modifier.onPreviewKeyEvent { event ->
+            // Before the on-screen keyboard takes Esc to close itself.
+            modifier.onPreInterceptKeyBeforeSoftKeyboard { event ->
+                (event.type == KeyEventType.KeyDown && event.key == Key.Escape && session.isBusy).also { if (it) onStop() }
+            }.onPreviewKeyEvent { event ->
                 // Hardware keyboards only; on-screen keyboards insert the newline themselves.
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when {
@@ -321,9 +338,8 @@ private fun Composer(
             }
             if (!compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 ModeChip(session, model)
-                ModelChip(session, model, Modifier.weight(1f, fill = false))
-                Spacer(Modifier.weight(1f))
-                Meter(session)
+                Box(Modifier.weight(1f)) { ModelChip(session, model) }
+                Meter(session, label = !narrow)
                 Spacer(Modifier.width(4.dp))
                 actions()
             }
@@ -341,7 +357,7 @@ private fun Act(icon: ImageVector, label: String, fill: Color, tint: Color = Mat
 
 /** How full Claude's context window is, as last reported by the server. */
 @Composable
-private fun Meter(session: ChatSession) {
+private fun Meter(session: ChatSession, label: Boolean = true) {
     val context = session.context ?: return
     val tint = if (context.fraction >= 0.9f) palette.error else if (context.fraction >= 0.75f) palette.warning else palette.muted
     val track = palette.line
@@ -354,7 +370,7 @@ private fun Meter(session: ChatSession) {
             drawArc(track, 0f, 360f, false, style = stroke)
             drawArc(tint, -90f, 360f * context.fraction, false, style = stroke)
         }
-        Text(context.label, style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1)
+        if (label) Text(context.label, style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1)
     }
 }
 
@@ -388,7 +404,7 @@ private fun ModeChip(session: ChatSession, model: AppModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ModelChip(session: ChatSession, model: AppModel, modifier: Modifier) {
+private fun ModelChip(session: ChatSession, model: AppModel) {
     var open by remember { mutableStateOf(false) }
     val offered by model.models.collectAsStateWithLifecycle()
     val models = offered[session.hostId].orEmpty()
@@ -396,12 +412,17 @@ private fun ModelChip(session: ChatSession, model: AppModel, modifier: Modifier)
     val current = models.firstOrNull { it.value == chosen }
     val effort = session.preferences.effort
     val name = current?.displayName ?: chosen ?: session.model ?: "模型"
-    Chip(if (effort != null && Efforts[effort] != null) "$name · ${Efforts[effort]}" else name, modifier) { open = true; model.loadModels(session.id) }
+    Chip(if (effort != null && Efforts[effort] != null) "$name · ${Efforts[effort]}" else name) { open = true }
     if (!open) return
+    var attempt by remember { mutableIntStateOf(0) }
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(attempt) { failed = false; failed = !model.fetchModels(session.id) }
     val idle = session.remoteTask == null
     ModalBottomSheet(onDismissRequest = { open = false }, containerColor = palette.popup) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
-            if (models.isEmpty()) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) }
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
+            if (models.isEmpty()) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                if (failed) TextButton(onClick = { attempt++ }) { Text("重试") } else CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+            }
             for (item in models) {
                 val selected = item.value == chosen || (chosen == null && item.value == "default")
                 Row(

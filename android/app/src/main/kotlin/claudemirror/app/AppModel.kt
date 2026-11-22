@@ -153,5 +153,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     fun respond(id: String, permission: String, answer: JsonObject) = act { engine.respond(id, permission, answer) }
     fun configure(id: String, preferences: Preferences) = act { engine.configure(id, preferences) }
     val models = engine.models
-    fun loadModels(id: String) = act { engine.loadModels(id) }
+    /** Whether the server's models are known after asking. A failure shows where they were asked for. */
+    suspend fun fetchModels(id: String): Boolean =
+        try { engine.loadModels(id); true } catch (error: CancellationException) { throw error } catch (error: Exception) { false }
 }

@@ -70,7 +70,8 @@ private fun Actions(refuse: String, accept: String?, enabled: Boolean = true, on
 @Composable
 private fun Approval(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit) {
     Text(permissionHeadline(permission.name, permission.input), style = MaterialTheme.typography.titleSmall, color = palette.text)
-    permissionDetail(permission.title, permission.description)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted) }
+    // A command's own description is shown with the command below.
+    permissionDetail(permission.title, permission.description)?.takeIf { it != (permission.input as? JsonObject)?.text("description") }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted) }
     // In full: allowing covers the whole request, so none of it may be left out or cut off.
     ToolInput(permission.name, permission.input)
     val rules = remember(permission.suggestions) { ruleLines(permission.suggestions) }
@@ -82,8 +83,7 @@ private fun Approval(permission: PermissionRequest, onAnswer: (JsonObject) -> Un
         Checkbox(keep, null, Modifier.size(20.dp))
         Column {
             for (rule in rules) {
-                Text(rule.action, style = MaterialTheme.typography.bodySmall, color = if (rule.widens) palette.warning else palette.text)
-                Text(rule.scope, style = MaterialTheme.typography.labelSmall, color = palette.dim)
+                Text(rule.action + " · " + rule.scope, style = MaterialTheme.typography.bodySmall, color = if (rule.widens) palette.warning else palette.text)
             }
         }
     }

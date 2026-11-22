@@ -37,7 +37,9 @@ class PresentTest {
 
     @Test fun `suggested rules are put in words`() {
         val lines = ruleLines(json("""[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"npm test:*"}],"behavior":"allow","destination":"localSettings"},{"type":"setMode","mode":"plan","destination":"session"}]"""))
-        assertEquals(listOf(RuleLine("自动允许 Bash(npm test:*)", "此项目的本地设置", true), RuleLine("权限模式切换为「计划模式」", "本次运行", false)), lines)
+        assertEquals(listOf(RuleLine("始终允许 Bash(npm test:*)", "本项目", true), RuleLine("切到计划", "本次", false)), lines)
+        assertEquals("plan", suggestedMode(json("""[{"type":"addRules","rules":[]},{"type":"setMode","mode":"plan","destination":"session"}]""")))
+        assertNull(suggestedMode(json("""[{"type":"addDirectories","directories":["/srv"]}]""")))
         assertEquals(emptyList<RuleLine>(), ruleLines(null))
     }
 
