@@ -60,7 +60,7 @@ private sealed interface Loaded<out T> {
 }
 
 private suspend fun <T> load(ask: suspend () -> T): Loaded<T> =
-    try { Loaded.Ready(ask()) } catch (error: CancellationException) { throw error } catch (error: Exception) { Loaded.Failed(error.message ?: "加载失败") }
+    try { Loaded.Ready(ask()) } catch (error: CancellationException) { throw error } catch (error: Exception) { Loaded.Failed(if ("EACCES" in error.message.orEmpty()) "无权读取" else error.message ?: "加载失败") }
 
 @Composable
 private fun <T> Loading(state: Loaded<T>, modifier: Modifier, onRetry: () -> Unit, content: @Composable (T) -> Unit) {
@@ -136,7 +136,7 @@ fun HistoryScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState, 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("服务器上的对话") },
+                title = { Text("服务器对话") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
             )
         },

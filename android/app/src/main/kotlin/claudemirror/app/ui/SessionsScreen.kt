@@ -100,7 +100,7 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = {
                     val connected = state is ConnectionState.Connected
-                    IconButton(onClick = onHistory, enabled = connected) { Icon(Icons.Filled.History, "服务器上的对话") }
+                    IconButton(onClick = onHistory, enabled = connected) { Icon(Icons.Filled.History, "服务器对话") }
                     IconButton(onClick = { picking = true }, enabled = connected) { Icon(Icons.Filled.CreateNewFolder, "添加项目") }
                     IconButton(onClick = { model.reconnect(host) }) { Icon(Icons.Filled.Refresh, "重新连接") }
                 },
@@ -178,7 +178,7 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("删除对话") },
-            text = { Text("只从手机上删除，服务器上的记录保留。") },
+            text = { Text("仅从手机删除") },
             confirmButton = { TextButton(onClick = { model.removeSession(session.id); deleting = null }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
         )
