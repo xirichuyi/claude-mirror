@@ -192,7 +192,9 @@ class Engine(
         // What was said here follows the transcript's last message and carries other IDs than
         // Claude gives it. Until the transcript has it, the transcript is behind and is not shown.
         val said = original.messages.drop(original.messages.indexOfLast { it.id == original.historyTail } + 1)
-        val prompts = incoming.filter { it.role == "user" }.mapTo(HashSet()) { it.text }
+        // Only what the transcript gained since counts: an older prompt with the same words proves nothing.
+        val news = incoming.drop(incoming.indexOfLast { it.id == original.historyTail } + 1)
+        val prompts = news.filter { it.role == "user" }.mapTo(HashSet()) { it.text }
         fun ChatMessage.failed() = role == "assistant" && error != null && blocks.isNullOrEmpty()
         // A prompt whose reply failed before it began, and that the transcript does not have,
         // never reached Claude: it is not waited for, and it stays, at the end.
@@ -213,7 +215,6 @@ class Engine(
             // nothing else was said it stays; once something was, the next prompt needs a worker
             // that reads the transcript again.
             val here = said.flatMap { message -> if (message.role == "user") listOf(message.text) else message.blocks.orEmpty().filter { it.type == "user" }.map { it.text } }
-            val news = incoming.drop(incoming.indexOfLast { it.id == original.historyTail } + 1)
             if (news.none { it.role == "user" && it.text !in here }) return
             // Let go of the worker before telling it to close: a prompt sent in the meantime
             // starts a new worker instead of reaching one that is on its way out.

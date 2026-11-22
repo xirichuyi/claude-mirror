@@ -523,6 +523,11 @@ class EngineTest {
             ),
         )
         engineTest(store = MemoryStore(listOf(adopted))) {
+            // The same words said before, in the transcript, do not show that this prompt arrived.
+            agent.onHistory = { json("""{"records":[${record("m0", "user", "lost on the way")},${record("m1", "user", "first")},${record("m2", "assistant", "one")}],"directory":"/srv/app","before":null}""") }
+            engine.refresh("c1")
+            assertEquals(listOf("m1", "m2", "l1", "l2"), current("c1").messages.map { it.id })
+
             agent.onHistory = { json("""{"records":[${record("m1", "user", "first")},${record("m2", "assistant", "one")},${record("m3", "user", "elsewhere")}],"directory":"/srv/app","before":null}""") }
             engine.refresh("c1")
             assertEquals(listOf("m1", "m2", "m3", "l1", "l2"), current("c1").messages.map { it.id })
