@@ -37,6 +37,8 @@ data class HostConfig(
     val host: String,
     val port: Int = 22,
     val directory: String,
+    /** Other project directories on this server, besides [directory]. */
+    val projects: List<String> = emptyList(),
     val auth: AuthMethod = AuthMethod.Password,
     /** Fingerprint accepted on the first connection. A server presenting another key is refused. */
     val hostKey: String? = null,
@@ -186,6 +188,10 @@ data class ChatSession(
     val queuePaused: Boolean = false,
     /** The queue was written for another machine; only the user's explicit go-ahead sends it. */
     val queueHeld: Boolean = false,
+    /** Claude Code's own transcript on the server, for a conversation that was not started here. */
+    val historyRef: String? = null,
+    /** Where the earlier part of that transcript continues, when there is more. */
+    val historyBefore: String? = null,
 ) {
     val isBusy: Boolean get() = status in BUSY
 

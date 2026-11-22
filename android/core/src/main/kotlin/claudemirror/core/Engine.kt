@@ -18,6 +18,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
@@ -89,11 +90,106 @@ class Engine(
 
     // Conversations
 
-    fun create(host: HostConfig): ChatSession {
-        val session = ChatSession(id = newId(), hostId = host.id, directory = host.directory, createdAt = now(), updatedAt = now())
+    fun create(host: HostConfig, directory: String = host.directory): ChatSession =
+        added(ChatSession(id = newId(), hostId = host.id, directory = directory, createdAt = now(), updatedAt = now()))
+
+    private fun added(session: ChatSession): ChatSession {
         state.value = listOf(session) + state.value
         update(session.id) { it }
         return session
+    }
+
+    fun rename(id: String, name: String) {
+        val value = name.trim().take(80)
+        if (value.isNotEmpty()) update(id) { it.copy(name = value) }
+    }
+
+    // What is already on the server
+
+    /** The folders inside [path] on the server. */
+    suspend fun folders(host: HostConfig, path: String): RemoteListing {
+        val result = agents.call(host, "file", buildJsonObject { put("operation", "list"); put("path", path) })
+        val listing = MirrorJson.decodeFromJsonElement<RemoteListing>(result)
+        return listing.copy(entries = listing.entries.filter { it.directory })
+    }
+
+    /** The conversations Claude Code keeps on the server, newest first. */
+    suspend fun history(host: HostConfig): List<RemoteConversation> {
+        val found = ArrayList<RemoteConversation>()
+        var offset: JsonElement = JsonPrimitive(0)
+        // 200 a page; beyond a couple of thousand nobody scrolls on a phone.
+        repeat(10) {
+            val page = agents.call(host, "history", buildJsonObject { put("operation", "list"); put("offset", offset) }).obj() ?: return found
+            page.list("sessions").mapNotNullTo(found) { runCatching { MirrorJson.decodeFromJsonElement<RemoteConversation>(it) }.getOrNull() }
+            offset = page["nextOffset"]?.takeIf { it.string() != null } ?: return found
+        }
+        return found
+    }
+
+    private suspend fun transcript(host: HostConfig, reference: String, before: String? = null): JsonObject =
+        agents.call(host, "history", buildJsonObject {
+            put("operation", "messages"); put("reference", reference)
+            if (before != null) put("before", before)
+        }).obj() ?: throw RemoteException("服务器没有返回对话")
+
+    /** Opens a conversation from the server here, so it can be continued from the phone. */
+    suspend fun adopt(host: HostConfig, item: RemoteConversation): ChatSession {
+        fun known() = state.value.firstOrNull { it.hostId == host.id && it.remoteSessionId == item.sessionId }
+        known()?.let { return it }
+        val page = transcript(host, item.reference)
+        val directory = page["directory"].string()?.takeIf { it.startsWith("/") } ?: throw RemoteException("这个对话没有记录工作目录")
+        known()?.let { return it }
+        val time = if (item.updatedAt > 0) item.updatedAt.toLong() else now()
+        return added(ChatSession(
+            id = newId(), hostId = host.id, name = historyTitle(item.name), directory = directory, createdAt = time, updatedAt = time,
+            messages = historyMessages(page.list("records")), remoteSessionId = item.sessionId,
+            historyRef = item.reference, historyBefore = page["before"].string(),
+        ))
+    }
+
+    /** Loads the part of an adopted conversation that comes before what is shown. */
+    suspend fun loadEarlier(id: String) {
+        val session = require(id)
+        val reference = session.historyRef ?: return
+        val before = session.historyBefore ?: return
+        val page = transcript(hostOf(session), reference, before)
+        update(id) { current ->
+            if (current.historyBefore != before) return@update current
+            val shown = current.messages.mapTo(HashSet()) { it.id }
+            current.copy(messages = historyMessages(page.list("records")).filter { it.id !in shown } + current.messages, historyBefore = page["before"].string())
+        }
+    }
+
+    /**
+     * Picks up what was said elsewhere (in a terminal, on the Mac) since an adopted conversation
+     * was last shown. Left alone while a reply is running here: then this app is the one writing.
+     */
+    suspend fun refresh(id: String) {
+        val original = require(id)
+        val reference = original.historyRef ?: return
+        if (original.remoteTask != null || original.remoteOwner != null) return
+        val page = transcript(hostOf(original), reference)
+        val incoming = historyMessages(page.list("records"))
+        update(id) { current ->
+            if (current.remoteTask != null || current.remoteOwner != null || current.messages != original.messages) return@update current
+            val shown = current.messages.mapTo(HashSet()) { it.id }
+            val first = incoming.indexOfFirst { it.id in shown }
+            val anchor = if (first < 0) 0 else current.messages.indexOfFirst { it.id == incoming[first].id }
+            // What was sent from here carries other IDs in Claude's transcript. Until the transcript
+            // has all of it, the transcript is behind and must not replace what is shown.
+            val written = incoming.mapTo(HashSet()) { it.id }
+            val prompts = incoming.filter { it.role == "user" }.mapTo(HashSet()) { it.text }
+            val behind = current.messages.drop(anchor).any { it.role == "user" && it.id !in written && it.text !in prompts }
+            when {
+                incoming.isEmpty() || behind -> current
+                // Too much happened to join up with what is shown: show the latest part instead.
+                first < 0 -> current.copy(messages = incoming, historyBefore = page["before"].string(), updatedAt = now())
+                else -> {
+                    val merged = current.messages.take(anchor) + incoming.drop(first)
+                    if (merged == current.messages) current else current.copy(messages = merged, updatedAt = now())
+                }
+            }
+        }
     }
 
     fun remove(id: String) {

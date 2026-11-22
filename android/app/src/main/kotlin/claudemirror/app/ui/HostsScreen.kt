@@ -1,5 +1,7 @@
 package claudemirror.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -42,6 +45,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -84,7 +88,7 @@ fun HostsScreen(model: AppModel, snackbar: SnackbarHostState, onOpen: (String) -
                     headlineContent = { Text(host.displayName) },
                     supportingContent = {
                         Text(
-                            host.directory + "\n" + state.label(),
+                            state.label(),
                             color = if (state is ConnectionState.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     },
@@ -94,6 +98,15 @@ fun HostsScreen(model: AppModel, snackbar: SnackbarHostState, onOpen: (String) -
             }
         }
     }
+}
+
+/** The start of a text file: a key is a few kilobytes, anything much larger was picked by mistake. */
+private fun head(input: java.io.InputStream, limit: Int = 65536): String {
+    val buffer = CharArray(limit)
+    val reader = input.bufferedReader()
+    var length = 0
+    while (length < limit) length += reader.read(buffer, length, limit - length).takeIf { it > 0 } ?: break
+    return String(buffer, 0, length)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,8 +125,15 @@ fun HostEditScreen(model: AppModel, id: String, onDone: () -> Unit) {
     var privateKey by remember { mutableStateOf(stored.privateKey.orEmpty()) }
     var passphrase by remember { mutableStateOf(stored.passphrase.orEmpty()) }
     var forgetKey by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val pickKey = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val text = uri?.let { runCatching { context.contentResolver.openInputStream(it)?.use { input -> head(input) } }.getOrNull() }
+        if (text != null && "PRIVATE KEY" in text) privateKey = text.trim()
+        else if (uri != null) model.notices.tryEmit("不是私钥文件")
+    }
     val portNumber = port.toIntOrNull()?.takeIf { it in 1..65535 }
-    val valid = user.isNotBlank() && address.isNotBlank() && directory.startsWith("/") && portNumber != null &&
+    val directoryValid = directory.isEmpty() || directory.startsWith("/") || directory == "~" || directory.startsWith("~/")
+    val valid = user.isNotBlank() && address.isNotBlank() && directoryValid && portNumber != null &&
         (if (auth == AuthMethod.Password) password.isNotEmpty() else privateKey.isNotBlank())
 
     Scaffold(topBar = {
@@ -127,13 +147,12 @@ fun HostEditScreen(model: AppModel, id: String, onDone: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             val field = Modifier.fillMaxWidth()
-            OutlinedTextField(name, { name = it }, field, label = { Text("名称（可不填）") }, singleLine = true)
-            OutlinedTextField(address, { address = it.trim() }, field, label = { Text("地址") }, placeholder = { Text("example.com 或 IP") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+            OutlinedTextField(name, { name = it }, field, label = { Text("名称") }, singleLine = true)
+            OutlinedTextField(address, { address = it.trim() }, field, label = { Text("地址") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
             OutlinedTextField(port, { port = it.filter(Char::isDigit) }, field, label = { Text("SSH 端口") }, singleLine = true, isError = portNumber == null, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             OutlinedTextField(user, { user = it.trim() }, field, label = { Text("用户名") }, singleLine = true)
             OutlinedTextField(
-                directory, { directory = it.trim() }, field, label = { Text("项目目录") }, placeholder = { Text("/home/me/project") }, singleLine = true,
-                isError = directory.isNotEmpty() && !directory.startsWith("/"), supportingText = { Text("Claude 在这个目录里工作，需要是绝对路径") },
+                directory, { directory = it.trim() }, field, label = { Text("目录") }, placeholder = { Text("~") }, singleLine = true, isError = !directoryValid,
             )
             SingleChoiceSegmentedButtonRow(field) {
                 SegmentedButton(auth == AuthMethod.Password, { auth = AuthMethod.Password }, SegmentedButtonDefaults.itemShape(0, 2)) { Text("密码") }
@@ -145,21 +164,21 @@ fun HostEditScreen(model: AppModel, id: String, onDone: () -> Unit) {
                 OutlinedTextField(
                     privateKey, { privateKey = it }, field, label = { Text("私钥") }, minLines = 4, maxLines = 8,
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    supportingText = { Text("粘贴私钥文件的全部内容（以 -----BEGIN 开头）。加密保存在本机，不会上传。") },
+                    trailingIcon = { IconButton(onClick = { pickKey.launch(arrayOf("*/*")) }) { Icon(Icons.Filled.FolderOpen, "导入文件") } },
                     // A password field to the keyboard: no suggestions, nothing learned from the key.
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 )
-                OutlinedTextField(passphrase, { passphrase = it }, field, label = { Text("私钥口令（没有则留空）") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                OutlinedTextField(passphrase, { passphrase = it }, field, label = { Text("口令") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             }
             if (existing?.hostKey != null) {
-                Text("已确认的服务器指纹：${existing.hostKey}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { forgetKey = !forgetKey }) { Text(if (forgetKey) "保存后将重新确认指纹" else "服务器重装过？重新确认指纹") }
+                Text(existing.hostKey.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { forgetKey = !forgetKey }) { Text(if (forgetKey) "保存后重新确认" else "重新确认指纹") }
             }
             Button(
                 onClick = {
                     val unchanged = existing != null && existing.host == address && existing.port == portNumber && !forgetKey
                     model.saveHost(
-                        HostConfig(id, name.trim(), user, address, portNumber!!, directory, auth, hostKey = if (unchanged) existing?.hostKey else null),
+                        HostConfig(id, name.trim(), user, address, portNumber!!, directory.ifEmpty { "~" }, existing?.projects.orEmpty(), auth, hostKey = if (unchanged) existing?.hostKey else null),
                         if (auth == AuthMethod.Password) HostSecret(password = password) else HostSecret(privateKey = privateKey, passphrase = passphrase),
                     )
                     onDone()
@@ -169,7 +188,7 @@ fun HostEditScreen(model: AppModel, id: String, onDone: () -> Unit) {
             if (existing != null) {
                 var confirm by remember { mutableStateOf(false) }
                 TextButton(onClick = { if (confirm) { model.deleteHost(existing); onDone() } else confirm = true }, modifier = field) {
-                    Text(if (confirm) "再点一次：连同本机对话一起删除" else "删除服务器", color = MaterialTheme.colorScheme.error)
+                    Text(if (confirm) "确认删除" else "删除服务器", color = MaterialTheme.colorScheme.error)
                 }
             }
         }

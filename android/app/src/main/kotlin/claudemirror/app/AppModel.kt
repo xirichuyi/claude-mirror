@@ -10,6 +10,8 @@ import claudemirror.core.Engine
 import claudemirror.core.FileSessionStore
 import claudemirror.core.HostConfig
 import claudemirror.core.Preferences
+import claudemirror.core.RemoteConversation
+import claudemirror.core.RemoteListing
 import claudemirror.core.ServerResources
 import claudemirror.core.SshLauncher
 import claudemirror.core.SshSecret
@@ -142,7 +144,26 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         foreground = false
     }
 
-    fun createSession(host: HostConfig): ChatSession = engine.create(host)
+    fun createSession(host: HostConfig, directory: String = host.directory): ChatSession = engine.create(host, directory)
+    fun rename(id: String, name: String) = engine.rename(id, name)
+    suspend fun folders(host: HostConfig, path: String): RemoteListing = engine.folders(host, path)
+    suspend fun history(host: HostConfig): List<RemoteConversation> = engine.history(host)
+    suspend fun adopt(host: HostConfig, item: RemoteConversation): ChatSession = engine.adopt(host, item)
+    fun loadEarlier(id: String) = act { engine.loadEarlier(id) }
+    /** Quietly: an adopted conversation that cannot be refreshed still shows what it had. */
+    fun refresh(id: String) { viewModelScope.launch { runCatching { engine.refresh(id) } } }
+
+    fun addProject(host: HostConfig, directory: String) {
+        if (directory == host.directory || directory in host.projects) return
+        saveProjects(host.id) { it + directory }
+    }
+
+    fun removeProject(host: HostConfig, directory: String) = saveProjects(host.id) { it - directory }
+
+    private fun saveProjects(id: String, change: (List<String>) -> List<String>) {
+        _hosts.value = _hosts.value.map { if (it.id == id) it.copy(projects = change(it.projects)) else it }
+        hostStore.save(_hosts.value)
+    }
     fun removeSession(id: String) = engine.remove(id)
     fun submit(id: String, text: String, steer: Boolean = false) = runCatching { engine.submit(id, text, steer) }.onFailure { notices.tryEmit(it.message ?: "发送失败") }.isSuccess
     fun steer(id: String, item: String) = act { engine.steer(id, item) }
