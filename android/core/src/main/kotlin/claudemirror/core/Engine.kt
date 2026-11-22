@@ -172,32 +172,57 @@ class Engine(
     suspend fun refresh(id: String) {
         val original = require(id)
         val reference = original.historyRef ?: return
-        if (original.remoteTask != null || original.remoteOwner != null) return
-        val reply = transcript(hostOf(original), reference)
-        val page = historyPage(reply.list("records"))
+        if (original.remoteTask != null) return
+        val shown = original.messages.mapTo(HashSet()) { it.id }
+        // Back from the end until something shown turns up, so that what is new joins on without a gap.
+        var records = emptyList<JsonElement>()
+        var before: String? = null
+        val asked = HashSet<String?>()
+        while (asked.add(before) && asked.size <= 20) {
+            val reply = transcript(hostOf(original), reference, before)
+            val batch = reply.list("records")
+            records = batch + records
+            before = reply["before"].string()
+            if (before == null || batch.any { it.obj()?.get("uuid").string() in shown }) break
+        }
+        val page = historyPage(records)
         val incoming = page.messages
+        if (incoming.isEmpty()) return
+
+        // What was said here follows the transcript's last message and carries other IDs than
+        // Claude gives it. Until the transcript has it, the transcript is behind and is not shown.
+        val said = original.messages.drop(original.messages.indexOfLast { it.id == original.historyTail } + 1)
+        val prompts = incoming.filter { it.role == "user" }.mapTo(HashSet()) { it.text }
+        fun ChatMessage.failed() = role == "assistant" && error != null && blocks.isNullOrEmpty()
+        // A prompt whose reply failed before it began, and that the transcript does not have,
+        // never reached Claude: it is not waited for, and it stays, at the end.
+        val unsent = said.filterIndexed { at, message ->
+            val prompt = if (message.failed()) said.getOrNull(at - 1) else message.takeIf { said.getOrNull(at + 1)?.failed() == true }
+            prompt?.role == "user" && prompt.text !in prompts
+        }
+        if (said.any { it.role == "user" && it !in unsent && it.text !in prompts }) return
+        val first = incoming.indexOfFirst { it.id in shown }
+        // Nothing in common: the latest part replaces what is shown.
+        val kept = if (first < 0) emptyList() else original.messages.take(original.messages.indexOfFirst { it.id == incoming[first].id })
+        val merged = kept.answered(page.loose) + incoming.drop(maxOf(first, 0)) + unsent
+        if (merged == original.messages) return
+
+        val owner = original.remoteOwner
+        if (owner != null) {
+            // The worker kept alive for this conversation remembers only what was said here. While
+            // nothing else was said it stays; once something was, the next prompt needs a worker
+            // that reads the transcript again.
+            val here = said.flatMap { message -> if (message.role == "user") listOf(message.text) else message.blocks.orEmpty().filter { it.type == "user" }.map { it.text } }
+            val news = incoming.drop(incoming.indexOfLast { it.id == original.historyTail } + 1)
+            if (news.none { it.role == "user" && it.text !in here }) return
+            command(original, "close")
+            watchers.remove(id)?.kill()
+        }
         update(id) { current ->
-            if (incoming.isEmpty() || current.remoteTask != null || current.remoteOwner != null || current.messages != original.messages) return@update current
-            // What was said here follows the transcript's last message and carries other IDs than
-            // Claude gives it. Until the transcript has it, the transcript is behind and is not shown.
-            val said = current.messages.drop(current.messages.indexOfLast { it.id == current.historyTail } + 1)
-            val prompts = incoming.filter { it.role == "user" }.mapTo(HashSet()) { it.text }
-            fun ChatMessage.failed() = role == "assistant" && error != null && blocks.isNullOrEmpty()
-            // A prompt whose reply failed before it began, and that the transcript does not have,
-            // never reached Claude: it is not waited for, and it stays, at the end.
-            val unsent = said.filterIndexed { at, message ->
-                val prompt = if (message.failed()) said.getOrNull(at - 1) else message.takeIf { said.getOrNull(at + 1)?.failed() == true }
-                prompt?.role == "user" && prompt.text !in prompts
-            }
-            if (said.any { it.role == "user" && it !in unsent && it.text !in prompts }) return@update current
-            val shown = current.messages.mapTo(HashSet()) { it.id }
-            val first = incoming.indexOfFirst { it.id in shown }
-            // Nothing in common: too much happened elsewhere to join up, so the latest part replaces what is shown.
-            val kept = if (first < 0) emptyList() else current.messages.take(current.messages.indexOfFirst { it.id == incoming[first].id })
-            val merged = kept.answered(page.loose) + incoming.drop(maxOf(first, 0)) + unsent
-            if (merged == current.messages) current
-            else if (first < 0) current.copy(messages = merged, historyBefore = reply["before"].string(), historyLoose = page.loose, historyTail = incoming.last().id, updatedAt = now())
-            else current.copy(messages = merged, historyTail = incoming.last().id, updatedAt = now())
+            val moved = current.remoteTask != null || current.messages != original.messages || (current.remoteOwner != null && current.remoteOwner.id != owner?.id)
+            if (moved) current
+            else if (first < 0) current.copy(messages = merged, remoteOwner = null, historyBefore = before, historyLoose = page.loose, historyTail = incoming.last().id, updatedAt = now())
+            else current.copy(messages = merged, remoteOwner = null, historyTail = incoming.last().id, updatedAt = now())
         }
     }
 

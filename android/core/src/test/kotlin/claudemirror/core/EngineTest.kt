@@ -445,10 +445,49 @@ class EngineTest {
         agent.onHistory = { json(reply) }
         val session = engine.adopt(testHost, RemoteConversation("p/s1.jsonl", "s1", "/srv/app", "first"))
 
-        reply = """{"records":[${record("n1", "user", "much later")},${record("n2", "assistant", "yes")}],"directory":"/srv/app","before":"n1"}"""
+        // Two pages of news: the walk back reaches a shown message, so nothing is skipped.
+        agent.onHistory = { request ->
+            if (request["before"].string() == "n2") json("""{"records":[${record("m2", "assistant", "one")},${record("n1", "user", "later")}],"directory":"/srv/app","before":"m2"}""")
+            else json("""{"records":[${record("n2", "assistant", "yes")},${record("n3", "user", "much later")}],"directory":"/srv/app","before":"n2"}""")
+        }
         engine.refresh(session.id)
-        assertEquals(listOf("n1", "n2"), current(session.id).messages.map { it.id })
-        assertEquals("n1", current(session.id).historyBefore)
+        assertEquals(listOf("m1", "m2", "n1", "n2", "n3"), current(session.id).messages.map { it.id })
+        assertNull(current(session.id).historyBefore)
+
+        // A transcript that shares nothing with what is shown replaces it.
+        reply = """{"records":[${record("x1", "user", "rewritten")},${record("x2", "assistant", "yes")}],"directory":"/srv/app","before":null}"""
+        agent.onHistory = { json(reply) }
+        engine.refresh(session.id)
+        assertEquals(listOf("x1", "x2"), current(session.id).messages.map { it.id })
+    }
+
+    @Test fun `a worker kept alive here is closed once something was said elsewhere, and not before`() = engineTest {
+        var transcript = listOf(record("m1", "user", "first"), record("m2", "assistant", "one"))
+        agent.onHistory = { json("""{"records":[${transcript.joinToString(",")}],"directory":"/srv/app","before":null}""") }
+        val session = engine.adopt(testHost, RemoteConversation("p/s1.jsonl", "s1", "/srv/app", "first"))
+        engine.send(session.id, "from the phone")
+        val task = current(session.id).remoteTask!!
+        until("the worker is followed") { agent.follows(task.id) }
+        agent.emit(task.id, state(task, 1, "idle", "two", ""","resident":true"""))
+        until("the reply ends") { current(session.id).remoteTask == null }
+        assertEquals(task.id, current(session.id).remoteOwner?.id)
+
+        transcript = transcript + record("m3", "user", "from the phone") + record("m4", "assistant", "two")
+        val shown = current(session.id).messages
+        engine.refresh(session.id)
+        assertEquals(shown, current(session.id).messages)
+        assertTrue(agent.commands("close").isEmpty())
+
+        transcript = transcript + record("m5", "user", "from the terminal") + record("m6", "assistant", "three")
+        engine.refresh(session.id)
+        assertEquals(listOf("m1", "m2", "m3", "m4", "m5", "m6"), current(session.id).messages.map { it.id })
+        assertEquals(task.id, agent.commands("close").single()["taskId"].string())
+        assertNull(current(session.id).remoteOwner)
+
+        // The next prompt starts a worker that resumes Claude's session, with what the terminal said.
+        engine.send(session.id, "back on the phone")
+        until("a new worker is started") { agent.starts().size == 2 }
+        assertEquals("s1", agent.starts().last()["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"].string())
     }
 
     @Test fun `a prompt that never reached Claude neither holds back the transcript nor is lost`() {
