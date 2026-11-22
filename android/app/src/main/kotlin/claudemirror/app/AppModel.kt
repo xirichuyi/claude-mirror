@@ -1,9 +1,9 @@
 package claudemirror.app
 
 import android.app.Application
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
+import claudemirror.core.alerts
 import claudemirror.core.AgentPool
+import claudemirror.core.Alert
 import claudemirror.core.ChatSession
 import claudemirror.core.ConnectionState
 import claudemirror.core.Engine
@@ -19,17 +19,25 @@ import claudemirror.core.UnknownHostKeyException
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 
 /** A server seen for the first time, waiting for the user to accept its key. */
 data class TrustRequest(val host: HostConfig, val fingerprint: String)
 
-class AppModel(application: Application) : AndroidViewModel(application) {
+/** Lives as long as the process, so that a reply can be followed while no screen is open. */
+class AppModel(private val application: Application) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val files = application.filesDir
     private val hostStore = HostStore(File(files, "hosts.json"))
     private val secrets = SecretStore(File(files, "secrets"))
@@ -38,35 +46,96 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         ServerResources.read { application.assets.open("server/$it") },
     )
     private val _hosts = MutableStateFlow(hostStore.load())
-    private val engine = Engine(viewModelScope, pool, FileSessionStore(File(files, "sessions")), host = ::host)
+    private val engine = Engine(scope, pool, FileSessionStore(File(files, "sessions")), host = ::host)
 
     val hosts: StateFlow<List<HostConfig>> = _hosts
     val sessions: StateFlow<List<ChatSession>> = engine.sessions
     val connections: StateFlow<Map<String, ConnectionState>> = pool.states
     val trust = MutableStateFlow<TrustRequest?>(null)
     /** Short messages for the snackbar. */
-    val notices = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val snackbar = MutableSharedFlow<String>(extraBufferCapacity = 8)
 
+    /** The conversation to show, asked for from a notification. */
+    val target = MutableStateFlow<String?>(null)
+
+    internal val notices = Notices(application)
     private var foreground = false
+    /** Whether [KeepAlive] is holding the process. */
+    private var kept = false
+    /** Servers whose dropped connection is being opened again. */
+    private val recovering = MutableStateFlow(emptySet<String>())
+
+    /**
+     * Replies being followed: those of servers that are connected or about to be again. While
+     * there are any, the app stays connected out of sight.
+     */
+    val running: StateFlow<List<ChatSession>> = combine(sessions, connections, recovering) { all, states, again ->
+        all.filter { it.remoteTask != null && (it.hostId in again || states[it.hostId].let { state -> state is ConnectionState.Connected || state is ConnectionState.Connecting }) }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
-        engine.onError = { notices.tryEmit(it) }
-        // A connection that drops while the app is open is opened again once, so a reply
-        // in progress keeps showing. A failed attempt is left for the user to retry.
-        viewModelScope.launch {
+        engine.onError = { snackbar.tryEmit(it) }
+        // A connection that drops while a reply is followed is opened again, so the reply keeps
+        // showing. In sight one attempt is made and a failure is left for the user to retry;
+        // out of sight nobody can, so a few are made before giving up and saying so.
+        scope.launch {
             var previous = emptyMap<String, ConnectionState>()
             connections.collect { current ->
                 for ((id, state) in current) {
-                    if (state !is ConnectionState.Disconnected || previous[id] !is ConnectionState.Connected) continue
-                    launch {
-                        delay(2000)
-                        val host = host(id)
-                        if (host != null && foreground && connections.value[id] is ConnectionState.Disconnected && unfinished(id)) connect(host)
-                    }
+                    if (state !is ConnectionState.Disconnected || previous[id] !is ConnectionState.Connected || id in recovering.value) continue
+                    recovering.value += id
+                    launch { try { recover(id) } finally { recovering.value -= id } }
                 }
                 previous = current
             }
         }
+        scope.launch {
+            var before = sessions.value
+            sessions.collect { now ->
+                if (!foreground) alerts(before, now).forEach(notices::tell)
+                if (before !== now) notices.settle(now)
+                before = now
+            }
+        }
+        scope.launch {
+            running.collect { now ->
+                if (now.isEmpty()) { if (kept) KeepAlive.stop(application) }
+                else if (kept) notices.update(now)
+                else KeepAlive.start(application)
+            }
+        }
+    }
+
+    private suspend fun recover(id: String) {
+        for (wait in listOf(2_000L, 10_000L, 30_000L)) {
+            delay(wait)
+            val host = host(id) ?: return
+            if (!(foreground || kept) || !unfinished(id)) return
+            when (connections.value[id]) {
+                is ConnectionState.Connected -> return
+                is ConnectionState.Connecting -> continue
+                else -> if (open(host) || foreground) return
+            }
+        }
+        if (foreground || connections.value[id] is ConnectionState.Connected) return
+        // Given up: the replies go on running on the server and are joined again when the app is opened.
+        sessions.value.filter { it.hostId == id && it.remoteTask != null }.forEach { notices.tell(Alert.Failed(it, "连接断开")) }
+    }
+
+    internal fun kept(value: Boolean) {
+        val was = kept
+        kept = value
+        if (value) notices.update(running.value)
+        // Stopped by Android while replies are still followed: taken up again when that is allowed.
+        else if (was && foreground && running.value.isNotEmpty()) KeepAlive.start(application)
+    }
+
+    /** True the first time only: whether to ask the user to allow notifications. */
+    fun askNotifications(): Boolean {
+        val settings = application.getSharedPreferences("app", android.content.Context.MODE_PRIVATE)
+        if (settings.getBoolean("askedNotifications", false)) return false
+        settings.edit().putBoolean("askedNotifications", true).apply()
+        return true
     }
 
     private fun unfinished(host: String) = sessions.value.any { it.hostId == host && (it.remoteTask != null || it.remoteOwner != null) }
@@ -77,9 +146,9 @@ class AppModel(application: Application) : AndroidViewModel(application) {
 
     /** Runs an action the user asked for and reports why it failed. */
     private fun act(block: suspend () -> Unit) {
-        viewModelScope.launch {
+        scope.launch {
             try { block() } catch (error: CancellationException) { throw error } catch (error: Exception) {
-                notices.tryEmit(error.message ?: "操作失败")
+                snackbar.tryEmit(error.message ?: "操作失败")
             }
         }
     }
@@ -107,15 +176,18 @@ class AppModel(application: Application) : AndroidViewModel(application) {
 
     /** Opens the SSH connection and rejoins replies that kept running on the server. */
     fun connect(host: HostConfig) {
-        viewModelScope.launch {
-            try {
-                pool.channel(host)
-                engine.restore(host)
-            } catch (error: CancellationException) { throw error } catch (error: UnknownHostKeyException) {
-                trust.value = TrustRequest(host, error.fingerprint)
-            } catch (error: Exception) { /* Shown from the connection state. */ }
-        }
+        scope.launch { open(host) }
     }
+
+    private suspend fun open(host: HostConfig): Boolean =
+        try {
+            pool.channel(host)
+            engine.restore(host)
+            true
+        } catch (error: CancellationException) { throw error } catch (error: UnknownHostKeyException) {
+            trust.value = TrustRequest(host, error.fingerprint)
+            false
+        } catch (error: Exception) { false /* Shown from the connection state. */ }
 
     fun reconnect(host: HostConfig) {
         engine.detach(host)
@@ -134,6 +206,8 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     /** Called when the app comes back to the foreground: Android drops idle connections in the background. */
     fun resume() {
         foreground = true
+        notices.clear()
+        if (!kept && running.value.isNotEmpty()) KeepAlive.start(application)
         for (host in _hosts.value) {
             val state = connections.value[host.id]
             if (unfinished(host.id) && state !is ConnectionState.Connected && state !is ConnectionState.Connecting) connect(host)
@@ -151,7 +225,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     suspend fun adopt(host: HostConfig, item: RemoteConversation): ChatSession = engine.adopt(host, item)
     fun loadEarlier(id: String) = act { engine.loadEarlier(id) }
     /** Quietly: an adopted conversation that cannot be refreshed still shows what it had. */
-    fun refresh(id: String) { viewModelScope.launch { runCatching { engine.refresh(id) } } }
+    fun refresh(id: String) { scope.launch { runCatching { engine.refresh(id) } } }
 
     fun addProject(host: HostConfig, directory: String) {
         if (directory == host.directory || directory in host.projects) return
@@ -165,7 +239,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         hostStore.save(_hosts.value)
     }
     fun removeSession(id: String) = engine.remove(id)
-    fun submit(id: String, text: String, steer: Boolean = false) = runCatching { engine.submit(id, text, steer) }.onFailure { notices.tryEmit(it.message ?: "发送失败") }.isSuccess
+    fun submit(id: String, text: String, steer: Boolean = false) = runCatching { engine.submit(id, text, steer) }.onFailure { snackbar.tryEmit(it.message ?: "发送失败") }.isSuccess
     fun steer(id: String, item: String) = act { engine.steer(id, item) }
     fun cancelQueued(id: String, item: String) = engine.cancelQueued(id, item)
     fun clearQueue(id: String) = engine.clearQueue(id)

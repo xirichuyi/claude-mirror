@@ -155,7 +155,7 @@ fun HistoryScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState, 
                             scope.launch {
                                 try { onOpen(model.adopt(host, item).id) }
                                 catch (error: CancellationException) { throw error }
-                                catch (error: Exception) { model.notices.tryEmit(error.message ?: "打开失败") }
+                                catch (error: Exception) { model.snackbar.tryEmit(error.message ?: "打开失败") }
                                 finally { opening = null }
                             }
                         },

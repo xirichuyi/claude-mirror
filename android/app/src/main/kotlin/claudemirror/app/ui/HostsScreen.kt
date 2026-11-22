@@ -129,7 +129,7 @@ fun HostEditScreen(model: AppModel, id: String, onDone: () -> Unit) {
     val pickKey = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val text = uri?.let { runCatching { context.contentResolver.openInputStream(it)?.use { input -> head(input) } }.getOrNull() }
         if (text != null && "PRIVATE KEY" in text) privateKey = text.trim()
-        else if (uri != null) model.notices.tryEmit("不是私钥文件")
+        else if (uri != null) model.snackbar.tryEmit("不是私钥文件")
     }
     val portNumber = port.toIntOrNull()?.takeIf { it in 1..65535 }
     val directoryValid = directory.isEmpty() || directory.startsWith("/") || directory == "~" || directory.startsWith("~/")
