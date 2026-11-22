@@ -359,7 +359,7 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
                             // The command gave up first, and says why once it has ended.
                             runCatching { process.stdin.close() }
                             process.waitForExit()
-                            throw RemoteException(process.errorText().trim().ifEmpty { error.message ?: "上传失败" }, confirmed = false)
+                            throw RemoteException(process.errorText().trim().ifEmpty { "上传中断" }, confirmed = false)
                         }
                     }
                 } finally { guard.cancel() }
