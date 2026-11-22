@@ -107,6 +107,7 @@ class AppModel(private val application: Application) {
             var previous = emptyMap<String, ConnectionState>()
             connections.collect { current ->
                 for ((id, state) in current) {
+                    if (state is ConnectionState.Connected && previous[id] !== state) resend(id)
                     if (state !is ConnectionState.Disconnected || previous[id] !is ConnectionState.Connected || id in recovering.value) continue
                     recovering.value += id
                     launch { try { recover(id) } finally { recovering.value -= id } }
@@ -192,11 +193,11 @@ class AppModel(private val application: Application) {
             pool.close(previous)
             if (previous.host != host.host || previous.port != host.port || previous.user != host.user) {
                 engine.endpointChanged(host.id)
-                // Files picked for the next message went to the old machine: they are sent to this one.
+                // Files picked for the next message went to the old machine: they are sent to this one, once it is connected.
                 for (session in sessions.value.filter { it.hostId == host.id }) for (file in picked.value[session.id].orEmpty()) {
                     uploads.remove(file.id)?.cancel()
                     if (file.source == null) detach(session.id, file.id)
-                    else { pick(session.id, file.id) { it.copy(file = null, error = null, sent = 0) }; upload(session.id, file) }
+                    else pick(session.id, file.id) { it.copy(file = null, error = null, sent = 0) }
                 }
             }
         }
@@ -326,6 +327,15 @@ class AppModel(private val application: Application) {
         val file = picked.value[id]?.firstOrNull { it.id == item && it.error != null } ?: return
         pick(id, item) { it.copy(error = null, sent = 0) }
         upload(id, file)
+    }
+
+    /** A connection is there (again): the picked files that are neither on the server nor on their way are sent. */
+    private fun resend(host: String) {
+        for (session in sessions.value.filter { it.hostId == host }) for (file in picked.value[session.id].orEmpty()) {
+            if (file.file != null || file.source == null || file.id in uploads) continue
+            pick(session.id, file.id) { it.copy(error = null, sent = 0) }
+            upload(session.id, file)
+        }
     }
 
     private fun upload(id: String, item: Picked) {
