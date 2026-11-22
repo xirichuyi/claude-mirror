@@ -213,10 +213,10 @@ test('search and quick-open find files; git status reports changes', async () =>
   } finally { f.close(); }
 });
 
-function png(width, height, kind, pixel) {
+function png(width, height, kind, pixel, extra: [string, Buffer][] = [], bloat = 0) {
   const { deflateSync, crc32 } = require('node:zlib');
   const channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[kind];
-  const lines = Buffer.alloc((width * channels + 1) * height);
+  const lines = Buffer.alloc((width * channels + 1) * height + bloat);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) lines.set(pixel(x, y), y * (width * channels + 1) + 1 + x * channels);
   const chunk = (type, data) => {
     const body = Buffer.concat([Buffer.from(type, 'latin1'), data]), head = Buffer.alloc(4), tail = Buffer.alloc(4);
@@ -225,7 +225,7 @@ function png(width, height, kind, pixel) {
   };
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = kind;
-  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header), chunk('IDAT', deflateSync(lines)), chunk('IEND', Buffer.alloc(0))]);
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header), ...extra.map(([type, data]) => chunk(type, data)), chunk('IDAT', deflateSync(lines)), chunk('IEND', Buffer.alloc(0))]);
 }
 function pixels(data) {
   const { inflateSync } = require('node:zlib');
@@ -247,6 +247,13 @@ test('a PNG is shrunk without any image tool on the server', () => {
   // An image already small enough keeps its size.
   assert.equal(pixels(shrinkPNG(png(30, 20, 2, () => [1, 2, 3]), 1024)).width, 30);
   assert.throws(() => shrinkPNG(Buffer.from('89504e470d0a1a0a', 'hex'), 100), /PNG/);
+  // Without an alpha channel, the one colour tRNS names is transparent.
+  const keyed = pixels(shrinkPNG(png(2, 1, 2, x => x ? [9, 8, 7] : [0, 255, 0], [['tRNS', Buffer.from([0, 0, 0, 255, 0, 0])]]), 2));
+  assert.deepEqual([keyed.at(0, 0), keyed.at(1, 0)], [[250, 246, 242], [9, 8, 7]]);
+  const greyKeyed = pixels(shrinkPNG(png(2, 1, 0, x => [x ? 40 : 200], [['tRNS', Buffer.from([0, 200])]]), 2));
+  assert.deepEqual([greyKeyed.at(0, 0), greyKeyed.at(1, 0)], [[250, 246, 242], [40, 40, 40]]);
+  // Pixel data that inflates to more than the header declares is refused, not held in memory.
+  assert.throws(() => shrinkPNG(png(2, 2, 2, () => [1, 2, 3], [], 64 * 1024 * 1024), 2), { code: 'ERR_BUFFER_TOO_LARGE' });
 });
 
 test('a large image previews as a thumbnail when the server has no image tool', async () => {
