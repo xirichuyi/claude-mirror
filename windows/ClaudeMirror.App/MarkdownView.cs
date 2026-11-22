@@ -139,7 +139,9 @@ public sealed partial class MainWindow
         // A header strip over the code: what it is on the left, its length and the copy action on the right.
         int lines=code.TrimEnd('\n').Count(c=>c=='\n')+1;
         var header=new Grid {Background=hover,BorderBrush=edge,BorderThickness=new Thickness(0,0,0,1),Padding=new Thickness(12,1,3,1)};
-        header.Children.Add(new TextBlock {Text=title ?? (language.Length==0?"代码":language),FontFamily=title is null?Mono:null,Foreground=muted,FontSize=12,VerticalAlignment=VerticalAlignment.Center});
+        var caption=new TextBlock {Text=title ?? (language.Length==0?"代码":language),Foreground=muted,FontSize=12,VerticalAlignment=VerticalAlignment.Center};
+        if(title is null) caption.FontFamily=Mono;
+        header.Children.Add(caption);
         var copy=ActionButton("复制","\uE8C8",()=>{var data=new DataPackage();data.SetText(code);Clipboard.SetContent(data);return Task.CompletedTask;},true);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(copy,"复制代码");copy.Foreground=muted;
         if(copy.Content is StackPanel label) { ((FontIcon)label.Children[0]).FontSize=12; ((TextBlock)label.Children[1]).FontSize=12; }

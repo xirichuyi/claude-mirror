@@ -217,7 +217,8 @@ public sealed partial class MainWindow
         connection.FontSize = subtitle.FontSize = 12; connection.Foreground = subtitle.Foreground = status.Foreground = muted;
         subtitle.TextTrimming = status.TextTrimming = TextTrimming.CharacterEllipsis; status.TextWrapping = TextWrapping.NoWrap;
         subtitle.Margin = new Thickness(12,0,0,0); status.HorizontalAlignment = HorizontalAlignment.Right;
-        status.RegisterPropertyChangedCallback(TextBlock.TextProperty,(_,_) => ToolTipService.SetToolTip(status,status.Text.Length > 0 ? status.Text : null));
+        // The strip already says whether the server is connected: a notice that only repeats it is not shown twice.
+        status.RegisterPropertyChangedCallback(TextBlock.TextProperty,(_,_) => { ToolTipService.SetToolTip(status,status.Text.Length > 0 ? status.Text : null); status.Opacity = status.Text == connection.Text ? 0 : 1; });
         int column = 0;
         foreach(FrameworkElement item in new FrameworkElement[] { stateDot, connection, subtitle, status }) { item.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(item,column++); statusBar.Children.Add(item); }
         Grid.SetRow(statusBar,2); Grid.SetColumnSpan(statusBar,2); root.Children.Add(statusBar);
@@ -238,8 +239,10 @@ public sealed partial class MainWindow
         messages.SizeChanged += (_,e) => { if(followReply && e.NewSize.Height > e.PreviousSize.Height)
             DispatcherQueue.TryEnqueue(()=>scroll.ChangeView(null,scroll.ScrollableHeight,null,true)); };
         // The conversation column is 680 wide and centred, whatever the width of the pane.
+        // A grid as the scrolled content takes the pane's width and centres the column inside it.
         messages.HorizontalAlignment = HorizontalAlignment.Stretch; messages.MaxWidth = 728; messages.Padding = new Thickness(24,8,24,16); messages.Spacing = 14;
-        scroll.Content = messages; At(area,scroll,1);
+        var centred = new Grid(); centred.Children.Add(messages);
+        scroll.Content = centred; At(area,scroll,1);
         home.Margin = new Thickness(24,40,24,16);
         home.VerticalAlignment = VerticalAlignment.Top;
         homeTitle.FontSize = 22; homeTitle.Foreground = ink; homeTitle.FontWeight=Microsoft.UI.Text.FontWeights.SemiBold;
@@ -389,7 +392,7 @@ public sealed partial class MainWindow
         title.Text = conversation?.Name ?? (host == null ? "claude-mirror" : "新对话");
         UpdateSubtitle();UpdatePickerTitle();UpdateHostPicker();
         composer.Visibility = host != null ? Visibility.Visible : Visibility.Collapsed;
-        hostDot.Background=stateDot.Background=online?sage:dim;connection.Text=online?"已连接":"未连接";
+        hostDot.Background=stateDot.Background=online?sage:dim;connection.Text=online?"已连接":"未连接";status.Opacity=status.Text==connection.Text?0:1;
         fresh.IsEnabled = online; sync.IsEnabled = online;
         files.Visibility = project.Visibility = host == null ? Visibility.Collapsed : Visibility.Visible;
         files.IsEnabled = online; project.IsEnabled = online && !busy;
