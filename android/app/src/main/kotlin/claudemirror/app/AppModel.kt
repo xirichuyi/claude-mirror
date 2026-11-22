@@ -152,4 +152,6 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     fun stop(id: String) = act { engine.stop(id) }
     fun respond(id: String, permission: String, answer: JsonObject) = act { engine.respond(id, permission, answer) }
     fun configure(id: String, preferences: Preferences) = act { engine.configure(id, preferences) }
+    val models = engine.models
+    fun loadModels(id: String) = act { engine.loadModels(id) }
 }

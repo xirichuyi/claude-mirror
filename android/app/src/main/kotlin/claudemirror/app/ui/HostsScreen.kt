@@ -75,7 +75,7 @@ fun HostsScreen(model: AppModel, snackbar: SnackbarHostState, onOpen: (String) -
     ) { padding ->
         if (hosts.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding).padding(32.dp), contentAlignment = Alignment.Center) {
-                Text("还没有服务器。添加一台已经装好 Claude Code 的服务器，就可以在手机上继续对话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("还没有服务器", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             items(hosts, key = { it.id }) { host ->
@@ -169,7 +169,7 @@ fun HostEditScreen(model: AppModel, id: String, onDone: () -> Unit) {
             if (existing != null) {
                 var confirm by remember { mutableStateOf(false) }
                 TextButton(onClick = { if (confirm) { model.deleteHost(existing); onDone() } else confirm = true }, modifier = field) {
-                    Text(if (confirm) "再点一次确认：删除这台服务器和它在本机的对话记录" else "删除服务器", color = MaterialTheme.colorScheme.error)
+                    Text(if (confirm) "再点一次：连同本机对话一起删除" else "删除服务器", color = MaterialTheme.colorScheme.error)
                 }
             }
         }

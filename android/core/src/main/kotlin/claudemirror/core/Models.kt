@@ -109,6 +109,8 @@ data class PermissionRequest(
     val description: String? = null,
     /** For kind "elicitation": what an MCP server asks the user. */
     val request: JsonElement? = null,
+    /** Permission rules the server offers to save along with an approval. */
+    val suggestions: JsonElement? = null,
 )
 
 @Serializable
@@ -117,6 +119,15 @@ data class Preferences(
     val effort: String? = null,
     val permissionMode: String? = null,
     val executionUser: String? = null,
+)
+
+/** A model the server's Claude Code offers, with the thinking efforts it accepts. */
+@Serializable
+data class RemoteModel(
+    val value: String,
+    val displayName: String? = null,
+    val description: String? = null,
+    val supportedEffortLevels: List<String>? = null,
 )
 
 @Serializable

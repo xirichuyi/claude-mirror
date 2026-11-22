@@ -49,7 +49,7 @@ fun ChatSession.statusLabel(): String? = when (status) {
     "working" -> "Claude 正在回复…"
     "permission" -> "等待你的确认"
     "stopping" -> "正在停止…"
-    "detached" -> "连接已断开，回复仍在服务器上进行"
+    "detached" -> "已断开"
     "error" -> "出错了"
     "stopped" -> "已停止"
     else -> null
@@ -108,7 +108,7 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
             }
             if (sessions.isEmpty()) {
                 Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("这台服务器上还没有对话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("还没有对话", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else LazyColumn(Modifier.fillMaxSize()) {
                 items(sessions, key = { it.id }) { session ->

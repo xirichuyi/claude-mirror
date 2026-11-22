@@ -116,6 +116,27 @@ class Engine(
         update(id) { it.copy(preferences = preferences, remoteOwner = null) }
     }
 
+    private val catalogue = MutableStateFlow<Map<String, List<RemoteModel>>>(emptyMap())
+    /** The models each server offers, by host ID, once known. */
+    val models: StateFlow<Map<String, List<RemoteModel>>> = catalogue
+
+    private fun offered(host: String, capabilities: JsonElement?) {
+        val list = capabilities.obj()?.get("models")?.let { runCatching { MirrorJson.decodeFromJsonElement<List<RemoteModel>>(it) }.getOrNull() }
+        if (!list.isNullOrEmpty()) catalogue.value = catalogue.value + (host to list)
+    }
+
+    /** Asks the server which models it offers, unless a reply has already told. */
+    suspend fun loadModels(id: String) {
+        val session = require(id)
+        val host = hostOf(session)
+        if (host.id in catalogue.value) return
+        ensureInstalled(host)
+        offered(host.id, agents.call(host, "task", buildJsonObject {
+            put("operation", "inspect"); put("digest", agents.resources.bundleDigest); put("action", "catalogue")
+            put("directory", session.directory); put("preferences", MirrorJson.encodeToJsonElement(session.preferences))
+        }))
+    }
+
     // Sending and the queue
 
     /** Sends now when Claude is idle. During a reply the message waits in the queue, or with [steer] goes into the running reply. */
@@ -387,6 +408,7 @@ class Engine(
         if (turnEnded) message = if (done && status == "stopped") message.cutShort() else message.settled()
         // Until the worker confirms the stop, states it wrote before hearing of it still say "working".
         if (!turnEnded && id in stopRequests && status != "stopping") status = "stopping"
+        if (session.hostId !in catalogue.value) offered(session.hostId, remote["capabilities"])
         val permissions = remote["permissions"]?.let { runCatching { MirrorJson.decodeFromJsonElement<List<PermissionRequest>>(it) }.getOrNull() }.orEmpty()
         val delivered = message.blocks.orEmpty().filter { it.type == "user" }.mapNotNull { it.id }.toSet()
         update(id, immediate = turnEnded || permissions.isNotEmpty()) {

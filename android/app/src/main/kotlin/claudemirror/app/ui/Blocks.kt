@@ -1,41 +1,68 @@
 package claudemirror.app.ui
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.automirrored.filled.FactCheck
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Timelapse
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import claudemirror.core.Block
+import claudemirror.core.ToolKind
+import claudemirror.core.diffLines
+import claudemirror.core.replacements
+import claudemirror.core.todos
+import claudemirror.core.toolLook
+import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
+import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.rememberMarkdownState
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -44,31 +71,25 @@ import kotlinx.serialization.json.JsonPrimitive
 
 private val Pretty = Json { prettyPrint = true }
 
-/** The part of a tool's input a person recognises it by: the command, the file, the search. */
-fun toolSummary(input: JsonElement?): String {
-    val fields = input as? JsonObject ?: return ""
-    for (key in listOf("command", "file_path", "path", "pattern", "query", "url", "description", "prompt")) {
-        val value = (fields[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
-        if (!value.isNullOrBlank()) return value
-    }
-    return ""
-}
-
 fun prettyJson(value: JsonElement?): String = value?.let { Pretty.encodeToString(JsonElement.serializer(), it) }.orEmpty()
+
+private fun JsonElement?.text(key: String): String? = ((this as? JsonObject)?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+private fun clipped(text: String, limit: Int = 6000) = if (text.length > limit) text.take(limit) + "\n…（其余 ${text.length - limit} 个字符未显示）" else text
 
 @Composable
 fun UserBubble(text: String, caption: String? = null, faded: Boolean = false) {
-    Box(Modifier.fillMaxWidth().padding(start = 48.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), contentAlignment = Alignment.CenterEnd) {
+    Box(Modifier.fillMaxWidth().padding(start = 56.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), contentAlignment = Alignment.CenterEnd) {
         Column(horizontalAlignment = Alignment.End) {
             Surface(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (faded) 0.5f else 1f),
-                shape = RoundedCornerShape(16.dp),
+                color = palette.selection.copy(alpha = if (faded) 0.5f else 1f),
+                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 6.dp),
             ) {
                 SelectionContainer {
-                    Text(text, Modifier.widthIn(max = 520.dp).padding(horizontal = 14.dp, vertical = 10.dp), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text(text, Modifier.widthIn(max = 520.dp).padding(horizontal = 14.dp, vertical = 9.dp), color = palette.text.copy(alpha = if (faded) 0.7f else 1f))
                 }
             }
-            if (caption != null) Text(caption, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp, end = 4.dp))
+            if (caption != null) Text(caption, style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = Modifier.padding(top = 3.dp, end = 4.dp))
         }
     }
 }
@@ -76,18 +97,10 @@ fun UserBubble(text: String, caption: String? = null, faded: Boolean = false) {
 @Composable
 fun BlockView(block: Block) {
     when (block.type) {
-        "text" -> if (!block.text.isNullOrBlank()) {
-            // Laid out at full height from the first frame and while more text arrives; a block
-            // that is empty until it has been parsed makes the list lose its place.
-            val markdown = rememberMarkdownState(block.text!!, retainState = true, immediate = true)
-            SelectionContainer { Markdown(markdown, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) }
-        }
+        "text" -> if (!block.text.isNullOrBlank()) Prose(block.text!!)
         "thinking" -> Thinking(block)
-        "tool" -> ToolCard(block)
-        "notice" -> Text(
-            block.text.orEmpty(), Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall,
-            color = if (block.level == "error") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        "tool" -> ToolRow(block)
+        "notice" -> Notice(block.text.orEmpty(), error = block.level == "error")
         // A message the user inserted while this reply was being written.
         "user" -> UserBubble(
             block.text.orEmpty(),
@@ -102,50 +115,179 @@ fun BlockView(block: Block) {
 }
 
 @Composable
-private fun Thinking(block: Block) {
-    var open by rememberSaveable(block.id) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 16.dp, vertical = 4.dp).animateContentSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("思考过程", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (open) Text(block.text.orEmpty(), style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant)
+fun Notice(text: String, error: Boolean) {
+    if (text.isBlank()) return
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (error) Icon(Icons.Filled.ErrorOutline, null, Modifier.padding(top = 1.dp).size(15.dp), tint = palette.error)
+        SelectionContainer { Text(text, style = MaterialTheme.typography.bodySmall, color = if (error) palette.error else palette.muted) }
     }
 }
 
 @Composable
-private fun ToolCard(block: Block) {
-    var open by rememberSaveable(block.id) { mutableStateOf(false) }
-    val summary = block.summary?.takeIf { it.isNotBlank() } ?: toolSummary(block.input)
-    OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clickable { open = !open }) {
-        Column(Modifier.padding(12.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun Prose(text: String) {
+    val colors = palette
+    val body = MaterialTheme.typography.bodyLarge.copy(color = colors.text)
+    val heading = body.copy(fontWeight = FontWeight.SemiBold)
+    // Laid out at full height from the first frame and while more text arrives; a block
+    // that is empty until it has been parsed makes the list lose its place.
+    val markdown = rememberMarkdownState(text, retainState = true, immediate = true)
+    SelectionContainer {
+        Markdown(
+            markdown,
+            colors = markdownColor(text = colors.text, codeBackground = colors.card, inlineCodeBackground = colors.card, dividerColor = colors.line, tableBackground = colors.card),
+            typography = markdownTypography(
+                h1 = heading.copy(fontSize = 20.sp, lineHeight = 28.sp), h2 = heading.copy(fontSize = 18.sp, lineHeight = 26.sp),
+                h3 = heading.copy(fontSize = 16.sp, lineHeight = 24.sp), h4 = heading, h5 = heading, h6 = heading,
+                text = body, paragraph = body, ordered = body, bullet = body, list = body, quote = body.copy(color = colors.muted),
+                code = CodeStyle, inlineCode = CodeStyle.copy(color = colors.syntax[0]),
+            ),
+            components = remember {
+                markdownComponents(
+                    codeBlock = { MarkdownCodeBlock(it.content, it.node, it.typography.code) { code, language, _ -> CodeBox(code, language) } },
+                    codeFence = { MarkdownCodeFence(it.content, it.node, it.typography.code) { code, language, _ -> CodeBox(code, language) } },
+                )
+            },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/** A collapsed line that opens to show the rest: used for tool calls and for Claude's thinking. */
+@Composable
+private fun Fold(
+    key: String?, icon: @Composable () -> Unit, title: String, detail: String, mono: Boolean = false,
+    content: (@Composable () -> Unit)?,
+) {
+    var open by rememberSaveable(key) { mutableStateOf(false) }
+    val colors = palette
+    Surface(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp), color = colors.card,
+        shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, colors.line),
+    ) {
+        Column(Modifier.animateContentSize()) {
+            Row(
+                Modifier.fillMaxWidth().clickable(enabled = content != null, onClickLabel = if (open) "收起" else "展开") { open = !open }
+                    .heightIn(min = 42.dp).padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) { icon() }
+                Text(title, style = MaterialTheme.typography.labelLarge, color = colors.text, maxLines = 1)
+                Text(
+                    detail, Modifier.weight(1f), style = if (mono) CodeStyle else MaterialTheme.typography.bodySmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.muted,
+                )
+                if (content != null) Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, Modifier.size(18.dp), tint = colors.dim)
+            }
+            if (open && content != null) {
+                HorizontalDivider(color = colors.line)
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Thinking(block: Block) {
+    val text = block.text.orEmpty()
+    Fold(
+        block.id ?: text.take(40), icon = { Icon(Icons.Filled.Lightbulb, null, Modifier.size(16.dp), tint = palette.muted) },
+        title = "思考", detail = text.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim(),
+        content = if (text.isBlank()) null else ({ SelectionContainer { Text(text, style = MaterialTheme.typography.bodyMedium, color = palette.muted) } }),
+    )
+}
+
+fun ToolKind.icon(): ImageVector = when (this) {
+    ToolKind.Command -> Icons.Filled.Terminal
+    ToolKind.Read -> Icons.Filled.Description
+    ToolKind.Write, ToolKind.Edit -> Icons.Filled.EditNote
+    ToolKind.Search -> Icons.Filled.Search
+    ToolKind.Web -> Icons.Filled.Language
+    ToolKind.Todo, ToolKind.Plan -> Icons.AutoMirrored.Filled.FactCheck
+    ToolKind.Agent -> Icons.Filled.Hub
+    ToolKind.Mcp -> Icons.Filled.Extension
+    ToolKind.Other -> Icons.Filled.Build
+}
+
+@Composable
+private fun ToolRow(block: Block) {
+    val look = remember(block.name, block.input) { toolLook(block.name, block.input) }
+    Fold(
+        block.id,
+        icon = {
+            when (block.status) {
+                "running" -> CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = palette.accent)
+                "error" -> Icon(Icons.Filled.ErrorOutline, "失败", Modifier.size(17.dp), tint = palette.error)
+                else -> Icon(look.kind.icon(), null, Modifier.size(17.dp), tint = palette.muted)
+            }
+        },
+        title = look.title, detail = look.detail.lineSequence().firstOrNull().orEmpty(),
+        mono = look.kind in setOf(ToolKind.Command, ToolKind.Search, ToolKind.Read, ToolKind.Write, ToolKind.Edit),
+    ) {
+        ToolInput(block.name, block.input)
+        val output = block.output.orEmpty().trim('\n')
+        if (output.isNotBlank()) CodeBox(clipped(output), "text", title = if (block.status == "error") "错误" else "输出", tint = if (block.status == "error") palette.error else palette.muted)
+        block.summary?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted) }
+        for (child in block.children.orEmpty()) {
+            val inner = toolLook(child.name, child.input)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                when (block.status) {
-                    "running" -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    "error" -> Icon(Icons.Filled.ErrorOutline, "失败", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
-                    else -> Icon(Icons.Filled.Build, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text(block.name ?: "工具", style = MaterialTheme.typography.labelLarge)
-                Text(summary, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (child.status == "running") CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = palette.accent)
+                else Icon(if (child.status == "error") Icons.Filled.ErrorOutline else inner.kind.icon(), null, Modifier.size(15.dp), tint = if (child.status == "error") palette.error else palette.dim)
+                Text(inner.title, style = MaterialTheme.typography.labelMedium, color = palette.text)
+                Text(inner.detail.lineSequence().firstOrNull().orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            if (open) {
-                SelectionContainer {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(prettyJson(block.input).take(4000), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                        val output = block.output.orEmpty()
-                        if (output.isNotBlank()) {
-                            Text(
-                                if (output.length > 6000) output.take(6000) + "\n…（其余 ${output.length - 6000} 个字符未显示）" else output,
-                                style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace,
-                                color = if (block.status == "error") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        block.children?.forEach { child ->
-                            Text("↳ " + (child.name ?: "工具") + "  " + toolSummary(child.input), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
+        }
+    }
+}
+
+/**
+ * Everything a tool was asked to do, shown as what it is: a command, a change to a file, a list of
+ * tasks. Nothing is left out or cut short, because a request to approve covers all of it.
+ */
+@Composable
+fun ToolInput(name: String?, input: JsonElement?) {
+    val look = remember(name, input) { toolLook(name, input) }
+    val fields = input as? JsonObject
+    val path = input.text("file_path") ?: input.text("notebook_path") ?: input.text("path")
+    val shown = mutableSetOf<String>()
+    @Composable fun path() {
+        if (path != null) SelectionContainer { Text(path, style = CodeStyle, color = palette.muted) }
+        shown += listOf("file_path", "notebook_path", "path")
+    }
+    when (look.kind) {
+        ToolKind.Command -> input.text("command")?.let { CodeBox(it, "bash", title = "命令"); shown += "command" }
+        ToolKind.Write -> {
+            path()
+            input.text("content")?.let { content -> DiffBox(remember(content) { diffLines("", content) }); shown += "content" }
+        }
+        ToolKind.Edit -> {
+            path()
+            val pairs = remember(input) { replacements(input) }
+            for ((old, new) in pairs) DiffBox(remember(old, new) { diffLines(old, new) })
+            if (pairs.isNotEmpty()) shown += listOf("old_string", "new_string", "old_source", "new_source", "edits")
+        }
+        ToolKind.Todo -> {
+            for (item in remember(input) { todos(input) }) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val done = item.status == "completed"
+                Icon(
+                    when (item.status) { "completed" -> Icons.Filled.CheckCircle; "in_progress" -> Icons.Filled.Timelapse; else -> Icons.Filled.RadioButtonUnchecked },
+                    when (item.status) { "completed" -> "已完成"; "in_progress" -> "进行中"; else -> "未开始" },
+                    Modifier.padding(top = 2.dp).size(16.dp), tint = when (item.status) { "completed" -> palette.added; "in_progress" -> palette.accent; else -> palette.dim },
+                )
+                Text(item.text, style = MaterialTheme.typography.bodyMedium, color = if (done) palette.muted else palette.text, textDecoration = if (done) TextDecoration.LineThrough else null)
             }
+            shown += "todos"
+        }
+        ToolKind.Plan -> input.text("plan")?.let { Prose(it); shown += "plan" }
+        else -> {}
+    }
+    // Whatever has no form of its own is still listed, by name.
+    if (fields == null) {
+        if (input != null) CodeBox(prettyJson(input), "json", title = "参数")
+    } else for ((key, value) in fields) {
+        if (key in shown) continue
+        Column {
+            Text(key, style = MaterialTheme.typography.labelSmall, color = palette.dim)
+            SelectionContainer { Text(input.text(key) ?: prettyJson(value), style = if (value is JsonPrimitive && value.isString) MaterialTheme.typography.bodyMedium else CodeStyle, color = palette.text) }
         }
     }
 }
