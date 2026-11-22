@@ -32,7 +32,13 @@ fun MirrorApp(model: AppModel) {
                 HostEditScreen(model, entry.arguments?.getString("id").orEmpty(), onDone = { navigation.popBackStack() })
             }
             composable("host/{id}") { entry ->
-                SessionsScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() }, onOpen = { navigation.navigate("chat/$it") })
+                val id = entry.arguments?.getString("id").orEmpty()
+                SessionsScreen(model, id, snackbar, onBack = { navigation.popBackStack() }, onOpen = { navigation.navigate("chat/$it") }, onHistory = { navigation.navigate("history/$id") })
+            }
+            composable("history/{id}") { entry ->
+                // The chat takes the list's place, so Back from it returns to the conversations.
+                HistoryScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() },
+                    onOpen = { navigation.navigate("chat/$it") { popUpTo("history/{id}") { inclusive = true } } })
             }
             composable("chat/{id}") { entry ->
                 ChatScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() })

@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,15 +14,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -55,9 +61,12 @@ fun ChatSession.statusLabel(): String? = when (status) {
     else -> null
 }
 
+/** The last part of a path, which is how a project is known. */
+fun folderName(path: String): String = path.trimEnd('/').substringAfterLast('/').ifEmpty { path }
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState, onBack: () -> Unit, onOpen: (String) -> Unit) {
+fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState, onBack: () -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit) {
     val hosts by model.hosts.collectAsStateWithLifecycle()
     val host = hosts.firstOrNull { it.id == hostId }
     if (host == null) {
@@ -68,7 +77,12 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
     val state = connections[hostId]
     val all by model.sessions.collectAsStateWithLifecycle()
     val sessions = all.filter { it.hostId == hostId }.sortedByDescending { it.updatedAt }
+    // The project talked in last comes first; one without conversations keeps its place at the end.
+    val projects = (sessions.map { it.directory } + host.directory + host.projects).distinct()
     var deleting by remember { mutableStateOf<ChatSession?>(null) }
+    var renaming by remember { mutableStateOf<ChatSession?>(null) }
+    var menu by remember { mutableStateOf<String?>(null) }
+    var picking by remember { mutableStateOf(false) }
     LaunchedEffect(hostId) {
         if (state !is ConnectionState.Connected && state !is ConnectionState.Connecting) model.connect(host)
     }
@@ -84,12 +98,17 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
                     }
                 },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
-                actions = { IconButton(onClick = { model.reconnect(host) }) { Icon(Icons.Filled.Refresh, "重新连接") } },
+                actions = {
+                    val connected = state is ConnectionState.Connected
+                    IconButton(onClick = onHistory, enabled = connected) { Icon(Icons.Filled.History, "服务器上的对话") }
+                    IconButton(onClick = { picking = true }, enabled = connected) { Icon(Icons.Filled.CreateNewFolder, "添加项目") }
+                    IconButton(onClick = { model.reconnect(host) }) { Icon(Icons.Filled.Refresh, "重新连接") }
+                },
             )
         },
         snackbarHost = { Snackbar(snackbar) },
         floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = { onOpen(model.createSession(host).id) }, icon = { Icon(Icons.Filled.Add, null) }, text = { Text("新对话") })
+            ExtendedFloatingActionButton(onClick = { onOpen(model.createSession(host, projects.first()).id) }, icon = { Icon(Icons.Filled.Add, null) }, text = { Text("新对话") })
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -106,31 +125,60 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
                     Text(warning, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.bodySmall)
                 }
             }
-            if (sessions.isEmpty()) {
-                Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("还没有对话", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else LazyColumn(Modifier.fillMaxSize()) {
-                items(sessions, key = { it.id }) { session ->
-                    val preview = session.statusLabel() ?: session.messages.lastOrNull { it.role == "user" }?.text ?: "还没有消息"
-                    ListItem(
-                        headlineContent = { Text(session.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = { Text(preview, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        trailingContent = {
-                            if (session.isBusy && session.status != "detached") CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        },
-                        modifier = Modifier.combinedClickable(onClick = { onOpen(session.id) }, onLongClick = { deleting = session }),
-                    )
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 88.dp)) {
+                for (project in projects) {
+                    val inside = sessions.filter { it.directory == project }
+                    item(key = "project:$project") {
+                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(folderName(project), style = MaterialTheme.typography.titleSmall, color = palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(project, style = MaterialTheme.typography.bodySmall, color = palette.dim, maxLines = 1, overflow = TextOverflow.StartEllipsis)
+                            }
+                            // Only a project added by hand and left empty can go; the others come from what is in them.
+                            if (inside.isEmpty() && project in host.projects) TextButton(onClick = { model.removeProject(host, project) }) { Text("移除", color = palette.muted) }
+                            IconButton(onClick = { onOpen(model.createSession(host, project).id) }) { Icon(Icons.Filled.Add, "在 ${folderName(project)} 里新建对话", tint = palette.muted) }
+                        }
+                    }
+                    items(inside, key = { it.id }) { session ->
+                        val preview = session.statusLabel() ?: session.messages.lastOrNull { it.role == "user" }?.text ?: ""
+                        Box {
+                            ListItem(
+                                headlineContent = { Text(session.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = if (preview.isEmpty()) null else ({ Text(preview, maxLines = 1, overflow = TextOverflow.Ellipsis) }),
+                                trailingContent = {
+                                    if (session.isBusy && session.status != "detached") CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                },
+                                modifier = Modifier.combinedClickable(onClick = { onOpen(session.id) }, onLongClick = { menu = session.id }),
+                            )
+                            DropdownMenu(menu == session.id, onDismissRequest = { menu = null }) {
+                                DropdownMenuItem(text = { Text("重命名") }, onClick = { menu = null; renaming = session })
+                                DropdownMenuItem(text = { Text("删除", color = MaterialTheme.colorScheme.error) }, onClick = { menu = null; deleting = session })
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    if (picking) FolderPicker(model, host, onDismiss = { picking = false }) { model.addProject(host, it); picking = false }
+
+    renaming?.let { session ->
+        var name by remember(session.id) { mutableStateOf(session.name) }
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text("重命名") },
+            text = { OutlinedTextField(name, { name = it }, singleLine = true) },
+            confirmButton = { TextButton(onClick = { model.rename(session.id, name); renaming = null }, enabled = name.isNotBlank()) { Text("保存") } },
+            dismissButton = { TextButton(onClick = { renaming = null }) { Text("取消") } },
+        )
     }
 
     deleting?.let { session ->
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("删除对话") },
-            text = { Text("从这台手机上删除“${session.name}”。服务器上的 Claude 历史记录不受影响。") },
+            text = { Text("只从手机上删除，服务器上的记录保留。") },
             confirmButton = { TextButton(onClick = { model.removeSession(session.id); deleting = null }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
         )
