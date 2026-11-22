@@ -27,7 +27,10 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -67,11 +70,15 @@ class AppModel(private val application: Application) {
     private val recovering = MutableStateFlow(emptySet<String>())
 
     /**
-     * Replies being followed: those of servers that are connected or about to be again. While
-     * there are any, the app stays connected out of sight.
+     * Conversations being followed: a reply is running, or a queued message is about to start
+     * one, on a server that is connected or about to be again. While there are any, the app stays
+     * connected out of sight.
      */
     val running: StateFlow<List<ChatSession>> = combine(sessions, connections, recovering) { all, states, again ->
-        all.filter { it.remoteTask != null && (it.hostId in again || states[it.hostId].let { state -> state is ConnectionState.Connected || state is ConnectionState.Connecting }) }
+        all.filter { session ->
+            (session.remoteTask != null || session.queue.isNotEmpty() && !session.queuePaused) &&
+                (session.hostId in again || states[session.hostId].let { it is ConnectionState.Connected || it is ConnectionState.Connecting })
+        }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
@@ -99,10 +106,14 @@ class AppModel(private val application: Application) {
             }
         }
         scope.launch {
-            running.collect { now ->
-                if (now.isEmpty()) { if (kept) KeepAlive.stop(application) }
-                else if (kept) notices.update(now)
-                else KeepAlive.start(application)
+            // Only who is running matters here, not every word of a reply as it arrives.
+            running.map { all -> all.map { it.name } }.distinctUntilChanged().collectLatest { names ->
+                if (names.isEmpty()) {
+                    // A moment between two replies is not the end: once stopped out of sight,
+                    // Android does not let the service start again.
+                    delay(3_000)
+                    if (kept) KeepAlive.stop(application)
+                } else if (kept) notices.update(running.value) else KeepAlive.start(application)
             }
         }
     }
@@ -128,7 +139,7 @@ class AppModel(private val application: Application) {
         kept = value
         if (value) notices.update(running.value)
         // Stopped by Android while replies are still followed: taken up again when that is allowed.
-        else if (was && foreground && running.value.isNotEmpty()) KeepAlive.start(application)
+        else if (!(was && running.value.isNotEmpty() && KeepAlive.start(application))) notices.rest()
     }
 
     /** True the first time only: whether to ask the user to allow notifications. */

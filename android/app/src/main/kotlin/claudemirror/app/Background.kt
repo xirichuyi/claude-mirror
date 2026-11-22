@@ -71,6 +71,9 @@ class Notices(private val context: Context) {
 
     fun update(running: List<ChatSession>) = post(ONGOING, ongoing(running))
 
+    /** Nothing is followed any more: "回复中" is not left behind by a service that has gone. */
+    fun rest() = manager.cancel(ONGOING)
+
     fun tell(alert: Alert) {
         val session = alert.session
         val builder = NotificationCompat.Builder(context, NEWS)
