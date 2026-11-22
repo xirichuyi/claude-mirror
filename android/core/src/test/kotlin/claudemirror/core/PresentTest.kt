@@ -29,6 +29,10 @@ class PresentTest {
     @Test fun `an edit is compared line by line`() {
         assertEquals(listOf("a" to "b", "c" to "d"), replacements(json("""{"edits":[{"old_string":"a","new_string":"b"},{"old_string":"c","new_string":"d"}]}""")))
         assertEquals(
+            listOf(Change("a", "b", true), Change("c", "d", false)),
+            changes(json("""{"edits":[{"old_string":"a","new_string":"b","replace_all":true},{"old_string":"c","new_string":"d"}]}""")),
+        )
+        assertEquals(
             listOf(DiffLine(' ', "one"), DiffLine('-', "two"), DiffLine('+', "2"), DiffLine(' ', "three"), DiffLine('+', "four")),
             diffLines("one\ntwo\nthree", "one\n2\nthree\nfour"),
         )

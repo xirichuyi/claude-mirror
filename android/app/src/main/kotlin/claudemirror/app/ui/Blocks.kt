@@ -56,7 +56,7 @@ import claudemirror.core.Attachment
 import claudemirror.core.Block
 import claudemirror.core.ToolKind
 import claudemirror.core.diffLines
-import claudemirror.core.replacements
+import claudemirror.core.changes
 import claudemirror.core.todos
 import claudemirror.core.readableError
 import claudemirror.core.toolLook
@@ -274,9 +274,13 @@ fun ToolInput(name: String?, input: JsonElement?) {
         }
         ToolKind.Edit -> {
             path()
-            val pairs = remember(input) { replacements(input) }
-            for ((old, new) in pairs) DiffBox(remember(old, new) { diffLines(old, new) })
-            if (pairs.isNotEmpty()) shown += listOf("old_string", "new_string", "old_source", "new_source", "edits")
+            val pairs = remember(input) { changes(input) }
+            for (change in pairs) {
+                // Said with the change it belongs to: approving it rewrites more than the lines shown.
+                if (change.everywhere) Text("全部替换", style = MaterialTheme.typography.labelMedium, color = palette.warning)
+                DiffBox(remember(change) { diffLines(change.old, change.new) })
+            }
+            if (pairs.isNotEmpty()) shown += listOf("old_string", "new_string", "old_source", "new_source", "edits", "replace_all")
         }
         ToolKind.Todo -> {
             for (item in remember(input) { todos(input) }) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

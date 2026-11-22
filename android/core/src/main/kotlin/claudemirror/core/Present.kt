@@ -71,13 +71,18 @@ fun todos(input: JsonElement?): List<TodoItem> = (input.obj()?.get("todos") as? 
 }
 
 /** The text an edit takes out and the text it puts in, one pair per place changed. */
-fun replacements(input: JsonElement?): List<Pair<String, String>> {
+fun replacements(input: JsonElement?): List<Pair<String, String>> = changes(input).map { it.old to it.new }
+
+/** One replacement a tool asks for. [everywhere]: each place the old text occurs, not only the first. */
+data class Change(val old: String, val new: String, val everywhere: Boolean)
+
+fun changes(input: JsonElement?): List<Change> {
     val fields = input.obj() ?: return emptyList()
     val many = (fields["edits"] as? JsonArray)?.mapNotNull { it.obj() } ?: listOf(fields)
     return many.mapNotNull { edit ->
         val old = edit["old_string"].string() ?: edit["old_source"].string().orEmpty()
         val new = edit["new_string"].string() ?: edit["new_source"].string() ?: return@mapNotNull null
-        old to new
+        Change(old, new, edit["replace_all"].truthy)
     }
 }
 
