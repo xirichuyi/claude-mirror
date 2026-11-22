@@ -37,7 +37,8 @@ fun Intent.session(): String? = getStringExtra(SESSION)
 /** What the app says while it is not on screen. */
 class Notices(private val context: Context) {
     private val manager = NotificationManagerCompat.from(context)
-    private val shown = HashSet<Int>()
+    /** Posted and not yet withdrawn, including what a process before this one left behind. */
+    private val shown = manager.activeNotifications.mapTo(HashSet()) { it.id }.apply { remove(ONGOING) }
 
     init {
         context.getSystemService(NotificationManager::class.java).createNotificationChannels(listOf(
