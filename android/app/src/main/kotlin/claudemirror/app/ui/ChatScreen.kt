@@ -121,7 +121,8 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
     var draft by rememberSaveable(sessionId) { mutableStateOf("") }
 
     // A phone on its side with its keyboard up: the title gives its room to the conversation.
-    val tight = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp - WindowInsets.ime.getBottom(this).toDp() } < 300.dp
+    val screen = LocalConfiguration.current
+    val tight = screen.screenWidthDp > screen.screenHeightDp && with(LocalDensity.current) { screen.screenHeightDp.dp - WindowInsets.ime.getBottom(this).toDp() } < 300.dp
     Scaffold(
         topBar = {
             if (!tight) TopAppBar(
