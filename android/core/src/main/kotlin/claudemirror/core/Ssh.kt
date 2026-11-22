@@ -70,13 +70,16 @@ class SshLauncher(
 
     override fun start(host: HostConfig, command: String): RemoteProcess {
         val client = client(host)
-        val session = try { client.startSession() } catch (error: IOException) {
+        // A connection that went away since it was looked up is refused by the library with an IllegalStateException.
+        val session = try { client.startSession() } catch (error: Exception) {
+            if (error !is IOException && error !is IllegalStateException) throw error
             val stale = synchronized(clients) { if (clients[host.id] === client) clients.remove(host.id) else null }
             runCatching { stale?.close() }
             throw RemoteException("SSH 通道已断开", confirmed = false)
         }
-        val running = try { session.exec(command) } catch (error: IOException) {
+        val running = try { session.exec(command) } catch (error: Exception) {
             runCatching { session.close() }
+            if (error !is IOException && error !is IllegalStateException) throw error
             throw RemoteException("SSH 通道已断开", confirmed = false)
         }
         val errors = StringBuffer()
