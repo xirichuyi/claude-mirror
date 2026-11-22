@@ -373,7 +373,7 @@ private fun Composer(
             maxLines = if (compact) 2 else 6,
             decorationBox = { inner ->
                 Box(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                    if (draft.isEmpty()) Text(if (replying) "排队或插队" else "发消息", style = MaterialTheme.typography.bodyLarge, color = palette.dim, maxLines = 1)
+                    if (draft.isEmpty()) Text(if (replying) "排队或插队" else "发消息", style = MaterialTheme.typography.bodyLarge, color = palette.muted, maxLines = 1)
                     inner()
                 }
             },

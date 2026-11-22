@@ -102,7 +102,7 @@ fun CodeBox(code: String, language: String? = null, modifier: Modifier = Modifie
     Surface(modifier.fillMaxWidth(), color = colors.selection, shape = MaterialTheme.shapes.medium) {
         Column {
             Row(Modifier.fillMaxWidth().height(32.dp).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(title.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = colors.dim, maxLines = 1)
+                Text(title.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = colors.muted, maxLines = 1)
                 CopyButton(code)
             }
             SelectionContainer {

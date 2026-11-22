@@ -37,8 +37,8 @@ private fun hex(value: Long) = Color(0xFF000000 or value)
 private val Midnight = Palette(
     dark = true,
     frame = hex(0x262624), card = hex(0x30302E), popup = hex(0x30302E),
-    text = hex(0xF0EEE6), muted = hex(0xA6A39A), dim = hex(0x77756E),
-    accent = hex(0xD97757), accentFill = hex(0xD97757), selection = hex(0x141413),
+    text = hex(0xF0EEE6), muted = hex(0xA6A39A), dim = hex(0x85827A),
+    accent = hex(0xD97757), accentFill = hex(0xB8573A), selection = hex(0x141413),
     line = hex(0x3E3D3A),
     error = hex(0xE5786B), warning = hex(0xD9A84E), added = hex(0x7FB58B), removed = hex(0xE5786B),
     syntax = listOf<Long>(0xD99A6C, 0x7CC7C2, 0x9DBF86, 0xC49BC9, 0x8A887F, 0x86B6E8, 0xDCC27A, 0xE5A9A0).map(::hex),
@@ -47,8 +47,8 @@ private val Midnight = Palette(
 private val Daylight = Palette(
     dark = false,
     frame = hex(0xFAF9F5), card = hex(0xFFFFFF), popup = hex(0xFFFFFF),
-    text = hex(0x1F1E1D), muted = hex(0x6B6A65), dim = hex(0xA3A199),
-    accent = hex(0xC96442), accentFill = hex(0xD97757), selection = hex(0xF0EEE6),
+    text = hex(0x1F1E1D), muted = hex(0x6B6A65), dim = hex(0x87857D),
+    accent = hex(0xB5532F), accentFill = hex(0xB8573A), selection = hex(0xF0EEE6),
     line = hex(0xE5E3DA),
     error = hex(0xB5443A), warning = hex(0x8F6400), added = hex(0x2F7D4F), removed = hex(0xB5443A),
     syntax = listOf<Long>(0xA4502D, 0x1F6F78, 0x3B6E23, 0x7A3E92, 0x7D7B73, 0x2A5FA8, 0x6B5200, 0x8A3552).map(::hex),

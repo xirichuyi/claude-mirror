@@ -147,7 +147,7 @@ private fun Questions(questions: List<JsonObject>, onAnswer: (JsonObject) -> Uni
         }
         OutlinedTextField(
             typed[question].orEmpty(), { typed = typed + (question to it) }, Modifier.fillMaxWidth(),
-            placeholder = { Text("其他", color = palette.dim) }, singleLine = true, textStyle = MaterialTheme.typography.bodyMedium,
+            placeholder = { Text("其他", color = palette.muted) }, singleLine = true, textStyle = MaterialTheme.typography.bodyMedium,
         )
     }
     val names = questions.mapNotNull { it.text("question") }

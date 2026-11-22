@@ -185,7 +185,7 @@ private fun Fold(
             Text(title, style = MaterialTheme.typography.bodyMedium, color = colors.muted, maxLines = 1)
             Text(
                 detail, Modifier.weight(1f, fill = false), style = if (mono) CodeStyle else MaterialTheme.typography.bodySmall,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.dim,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.muted,
             )
             if (content != null) Icon(if (open) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight, null, Modifier.size(16.dp), tint = colors.dim)
         }
@@ -299,7 +299,7 @@ fun ToolInput(name: String?, input: JsonElement?) {
     } else for ((key, value) in fields) {
         if (key in shown) continue
         Column {
-            Text(key, style = MaterialTheme.typography.labelSmall, color = palette.dim)
+            Text(key, style = MaterialTheme.typography.labelSmall, color = palette.muted)
             SelectionContainer { Text(input.text(key) ?: prettyJson(value), style = if (value is JsonPrimitive && value.isString) MaterialTheme.typography.bodyMedium else CodeStyle, color = palette.text) }
         }
     }
