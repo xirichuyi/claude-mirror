@@ -75,6 +75,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.platform.LocalConfiguration
 import claudemirror.core.modelName
 import claudemirror.core.readableError
 import androidx.compose.ui.platform.LocalDensity
@@ -117,9 +120,11 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
     val connections by model.connections.collectAsStateWithLifecycle()
     var draft by rememberSaveable(sessionId) { mutableStateOf("") }
 
+    // A phone on its side with its keyboard up: the title gives its room to the conversation.
+    val tight = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp - WindowInsets.ime.getBottom(this).toDp() } < 300.dp
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (!tight) TopAppBar(
                 title = {
                     Column {
                         Text(session.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
