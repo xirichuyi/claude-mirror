@@ -4,49 +4,38 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>claude-mirror</title>
         <item>
-            <title>0.25.0</title>
-            <pubDate>Sat, 21 Nov 2026 14:26:42 +0000</pubDate>
-            <sparkle:version>19</sparkle:version>
-            <sparkle:shortVersionString>0.25.0</sparkle:shortVersionString>
+            <title>0.26.0</title>
+            <pubDate>Sun, 22 Nov 2026 04:54:28 +0000</pubDate>
+            <sparkle:version>20</sparkle:version>
+            <sparkle:shortVersionString>0.26.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Claude Mirror v0.25.0
+            <description sparkle:format="markdown"><![CDATA[# Claude Mirror v0.26.0
 
-本次更新让 macOS 版可以在回复途中插队和停止，新增 Android 客户端（预览），并把 root 服务器的配置缩成一条命令。
+本次更新补齐 Windows 客户端在 v0.24.0 里缺的功能：Full Access、跳板机和 ssh-agent 登录、多个对话同时回复、插件和 Agent 列表、对话用量、跨消息选择文本。
 
-## macOS
+## Windows
 
-- 回复进行中按 Enter，消息进入队列；按 ⌘Enter 或点队列项上的“立即发送”，消息插入当前回复，Claude 在下一步就能看到。
-- 按 Esc 停止当前回复，输入框里没发出的文字保留。停止后队列暂停，点“继续发送”才会发出。
-- 队列中的消息可以编辑、移除，也可以一次清空。
-- 输入框工具栏显示上下文用量（已用 / 总量），每轮回复后更新。
-- 账户信息只保留邮箱、组织、订阅、服务提供方和 Claude Code 版本，不再显示额度和“当前对话”。
+- 新增 Full Access 权限模式。以 root 登录的服务器需要在新对话里填写一个普通执行账号，由它运行 Claude；该账号名下的对话历史、附件和废纸篓操作都按这个账号处理。
+- 新增登录方式“系统 SSH”：使用 Windows 自带的 OpenSSH 连接，支持 `~/.ssh/config`、ssh-agent 和跳板机（ProxyJump）。经跳板机连接时不在本机开中转端口。
+- 系统 SSH 不能输入密码；第一次连接没见过的主机时，需要先在终端里确认一次主机密钥，应用会提示并可直接打开终端。
+- 多个对话可以同时回复：切到别的对话后，原对话在后台继续，侧栏显示“回复中 / 等你确认 / 已暂停 / 有新回复”。断线时后台对话的发送队列暂停，重连后接回。
+- 状态页新增已加载的插件列表、Agent 列表，以及当前对话的用量（最近一轮、各模型 token、服务器报告的费用）。
+- 新增“对话文本”标签页，可跨消息拖选、全选和复制。对话气泡里仍只能在一段内选择；“对话文本”不包含工具调用和思考过程。
+- 修复：同一地址经不同跳板机连接时，本机保存的对话和任务不再混在一起。
 
-## Android（预览）
+Windows 暂不支持：回复途中插队、按天的用量历史、反向访问。密码和私钥文件登录仍是直连，不能经跳板机；要经跳板机请用“系统 SSH”。
 
-- 新增 Android 客户端，手机通过 SSH 直连服务器，不经过中转服务。需要 Android 8.0 或更高版本。
-- 支持：添加服务器（密码或私钥登录）、首次连接确认服务器指纹、对话与流式回复、工具调用、权限确认、排队、插队、停止、上下文用量、断线后自动接回。
-- 本次发布附带的 `claude-mirror-android-debug.apk` 是调试签名的安装包，可以直接安装，不能上架应用商店。
-- 暂不支持：导入服务器上已有的对话历史、附件、切换模型、填写 MCP 表单。
+## 服务器
 
-## 服务器配置
+- 把项目的对话记录移到废纸篓时，执行账号名下的记录由该账号自己移动，root 不在它的目录里改动文件。
 
-- `setup-remote.sh` 新增 `--runner`、`--project` 和 `--copy-login`：以 root 登录的服务器一条命令建好运行 Claude 的普通账号、授权项目目录、安装 Claude Code，并可把 root 的 Claude 登录复制给该账号。
-
-```sh
-sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app root@服务器
-```
-
-## 其他
-
-- 服务端支持在回复途中接收插队消息，并随状态一起推送上下文用量。Windows 版暂未使用这两项。
-
-验证：自动化测试通过；Android 版在 Android 15 模拟器上通过真实 SSH 和真实 Claude Code 完整操作过，Anthropic API 为脚本模拟。macOS 的 Esc 停止和 ⌘Enter 插队只有引擎测试，未在真实 Mac 上按键验证。Android 未在真机上验证，也未验证密码登录、带口令的私钥和真实 Anthropic API。root 服务器配置在 Ubuntu 24.04 容器中验证，未使用真实的 Claude 登录。
+验证：自动化测试通过。系统 SSH 的连接层在构建流程中用真实的 Windows `ssh.exe` 和 Linux OpenSSH 对本地 SSH 服务测试过（直连、经跳板机、上传下载、端口转发、未知主机密钥被拒绝）；执行账号的附件和废纸篓操作在构建流程中以 root 实测。Windows 的新界面只通过编译、启动检查和单元测试，未在真实 Windows 电脑上逐项操作过；Full Access、后台对话和状态页的新列表未从 Windows 客户端连接真实 Claude Code 服务器验证。
 ]]></description>
-            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.25.0/claude-mirror-0.25.0-macOS-arm64.dmg" length="9020368" type="application/octet-stream" sparkle:edSignature="VOkqOSb9U+TBhDyQPD7hVX3QTaIKqtV4Q0AB5KV4n99PhgJnsP2Ds+YjKHvsHkxAy8rYR+NY03C59f62pyz/AQ=="></enclosure>
+            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.26.0/claude-mirror-0.26.0-macOS-arm64.dmg" length="9025981" type="application/octet-stream" sparkle:edSignature="RsyM4s/xL+S/FD+hirkHxJfOZXHkcslPqm2HJQ6buIAkwxX+9bkBHFxtSEzDVn3IUQVoCNG7ydn2SL6pBoN7Ag=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: bWwPBpkm/1D94ksqmp14P3ymsKMZa5RDm20xfho3ENe49aT0lz/dksPXFz6/IP+3n0OjjtBKVPpAlEIsWBv/Cw==
-length: 3587
+edSignature: jdaLmBZ5z6NPUxKXCNof3/g38RB4Z45pF4zC5+9agwvAY/XF3H6T6PXJDhQNOQQ2qhwKwJ3LngSmjOEkuGi3Dg==
+length: 3617
 -->
