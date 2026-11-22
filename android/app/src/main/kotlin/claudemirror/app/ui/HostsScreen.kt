@@ -1,5 +1,12 @@
 package claudemirror.app.ui
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -26,7 +33,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -74,27 +80,27 @@ fun HostsScreen(model: AppModel, snackbar: SnackbarHostState, onOpen: (String) -
         topBar = { TopAppBar(title = { Text("服务器") }) },
         snackbarHost = { Snackbar(snackbar) },
         floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = { onEdit(model.newHostId()) }, icon = { Icon(Icons.Filled.Add, null) }, text = { Text("添加服务器") })
+            ExtendedFloatingActionButton(onClick = { onEdit(model.newHostId()) }, icon = { Icon(Icons.Filled.Add, null) }, text = { Text("添加") },
+                shape = CircleShape, containerColor = palette.accentFill, contentColor = Color.White)
         },
     ) { padding ->
         if (hosts.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding).padding(32.dp), contentAlignment = Alignment.Center) {
-                Text("还没有服务器", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spark(Modifier.size(44.dp))
             }
         } else LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             items(hosts, key = { it.id }) { host ->
                 val state = connections[host.id]
-                ListItem(
-                    headlineContent = { Text(host.displayName) },
-                    supportingContent = {
-                        Text(
-                            state.label(),
-                            color = if (state is ConnectionState.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                    trailingContent = { IconButton(onClick = { onEdit(host.id) }) { Icon(Icons.Filled.Edit, "编辑") } },
-                    modifier = Modifier.clickable { onOpen(host.id) },
-                )
+                Row(
+                    Modifier.fillMaxWidth().clickable { onOpen(host.id) }.heightIn(min = 60.dp).padding(start = 16.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(host.displayName, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(state.label(), style = MaterialTheme.typography.bodySmall, color = if (state is ConnectionState.Failed) palette.error else palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = { onEdit(host.id) }) { Icon(Icons.Filled.Edit, "编辑", Modifier.size(18.dp), tint = palette.dim) }
+                }
             }
         }
     }

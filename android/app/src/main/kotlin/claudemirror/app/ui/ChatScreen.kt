@@ -1,5 +1,11 @@
 package claudemirror.app.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -61,7 +67,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -141,12 +147,13 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
     val tight = screen.screenWidthDp > screen.screenHeightDp && with(LocalDensity.current) { screen.screenHeightDp.dp - WindowInsets.ime.getBottom(this).toDp() } < 300.dp
     Scaffold(
         topBar = {
-            if (!tight) TopAppBar(
+            if (!tight) CenterAlignedTopAppBar(
                 title = {
-                    Column {
-                        Text(session.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        (session.statusLabel() ?: session.model?.let(::modelName))?.let {
-                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(session.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // The model is on the composer; only what the conversation is doing is worth a second line.
+                        session.statusLabel()?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 },
@@ -253,12 +260,15 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -
     if (session.historyBefore != null && !list.canScrollBackward) {
         TextButton(onClick = onEarlier, Modifier.align(Alignment.CenterHorizontally)) { Text("更早", color = palette.muted) }
     }
-    LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(reader), state = list) {
+    Box(Modifier.weight(1f).fillMaxWidth()) {
+    // Nothing said yet: the page is Claude's mark and the composer.
+    if (rows.isEmpty() && !session.isBusy && session.permissions.isEmpty()) Spark(Modifier.align(Alignment.Center).size(48.dp))
+    LazyColumn(Modifier.fillMaxSize().nestedScroll(reader), state = list) {
         items(rows.size, key = { rows[it].first }) { index ->
             val (_, message, part) = rows[index]
             when (part) {
                 -1 -> UserBubble(message.text.orEmpty(), message.attachments.orEmpty())
-                -2 -> Column(Modifier.padding(horizontal = 16.dp)) {
+                -2 -> Column(Modifier.padding(horizontal = 20.dp)) {
                     readableError(message.error)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     if (message.interrupted == true) Text("已停止", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 }
@@ -268,8 +278,8 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -
         item(key = "status") {
             // A pending request is shown by its own card.
             if (session.isBusy && session.status != "permission") {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (session.status != "detached") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (session.status != "detached") Spark(Modifier.size(20.dp), turning = true)
                     Text(
                         if (session.status == "working") last?.activity?.takeIf { it.isNotBlank() } ?: "Claude 正在回复…" else session.statusLabel().orEmpty(),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -283,13 +293,14 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -
         }
     }
     }
+    }
 }
 
 /** Messages waiting for the current reply to end. Each can go into the reply now, back to the editor (when its files fit there), or away. */
 @Composable
 private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (QueuedMessage) -> Boolean) {
     if (session.queue.isEmpty()) return
-    HorizontalDivider()
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp), shape = MaterialTheme.shapes.large, color = palette.selection) {
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val waiting = (session.queuePaused || session.queueHeld) && session.remoteTask == null
@@ -320,6 +331,7 @@ private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (Queu
         }
     }
 }
+}
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -331,9 +343,9 @@ private fun Composer(
     // A file still on its way holds the message back; one that failed is sent again or taken off first.
     val ready = (draft.isNotBlank() || files.isNotEmpty()) && files.all { it.file != null }
     val actions: @Composable () -> Unit = {
-        if (session.isBusy) Act(Icons.Filled.Stop, "停止", palette.error, enabled = session.status != "stopping", onClick = onStop)
+        if (session.isBusy) Act(Icons.Filled.Stop, "停止", palette.text, palette.frame, enabled = session.status != "stopping", onClick = onStop)
         if (replying) Act(Icons.Filled.Bolt, "插队", palette.selection, palette.accent, ready) { onSend(true) }
-        if (!session.isBusy || replying) Act(Icons.Filled.ArrowUpward, if (replying) "排队" else "发送", MaterialTheme.colorScheme.primary, enabled = ready) { onSend(false) }
+        if (!session.isBusy || replying) Act(Icons.Filled.ArrowUpward, if (replying) "排队" else "发送", palette.accentFill, enabled = ready) { onSend(false) }
     }
     // One place for both layouts: what is picked while the window turns still arrives.
     val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { if (it.isNotEmpty()) model.attach(session.id, it) }
@@ -360,7 +372,7 @@ private fun Composer(
             cursorBrush = SolidColor(palette.accent),
             maxLines = if (compact) 2 else 6,
             decorationBox = { inner ->
-                Box(Modifier.padding(horizontal = 6.dp, vertical = 6.dp)) {
+                Box(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                     if (draft.isEmpty()) Text(if (replying) "排队或插队" else "发消息", style = MaterialTheme.typography.bodyLarge, color = palette.dim, maxLines = 1)
                     inner()
                 }
@@ -368,11 +380,12 @@ private fun Composer(
         )
     }
     Surface(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = if (compact) 4.dp else 8.dp),
-        shape = MaterialTheme.shapes.large, color = palette.card, border = BorderStroke(1.dp, palette.line),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = if (compact) 4.dp else 8.dp),
+        shape = MaterialTheme.shapes.extraLarge, color = palette.card, border = BorderStroke(1.dp, palette.line),
+        shadowElevation = if (palette.dark) 0.dp else 3.dp,
     ) {
         // The field keeps its place in both layouts, so it keeps the keyboard when one turns into the other.
-        Column(Modifier.padding(start = 8.dp, end = 6.dp, top = if (compact) 2.dp else 6.dp, bottom = if (compact) 2.dp else 4.dp)) {
+        Column(Modifier.padding(start = 10.dp, end = 8.dp, top = if (compact) 2.dp else 8.dp, bottom = if (compact) 2.dp else 6.dp)) {
             if (files.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (file in files) PickedChip(file, onRetry = { model.retry(session.id, file.id) }, onRemove = { model.detach(session.id, file.id) })
             }
@@ -414,8 +427,8 @@ private fun PickedChip(file: Picked, onRetry: () -> Unit, onRemove: () -> Unit) 
     val failed = file.error != null
     val tint = if (failed) palette.error else palette.text
     Surface(
-        shape = MaterialTheme.shapes.small, color = palette.selection, border = if (failed) BorderStroke(1.dp, palette.error) else null,
-        modifier = if (failed) Modifier.clip(MaterialTheme.shapes.small).clickable(role = Role.Button, onClickLabel = "重试", onClick = onRetry) else Modifier,
+        shape = MaterialTheme.shapes.medium, color = palette.selection, border = if (failed) BorderStroke(1.dp, palette.error) else null,
+        modifier = if (failed) Modifier.clip(MaterialTheme.shapes.medium).clickable(role = Role.Button, onClickLabel = "重试", onClick = onRetry) else Modifier,
     ) {
         Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             when {
@@ -431,11 +444,30 @@ private fun PickedChip(file: Picked, onRetry: () -> Unit, onRemove: () -> Unit) 
 }
 
 @Composable
-private fun Act(icon: ImageVector, label: String, fill: Color, tint: Color = MaterialTheme.colorScheme.onPrimary, enabled: Boolean = true, onClick: () -> Unit) {
+private fun Act(icon: ImageVector, label: String, fill: Color, tint: Color = Color.White, enabled: Boolean = true, onClick: () -> Unit) {
     FilledIconButton(
-        onClick, Modifier.size(36.dp), enabled,
-        colors = IconButtonDefaults.filledIconButtonColors(containerColor = fill, contentColor = tint, disabledContainerColor = palette.line, disabledContentColor = palette.dim),
-    ) { Icon(icon, label, Modifier.size(20.dp)) }
+        onClick, Modifier.size(34.dp), enabled,
+        // Unavailable is the same button, fainter: the composer keeps its one spot of colour.
+        colors = IconButtonDefaults.filledIconButtonColors(containerColor = fill, contentColor = tint, disabledContainerColor = fill.copy(alpha = 0.4f), disabledContentColor = tint.copy(alpha = 0.8f)),
+    ) { Icon(icon, label, Modifier.size(19.dp)) }
+}
+
+/** The mark Claude's apps show while it works: a burst of rays, turning when [turning]. */
+@Composable
+fun Spark(modifier: Modifier = Modifier, turning: Boolean = false) {
+    val tint = palette.accentFill
+    val angle = if (turning) rememberInfiniteTransition(label = "spark").animateFloat(0f, 360f, infiniteRepeatable(tween(2400, easing = LinearEasing)), label = "turn").value else 0f
+    Canvas(modifier.semantics { if (turning) contentDescription = "回复中" }) {
+        val reach = size.minDimension / 2
+        rotate(angle) {
+            repeat(8) { ray ->
+                rotate(ray * 45f) {
+                    // Rays of two lengths, so the burst reads as drawn by hand rather than as a spinner.
+                    drawLine(tint, center.copy(y = center.y - reach * 0.22f), center.copy(y = center.y - reach * if (ray % 2 == 0) 1f else 0.78f), reach * 0.2f, StrokeCap.Round)
+                }
+            }
+        }
+    }
 }
 
 /** How full Claude's context window is, as last reported by the server. */

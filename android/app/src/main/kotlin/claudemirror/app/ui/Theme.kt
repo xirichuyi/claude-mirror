@@ -18,12 +18,14 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** The colours of the desktop app's default light and dark themes, so both look like one product. */
+/** Warm paper and clay, after Claude's own apps: the phone reads as a Claude product, in light and in dark. */
 class Palette(
     val dark: Boolean,
     val frame: Color, val card: Color, val popup: Color,
     val text: Color, val muted: Color, val dim: Color,
-    val accent: Color, val accentFill: Color, val selection: Color,
+    val accent: Color, val accentFill: Color,
+    /** What the user said, and whatever else is set apart from the page without being a card. */
+    val selection: Color,
     val line: Color,
     val error: Color, val warning: Color, val added: Color, val removed: Color,
     /** Keyword, built-in, string, number, comment, function, decorator, property. */
@@ -34,22 +36,22 @@ private fun hex(value: Long) = Color(0xFF000000 or value)
 
 private val Midnight = Palette(
     dark = true,
-    frame = hex(0x15171C), card = hex(0x1B1E24), popup = hex(0x23272E),
-    text = hex(0xD4D8DF), muted = hex(0x959CA8), dim = hex(0x656C78),
-    accent = hex(0x78AEF2), accentFill = hex(0x3D6FC4), selection = hex(0x2C4468),
-    line = hex(0x2C3038),
-    error = hex(0xF07F7F), warning = hex(0xE2BA6A), added = hex(0x5FBFA0), removed = hex(0xEB7F6C),
-    syntax = listOf<Long>(0xD7915C, 0x6DDAD6, 0x75B18B, 0xC28EC4, 0x7F8796, 0x6FB7F0, 0xE4CF7A, 0xF9AEB9).map(::hex),
+    frame = hex(0x262624), card = hex(0x30302E), popup = hex(0x30302E),
+    text = hex(0xF0EEE6), muted = hex(0xA6A39A), dim = hex(0x77756E),
+    accent = hex(0xD97757), accentFill = hex(0xD97757), selection = hex(0x141413),
+    line = hex(0x3E3D3A),
+    error = hex(0xE5786B), warning = hex(0xD9A84E), added = hex(0x7FB58B), removed = hex(0xE5786B),
+    syntax = listOf<Long>(0xD99A6C, 0x7CC7C2, 0x9DBF86, 0xC49BC9, 0x8A887F, 0x86B6E8, 0xDCC27A, 0xE5A9A0).map(::hex),
 )
 
 private val Daylight = Palette(
     dark = false,
-    frame = hex(0xF3F4F6), card = hex(0xFFFFFF), popup = hex(0xFFFFFF),
-    text = hex(0x24272E), muted = hex(0x5C6370), dim = hex(0x9AA0AB),
-    accent = hex(0x2B66D2), accentFill = hex(0x2B66D2), selection = hex(0xDCE8FB),
-    line = hex(0xDFE2E7),
-    error = hex(0xC2373A), warning = hex(0x9A6200), added = hex(0x16805F), removed = hex(0xC4432F),
-    syntax = listOf<Long>(0xA43E3A, 0x156686, 0x1D691A, 0x58309D, 0x6B717D, 0x0A59CA, 0x574504, 0x7E2166).map(::hex),
+    frame = hex(0xFAF9F5), card = hex(0xFFFFFF), popup = hex(0xFFFFFF),
+    text = hex(0x1F1E1D), muted = hex(0x6B6A65), dim = hex(0xA3A199),
+    accent = hex(0xC96442), accentFill = hex(0xD97757), selection = hex(0xF0EEE6),
+    line = hex(0xE5E3DA),
+    error = hex(0xB5443A), warning = hex(0x8F6400), added = hex(0x2F7D4F), removed = hex(0xB5443A),
+    syntax = listOf<Long>(0xA4502D, 0x1F6F78, 0x3B6E23, 0x7A3E92, 0x7D7B73, 0x2A5FA8, 0x6B5200, 0x8A3552).map(::hex),
 )
 
 private val LocalPalette = staticCompositionLocalOf { Daylight }
@@ -58,10 +60,10 @@ val palette: Palette
     @Composable @ReadOnlyComposable get() = LocalPalette.current
 
 private fun Palette.scheme(): ColorScheme {
-    val onAccent = if (dark) hex(0x0E1116) else Color.White
+    val onAccent = Color.White
     val base = if (dark) darkColorScheme() else lightColorScheme()
     return base.copy(
-        primary = if (dark) accent else accentFill, onPrimary = onAccent,
+        primary = accentFill, onPrimary = onAccent,
         primaryContainer = selection, onPrimaryContainer = text,
         secondary = accent, onSecondary = onAccent, secondaryContainer = selection, onSecondaryContainer = text,
         tertiary = warning, onTertiary = onAccent,
@@ -85,13 +87,14 @@ private fun Color.compositeOver(background: Color) = Color(
 )
 
 private val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp), small = RoundedCornerShape(8.dp), medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp), extraLarge = RoundedCornerShape(22.dp),
+    extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(10.dp), medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(20.dp), extraLarge = RoundedCornerShape(26.dp),
 )
 
 private val AppType = Typography().let { base ->
     base.copy(
-        titleLarge = base.titleLarge.copy(fontSize = 19.sp, lineHeight = 24.sp),
+        titleLarge = base.titleLarge.copy(fontFamily = FontFamily.Serif, fontSize = 20.sp, lineHeight = 26.sp),
+        titleMedium = base.titleMedium.copy(fontSize = 16.sp, lineHeight = 22.sp, letterSpacing = 0.sp),
         bodyLarge = base.bodyLarge.copy(fontSize = 15.sp, lineHeight = 22.sp, letterSpacing = 0.sp),
         bodyMedium = base.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.sp),
         bodySmall = base.bodySmall.copy(fontSize = 12.5.sp, lineHeight = 17.sp, letterSpacing = 0.sp),
@@ -100,6 +103,9 @@ private val AppType = Typography().let { base ->
         labelSmall = base.labelSmall.copy(letterSpacing = 0.sp),
     )
 }
+
+/** What Claude writes is set in a serif face, as in its own apps; what the user and the app say is not. */
+val ProseStyle = TextStyle(fontFamily = FontFamily.Serif, fontSize = 16.sp, lineHeight = 25.sp)
 
 val CodeStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, lineHeight = 18.sp)
 

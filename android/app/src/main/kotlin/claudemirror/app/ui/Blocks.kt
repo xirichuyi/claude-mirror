@@ -1,7 +1,6 @@
 package claudemirror.app.ui
 
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,7 +21,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Hub
@@ -34,7 +33,6 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -89,14 +87,14 @@ fun fileIcon(name: String): ImageVector =
 
 @Composable
 fun UserBubble(text: String, files: List<Attachment> = emptyList(), caption: String? = null, faded: Boolean = false) {
-    Box(Modifier.fillMaxWidth().padding(start = 56.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), contentAlignment = Alignment.CenterEnd) {
+    Box(Modifier.fillMaxWidth().padding(start = 48.dp, end = 16.dp, top = 10.dp, bottom = 10.dp), contentAlignment = Alignment.CenterEnd) {
         Column(horizontalAlignment = Alignment.End) {
             Surface(
                 color = palette.selection.copy(alpha = if (faded) 0.5f else 1f),
-                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 6.dp),
+                shape = RoundedCornerShape(20.dp),
             ) {
                 val tint = palette.text.copy(alpha = if (faded) 0.7f else 1f)
-                Column(Modifier.widthIn(max = 520.dp).padding(horizontal = 14.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.widthIn(max = 520.dp).padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     // The words a message of only files is given say nothing its files do not.
                     if (files.isEmpty() || text != ATTACHMENTS_ONLY) SelectionContainer { Text(text, color = tint) }
                     for (file in files) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -133,7 +131,7 @@ fun BlockView(block: Block) {
 @Composable
 fun Notice(text: String, error: Boolean) {
     if (text.isBlank()) return
-    Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (error) Icon(Icons.Filled.ErrorOutline, null, Modifier.padding(top = 1.dp).size(15.dp), tint = palette.error)
         SelectionContainer { Text(text, style = MaterialTheme.typography.bodySmall, color = if (error) palette.error else palette.muted) }
     }
@@ -142,7 +140,7 @@ fun Notice(text: String, error: Boolean) {
 @Composable
 private fun Prose(text: String) {
     val colors = palette
-    val body = MaterialTheme.typography.bodyLarge.copy(color = colors.text)
+    val body = ProseStyle.copy(color = colors.text)
     val heading = body.copy(fontWeight = FontWeight.SemiBold)
     // Laid out at full height from the first frame and while more text arrives; a block
     // that is empty until it has been parsed makes the list lose its place.
@@ -152,8 +150,8 @@ private fun Prose(text: String) {
             markdown,
             colors = markdownColor(text = colors.text, codeBackground = colors.card, inlineCodeBackground = colors.card, dividerColor = colors.line, tableBackground = colors.card),
             typography = markdownTypography(
-                h1 = heading.copy(fontSize = 20.sp, lineHeight = 28.sp), h2 = heading.copy(fontSize = 18.sp, lineHeight = 26.sp),
-                h3 = heading.copy(fontSize = 16.sp, lineHeight = 24.sp), h4 = heading, h5 = heading, h6 = heading,
+                h1 = heading.copy(fontSize = 22.sp, lineHeight = 30.sp), h2 = heading.copy(fontSize = 19.sp, lineHeight = 28.sp),
+                h3 = heading.copy(fontSize = 17.sp, lineHeight = 26.sp), h4 = heading, h5 = heading, h6 = heading,
                 text = body, paragraph = body, ordered = body, bullet = body, list = body, quote = body.copy(color = colors.muted),
                 code = CodeStyle, inlineCode = CodeStyle.copy(color = colors.syntax[0]),
             ),
@@ -163,7 +161,7 @@ private fun Prose(text: String) {
                     codeFence = { MarkdownCodeFence(it.content, it.node, it.typography.code) { code, language, _ -> CodeBox(code, language) } },
                 )
             },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
         )
     }
 }
@@ -176,28 +174,23 @@ private fun Fold(
 ) {
     var open by rememberSaveable(key) { mutableStateOf(false) }
     val colors = palette
-    Surface(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp), color = colors.card,
-        shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, colors.line),
-    ) {
-        Column(Modifier.animateContentSize()) {
-            Row(
-                Modifier.fillMaxWidth().clickable(enabled = content != null, onClickLabel = if (open) "收起" else "展开") { open = !open }
-                    .heightIn(min = 42.dp).padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
-            ) {
-                Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) { icon() }
-                Text(title, style = MaterialTheme.typography.labelLarge, color = colors.text, maxLines = 1)
-                Text(
-                    detail, Modifier.weight(1f), style = if (mono) CodeStyle else MaterialTheme.typography.bodySmall,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.muted,
-                )
-                if (content != null) Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, Modifier.size(18.dp), tint = colors.dim)
-            }
-            if (open && content != null) {
-                HorizontalDivider(color = colors.line)
-                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
-            }
+    // A quiet line between paragraphs, not a card: what Claude did reads as part of what it said.
+    Column(Modifier.fillMaxWidth().animateContentSize()) {
+        Row(
+            Modifier.fillMaxWidth().clickable(enabled = content != null, onClickLabel = if (open) "收起" else "展开") { open = !open }
+                .heightIn(min = 36.dp).padding(horizontal = 20.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) { icon() }
+            Text(title, style = MaterialTheme.typography.bodyMedium, color = colors.muted, maxLines = 1)
+            Text(
+                detail, Modifier.weight(1f, fill = false), style = if (mono) CodeStyle else MaterialTheme.typography.bodySmall,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.dim,
+            )
+            if (content != null) Icon(if (open) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight, null, Modifier.size(16.dp), tint = colors.dim)
+        }
+        if (open && content != null) {
+            Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
         }
     }
 }
@@ -206,7 +199,7 @@ private fun Fold(
 private fun Thinking(block: Block) {
     val text = block.text.orEmpty()
     Fold(
-        block.id ?: text.take(40), icon = { Icon(Icons.Filled.Lightbulb, null, Modifier.size(16.dp), tint = palette.muted) },
+        block.id ?: text.take(40), icon = { Icon(Icons.Filled.Lightbulb, null, Modifier.size(16.dp), tint = palette.dim) },
         title = "思考", detail = text.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().trim(),
         content = if (text.isBlank()) null else ({ SelectionContainer { Text(text, style = MaterialTheme.typography.bodyMedium, color = palette.muted) } }),
     )
@@ -233,7 +226,7 @@ private fun ToolRow(block: Block) {
             when (block.status) {
                 "running" -> CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = palette.accent)
                 "error" -> Icon(Icons.Filled.ErrorOutline, "失败", Modifier.size(17.dp), tint = palette.error)
-                else -> Icon(look.kind.icon(), null, Modifier.size(17.dp), tint = palette.muted)
+                else -> Icon(look.kind.icon(), null, Modifier.size(16.dp), tint = palette.dim)
             }
         },
         title = look.title, detail = look.detail.lineSequence().firstOrNull().orEmpty(),

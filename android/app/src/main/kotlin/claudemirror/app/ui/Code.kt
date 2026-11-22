@@ -1,6 +1,5 @@
 package claudemirror.app.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
@@ -100,7 +99,7 @@ fun CopyButton(text: String, modifier: Modifier = Modifier) {
 fun CodeBox(code: String, language: String? = null, modifier: Modifier = Modifier, title: String? = language, tint: Color = Color.Unspecified) {
     val colors = palette
     val text = remember(code, language, colors) { highlight(code.trimEnd('\n'), language, colors) }
-    Surface(modifier.fillMaxWidth(), color = colors.card, shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, colors.line)) {
+    Surface(modifier.fillMaxWidth(), color = colors.selection, shape = MaterialTheme.shapes.medium) {
         Column {
             Row(Modifier.fillMaxWidth().height(32.dp).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = colors.dim, maxLines = 1)
@@ -120,7 +119,7 @@ fun CodeBox(code: String, language: String? = null, modifier: Modifier = Modifie
 @Composable
 fun DiffBox(lines: List<DiffLine>, modifier: Modifier = Modifier) {
     val colors = palette
-    Surface(modifier.fillMaxWidth(), color = colors.card, shape = MaterialTheme.shapes.small, border = BorderStroke(1.dp, colors.line)) {
+    Surface(modifier.fillMaxWidth(), color = colors.selection, shape = MaterialTheme.shapes.medium) {
         SelectionContainer {
             Column(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 6.dp).width(androidx.compose.foundation.layout.IntrinsicSize.Max)) {
                 for (line in lines) {

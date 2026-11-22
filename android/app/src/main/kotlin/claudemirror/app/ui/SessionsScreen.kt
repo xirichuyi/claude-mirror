@@ -1,5 +1,10 @@
 package claudemirror.app.ui
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -18,14 +23,12 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -93,8 +96,11 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
                 title = {
                     Column {
                         Text(host.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(state.label(), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            color = if (state is ConnectionState.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                        // Connected with Claude found is how it should be, and goes without saying.
+                        if ((state as? ConnectionState.Connected)?.info?.claude == null) Text(
+                            state.label(), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            color = if (state is ConnectionState.Failed) palette.error else palette.muted,
+                        )
                     }
                 },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
@@ -108,7 +114,8 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
         },
         snackbarHost = { Snackbar(snackbar) },
         floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = { onOpen(model.createSession(host, projects.first()).id) }, icon = { Icon(Icons.Filled.Add, null) }, text = { Text("新对话") })
+            ExtendedFloatingActionButton(onClick = { onOpen(model.createSession(host, projects.first()).id) }, icon = { Icon(Icons.Filled.Add, null) }, text = { Text("新对话") },
+                shape = CircleShape, containerColor = palette.accentFill, contentColor = Color.White)
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -126,30 +133,37 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
                 }
             }
             LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 88.dp)) {
+                // Two projects in folders of one name are told apart by where they are.
+                val twins = projects.groupingBy(::folderName).eachCount()
                 for (project in projects) {
                     val inside = sessions.filter { it.directory == project }
                     item(key = "project:$project") {
-                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(folderName(project), style = MaterialTheme.typography.titleSmall, color = palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(project, style = MaterialTheme.typography.bodySmall, color = palette.dim, maxLines = 1, overflow = TextOverflow.StartEllipsis)
-                            }
+                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (twins[folderName(project)] == 1) folderName(project) else project, Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelLarge, color = palette.muted, maxLines = 1, overflow = TextOverflow.StartEllipsis,
+                            )
                             // Only a project added by hand and left empty can go; the others come from what is in them.
                             if (inside.isEmpty() && project in host.projects) TextButton(onClick = { model.removeProject(host, project) }) { Text("移除", color = palette.muted) }
-                            IconButton(onClick = { onOpen(model.createSession(host, project).id) }) { Icon(Icons.Filled.Add, "在 ${folderName(project)} 里新建对话", tint = palette.muted) }
+                            IconButton(onClick = { onOpen(model.createSession(host, project).id) }) { Icon(Icons.Filled.Add, "在 ${folderName(project)} 里新建对话", Modifier.size(20.dp), tint = palette.muted) }
                         }
                     }
                     items(inside, key = { it.id }) { session ->
-                        val preview = session.statusLabel() ?: session.messages.lastOrNull { it.role == "user" }?.text ?: ""
+                        // A conversation is its name; a second line only when something about it needs attention.
+                        val working = session.isBusy && session.status != "detached" && session.status != "permission"
+                        val note = session.statusLabel().takeUnless { session.status == "working" }
                         Box {
-                            ListItem(
-                                headlineContent = { Text(session.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                supportingContent = if (preview.isEmpty()) null else ({ Text(preview, maxLines = 1, overflow = TextOverflow.Ellipsis) }),
-                                trailingContent = {
-                                    if (session.isBusy && session.status != "detached") CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                },
-                                modifier = Modifier.combinedClickable(onClick = { onOpen(session.id) }, onLongClick = { menu = session.id }),
-                            )
+                            Row(
+                                Modifier.fillMaxWidth().combinedClickable(onClick = { onOpen(session.id) }, onLongClick = { menu = session.id })
+                                    .heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(session.name, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = if (session.status == "permission") palette.accent else palette.muted, maxLines = 1)
+                                }
+                                if (working) Spark(Modifier.size(18.dp), turning = true)
+                            }
                             DropdownMenu(menu == session.id, onDismissRequest = { menu = null }) {
                                 DropdownMenuItem(text = { Text("重命名") }, onClick = { menu = null; renaming = session })
                                 DropdownMenuItem(text = { Text("删除", color = MaterialTheme.colorScheme.error) }, onClick = { menu = null; deleting = session })

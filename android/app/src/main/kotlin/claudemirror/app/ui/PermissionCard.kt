@@ -51,9 +51,9 @@ fun PermissionCard(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit
     val questions = questions(permission)
     Surface(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), color = palette.popup,
-        shape = MaterialTheme.shapes.medium, border = BorderStroke(1.dp, palette.accent.copy(alpha = 0.55f)),
+        shape = MaterialTheme.shapes.large, border = BorderStroke(1.dp, palette.line), shadowElevation = if (palette.dark) 0.dp else 3.dp,
     ) {
-        Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             when {
                 permission.kind == "elicitation" -> Elicitation(permission, onAnswer)
                 questions.isNotEmpty() -> Questions(questions, onAnswer)
