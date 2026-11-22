@@ -218,9 +218,8 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -
     }
     val last = session.messages.lastOrNull()
     if (rows.isEmpty() && session.permissions.isEmpty()) {
-        Box(modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-            Text("在 ${session.directory} 里开始对话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        // Nothing said yet: the page is Claude's mark and the composer.
+        Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Spark(Modifier.size(48.dp)) }
         return
     }
     // Whether the view keeps up with the reply. Only the reader's own scrolling changes it:
@@ -260,10 +259,7 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -
     if (session.historyBefore != null && !list.canScrollBackward) {
         TextButton(onClick = onEarlier, Modifier.align(Alignment.CenterHorizontally)) { Text("更早", color = palette.muted) }
     }
-    Box(Modifier.weight(1f).fillMaxWidth()) {
-    // Nothing said yet: the page is Claude's mark and the composer.
-    if (rows.isEmpty() && !session.isBusy && session.permissions.isEmpty()) Spark(Modifier.align(Alignment.Center).size(48.dp))
-    LazyColumn(Modifier.fillMaxSize().nestedScroll(reader), state = list) {
+    LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(reader), state = list) {
         items(rows.size, key = { rows[it].first }) { index ->
             val (_, message, part) = rows[index]
             when (part) {
@@ -291,7 +287,6 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -
         items(session.permissions, key = { "permission:" + it.id }) { permission ->
             PermissionCard(permission) { answer -> onAnswer(permission.id, answer) }
         }
-    }
     }
     }
 }
