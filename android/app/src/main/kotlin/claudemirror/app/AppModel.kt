@@ -187,7 +187,15 @@ class AppModel(private val application: Application) {
         if (previous != null) {
             engine.detach(previous)
             pool.close(previous)
-            if (previous.host != host.host || previous.port != host.port || previous.user != host.user) engine.endpointChanged(host.id)
+            if (previous.host != host.host || previous.port != host.port || previous.user != host.user) {
+                engine.endpointChanged(host.id)
+                // Files picked for the next message went to the old machine: they are sent to this one.
+                for (session in sessions.value.filter { it.hostId == host.id }) for (file in picked.value[session.id].orEmpty()) {
+                    uploads.remove(file.id)?.cancel()
+                    if (file.source == null) detach(session.id, file.id)
+                    else { pick(session.id, file.id) { it.copy(file = null, error = null, sent = 0) }; upload(session.id, file) }
+                }
+            }
         }
     }
 

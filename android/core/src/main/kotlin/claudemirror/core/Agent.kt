@@ -20,6 +20,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -262,6 +264,7 @@ sealed interface ConnectionState {
 /** One agent per server, started on first use and shared by every conversation on that server. */
 class AgentPool(private val launcher: Launcher, val resources: ServerResources) {
     private companion object { const val MAX_UPLOAD = 1L shl 30 }
+    private val transfers = Semaphore(2)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val channels = HashMap<String, Deferred<AgentChannel>>()
@@ -317,39 +320,46 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
         val file = name.replace(Regex("[\\x00-\\x1f/\\\\]"), "_").trim().takeUnless { it.isEmpty() || it == "." || it == ".." } ?: "file"
         val known = call(host, "file", buildJsonObject { put("operation", "attachmentLookup"); put("name", file); put("digest", digest) }, 120_000).obj()?.get("file").obj()
         known?.get("path").string()?.let { return Attachment(file, it, size) }
-        val server = channel(host).info ?: throw RemoteException("SSH 通道已断开", confirmed = false)
+        val server = channel(host).info?.takeIf { it.nodePath.isNotEmpty() && it.agentPath.isNotEmpty() } ?: throw RemoteException("SSH 通道已断开", confirmed = false)
         val request = buildJsonObject {
             put("operation", "upload"); put("name", file); put("size", size); put("attachment", true); put("digest", digest)
         }
         val command = "${shellQuote(server.nodePath)} ${shellQuote(server.agentPath)} transfer ${shellQuote(request.toString())}"
-        return coroutineScope {
-            val process = withContext(Dispatchers.IO) { launcher.start(host, command) }
-            // The reads and writes below only end early when the command under them does.
-            val guard = launch(start = CoroutineStart.UNDISPATCHED) { try { awaitCancellation() } finally { process.kill() } }
-            try {
-                withContext(Dispatchers.IO) {
-                    try {
-                        var done = 0L
-                        open().use { source ->
-                            val chunk = ByteArray(64 * 1024)
-                            while (true) {
-                                val count = source.read(chunk)
-                                if (count < 0) break
-                                process.stdin.write(chunk, 0, count)
-                                done += count
-                                sent(done)
+        // A server allows only so many commands on one connection (sshd's MaxSessions, 10 unless changed).
+        return transfers.withPermit {
+            coroutineScope {
+                val process = withContext(Dispatchers.IO) { launcher.start(host, command) }
+                // The reads and writes below only end early when the command under them does.
+                val guard = launch(start = CoroutineStart.UNDISPATCHED) { try { awaitCancellation() } finally { process.kill() } }
+                try {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            var done = 0L
+                            val source = try { open() } catch (error: IOException) { throw RemoteException("无法读取文件") }
+                            source.use {
+                                val chunk = ByteArray(64 * 1024)
+                                while (true) {
+                                    val count = try { source.read(chunk) } catch (error: IOException) { throw RemoteException("无法读取文件") }
+                                    if (count < 0) break
+                                    process.stdin.write(chunk, 0, count)
+                                    done += count
+                                    sent(done)
+                                }
                             }
+                            process.stdin.close()
+                            val answer = process.stdout.readBytes().decodeToString()
+                            if (process.waitForExit() != 0) throw RemoteException(process.errorText().trim().ifEmpty { "上传失败" })
+                            val path = runCatching { MirrorJson.parseToJsonElement(answer).obj()?.get("path").string() }.getOrNull()
+                            Attachment(file, path ?: throw RemoteException("上传失败"), size)
+                        } catch (error: IOException) {
+                            // The command gave up first, and says why once it has ended.
+                            runCatching { process.stdin.close() }
+                            process.waitForExit()
+                            throw RemoteException(process.errorText().trim().ifEmpty { error.message ?: "上传失败" }, confirmed = false)
                         }
-                        process.stdin.close()
-                        val answer = process.stdout.readBytes().decodeToString()
-                        if (process.waitForExit() != 0) throw RemoteException(process.errorText().trim().ifEmpty { "上传失败" })
-                        val path = runCatching { MirrorJson.parseToJsonElement(answer).obj()?.get("path").string() }.getOrNull()
-                        Attachment(file, path ?: throw RemoteException("上传失败"), size)
-                    } catch (error: IOException) {
-                        throw RemoteException(process.errorText().trim().ifEmpty { error.message ?: "上传失败" }, confirmed = false)
                     }
-                }
-            } finally { guard.cancel() }
+                } finally { guard.cancel() }
+            }
         }
     }
 
