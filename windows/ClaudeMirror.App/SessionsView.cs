@@ -19,8 +19,8 @@ public sealed partial class MainWindow
     private Button ConversationRow(Sessions.Entry entry, string? glyph)
     {
         var c = entry.Conversation;
-        var row = Button(c.Name, () => SelectAsync(c));
-        var name = new TextBlock { Text = c.Name, TextTrimming = TextTrimming.CharacterEllipsis };
+        var row = Flat(Button(c.Name, () => SelectAsync(c)));
+        var name = new TextBlock { Text = c.Name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis };
         // A conversation going on in the background says so under its name.
         FrameworkElement title = name;
         if (!IsCurrent(c) && ParkedFor(c) is { Label: { } label } waiting)
@@ -29,10 +29,11 @@ public sealed partial class MainWindow
             lines.Children.Add(new TextBlock { Text = label, FontSize = 11, Foreground = waiting.Busy && Turn.NeedsAnswer(waiting.State) ? amber : sage });
             title = lines;
         }
-        row.Content = glyph is null ? title : Row(new FontIcon { Glyph = glyph, FontSize = 13, Foreground = muted }, title);
+        row.Content = Row(new FontIcon { Glyph = glyph ?? "\uE8BD", FontSize = 13, Foreground = muted }, title);
         row.HorizontalAlignment = HorizontalAlignment.Stretch; row.HorizontalContentAlignment = HorizontalAlignment.Left;
-        row.Background = IsCurrent(c) ? bubble : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        row.BorderThickness = new Thickness(0); ToolTipService.SetToolTip(row, c.Name);
+        row.Padding = new Thickness(8, 5, 8, 5);
+        if (IsCurrent(c)) { row.Background = selected; row.Resources["ButtonBackgroundPointerOver"] = selected; row.Resources["ButtonBackgroundPressed"] = selected; }
+        ToolTipService.SetToolTip(row, c.Name);
         var menu = new MenuFlyout();
         menu.Items.Add(MenuItem("重命名…", "\uE8AC", () => RenameAsync(entry)));
         if (!entry.Archived) menu.Items.Add(MenuItem(entry.Pinned ? "取消固定" : "固定", entry.Pinned ? "\uE77A" : "\uE718", () => Mark(() => Sessions.SetPinned(local, entry.Key, !entry.Pinned))));

@@ -12,11 +12,16 @@ namespace ClaudeMirror.App;
 public sealed partial class MainWindow
 {
     private readonly SolidColorBrush canvas = new(), rail = new(), surface = new(), ink = new(),
-        muted = new(), edge = new(), bubble = new(), sage = new(), danger = new(), amber = new(), added = new(), removed = new();
+        muted = new(), edge = new(), bubble = new(), sage = new(), danger = new(), amber = new(), added = new(), removed = new(),
+        frame = new(), popup = new(), hover = new(), dim = new(), accent = new(), accentFill = new(), onAccent = new(), selected = new();
     private readonly Grid railPanel = new();
-    private readonly StackPanel home = new() { Spacing = 16, MaxWidth = 620, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly StackPanel home = new() { Spacing = 12, MaxWidth = 560, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly StackPanel homeRecent = new() { Spacing = 2 };
+    private readonly TextBlock windowTitle = new();
+    private Button archiveToggle = null!;
     private readonly TextBlock title = new(), subtitle = new(), connection = new(), homeTitle = new(), homeHint = new();
     private readonly StackPanel homeActions = new() { Spacing = 8 };
+    private readonly Border stateDot = new() { Width=7, Height=7, CornerRadius=new CornerRadius(3.5) };
     private readonly TextBox search = new() { PlaceholderText = "搜索对话或目录", Visibility = Visibility.Collapsed };
     private readonly Border composer = new();
     private List<Conversation> history = [];
@@ -24,9 +29,7 @@ public sealed partial class MainWindow
     private Button send = null!, stop = null!, fresh = null!, sync = null!;
     private Button files = null!, project = null!;
     private bool sidebarOpen = true;
-    private readonly StackPanel welcomeHeading = new() { Orientation=Orientation.Horizontal, Spacing=12 };
-    private readonly Image welcomeIcon = new() { Width=38, Height=38 };
-    private readonly Border hostDot = new() { Width=8, Height=8, CornerRadius=new CornerRadius(4), VerticalAlignment=VerticalAlignment.Center };
+    private readonly Border hostDot = new() { Width=7, Height=7, CornerRadius=new CornerRadius(3.5), VerticalAlignment=VerticalAlignment.Center };
     private readonly Border inputCard = new();
     private Button commandMenu = null!, modelMenu = null!, connectHost = null!;
 
@@ -45,8 +48,8 @@ public sealed partial class MainWindow
 
     private void UpdateSubtitle()
     {
-        subtitle.Text = host==null ? "" : ShortDirectory(directory.Text)+"  ·  "+host.Name;
-        ToolTipService.SetToolTip(subtitle, directory.Text);
+        subtitle.Text = host==null ? "" : directory.Text;
+        windowTitle.Text = host==null ? "claude-mirror" : ShortDirectory(directory.Text) is { Length: > 0 } folder ? folder : host.Name;
     }
 
     private Button PickerAction(bool model)
@@ -76,18 +79,34 @@ public sealed partial class MainWindow
         modelMenu.Content=Row(new TextBlock {Text=label,MaxWidth=125,TextTrimming=TextTrimming.CharacterEllipsis},new FontIcon {Glyph="\uE70D",FontSize=10});
     }
 
+    /// The macOS palettes (daylight and midnight in DesignSystem/ThemePalette.swift) and the same derived tokens:
+    /// cards float on a grey frame, inputs and code sit slightly off the card, and blue marks selection and the main action.
     private void ApplyTheme()
     {
         bool dark = root.ActualTheme == ElementTheme.Dark;
-        foreach (var (brush, light, night) in new[] {
-            (canvas,0xFAF6F2,0x242424), (rail,0xF0EAE3,0x1C1C1C), (surface,0xF6F1EB,0x2C2C2C),
-            (ink,0x272727,0xEAEAEA), (muted,0x645E58,0xBBB6B0), (edge,0xDCD5CE,0x484848),
-            (bubble,0xEDE5DC,0x343434), (sage,0x566746,0xB4C49E), (danger,0xB3392C,0xF08A7C), (amber,0x9A6A12,0xE3B565),
-            (added,0xDDEBD3,0x2B3A27), (removed,0xF3D9D4,0x44292A) })
-        {
-            int rgb = dark ? night : light;
+        int card = dark ? 0x1B1E24 : 0xFBFBFC, text = dark ? 0xD4D8DF : 0x24272E, fill = dark ? 0x3D6FC4 : 0x2B66D2;
+        int over = dark ? 0xFFFFFF : 0x000000, green = dark ? 0x5FBFA0 : 0x16805F, red = dark ? 0xEB7F6C : 0xC4432F;
+        foreach (var (brush, rgb) in new[] {
+            (frame, dark ? 0x15171C : 0xE9EBEF), (canvas, card), (rail, card), (popup, dark ? 0x23272E : 0xFFFFFF),
+            (surface, Mix(over,card,dark ? .035 : .03)), (edge, Mix(over,card,dark ? .07 : .09)), (hover, Mix(over,card,dark ? .05 : .045)),
+            (ink, text), (muted, dark ? 0x959CA8 : 0x5C6370), (dim, dark ? 0x656C78 : 0x9AA0AB),
+            (accent, dark ? 0x78AEF2 : 0x2B66D2), (accentFill, fill), (onAccent, 0xFFFFFF),
+            (selected, Mix(fill,card,dark ? .32 : .16)), (bubble, Mix(fill,card,dark ? .24 : .1)),
+            (sage, green), (danger, dark ? 0xF07F7F : 0xC2373A), (amber, dark ? 0xE2BA6A : 0x9A6200),
+            (added, Mix(green,card,dark ? .2 : .14)), (removed, Mix(red,card,dark ? .2 : .14)) })
             brush.Color = Windows.UI.Color.FromArgb(255,(byte)(rgb >> 16),(byte)(rgb >> 8),(byte)rgb);
-        }
+        // Minimise, maximise and close are drawn by Windows over the frame; they take the palette's ink.
+        var caption = AppWindow.TitleBar;
+        caption.ButtonBackgroundColor = caption.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        caption.ButtonForegroundColor = caption.ButtonHoverForegroundColor = caption.ButtonPressedForegroundColor = ink.Color;
+        caption.ButtonInactiveForegroundColor = dim.Color;
+        caption.ButtonHoverBackgroundColor = caption.ButtonPressedBackgroundColor = edge.Color;
+    }
+    /// `a` laid over `b` at `amount`, as an opaque colour.
+    private static int Mix(int a, int b, double amount)
+    {
+        int Channel(int shift) => (int)Math.Round(((a >> shift) & 255) * amount + ((b >> shift) & 255) * (1 - amount));
+        return Channel(16) << 16 | Channel(8) << 8 | Channel(0);
     }
     private static Grid Rows(params GridLength[] heights)
     {
@@ -99,44 +118,78 @@ public sealed partial class MainWindow
     {
         Grid.SetRow(el,row); g.Children.Add(el);
     }
+    /// A button with no fill of its own: it only tints under the pointer, like a toolbar item or a sidebar row.
+    private Button Flat(Button button)
+    {
+        button.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        button.Resources["ButtonBackgroundPointerOver"] = hover; button.Resources["ButtonBackgroundPressed"] = edge;
+        button.Resources["ButtonForegroundPointerOver"] = ink; button.Resources["ButtonForegroundPressed"] = ink;
+        button.BorderThickness = new Thickness(0); button.CornerRadius = new CornerRadius(6); button.Foreground = ink;
+        return button;
+    }
+    /// A quiet outlined button: the secondary actions on the home page and in cards.
+    private Button Bordered(Button button)
+    {
+        button.Background = surface; button.BorderBrush = edge; button.BorderThickness = new Thickness(1);
+        button.CornerRadius = new CornerRadius(8); button.Padding = new Thickness(10,5,12,5);
+        return button;
+    }
     private Button ActionButton(string name, string glyph, Func<Task> action, bool showLabel = false)
     {
         var button = Button(name,action);
-        var icon = new FontIcon { Glyph = glyph, FontSize = 15 };
-        button.Content = showLabel ? Row(icon,new TextBlock { Text = name }) : icon;
-        button.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        button.BorderThickness = new Thickness(0); button.CornerRadius = new CornerRadius(6);
-        button.Foreground = ink; button.MinWidth = 32; button.MinHeight = 32;
-        button.Padding = new Thickness(7,4,7,4);
+        var icon = new FontIcon { Glyph = glyph, FontSize = 14 };
+        var content = Row(icon,new TextBlock { Text = name, FontSize = 13 }); content.Spacing = 6;
+        button.Content = showLabel ? content : icon;
+        Flat(button); button.MinWidth = 28; button.MinHeight = 28;
+        button.Padding = showLabel ? new Thickness(8,4,8,4) : new Thickness(6,4,6,4);
         AutomationProperties.SetName(button,name); ToolTipService.SetToolTip(button,name);
         return button;
     }
     private void BuildWorkbench()
     {
         ApplySavedTheme(); ApplyTheme(); root.ActualThemeChanged += (_,_) => ApplyTheme();
-        root.Background = canvas;
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
+        Application.Current.Resources["ControlCornerRadius"] = new CornerRadius(6);
+        Application.Current.Resources["OverlayCornerRadius"] = new CornerRadius(10);
+        // The sidebar and the conversation are cards on the window frame, 6 px from the edge and from each other, as on macOS.
+        root.Background = frame; root.Padding = new Thickness(6,0,6,0); root.ColumnSpacing = 6;
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(36) });
+        root.RowDefinitions.Add(new RowDefinition()); root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(28) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
         root.ColumnDefinitions.Add(new ColumnDefinition());
-        railPanel.Background = rail; railPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        // The window's own title bar: the sidebar switch and the project name sit on the frame; the rest of the strip drags the window.
+        ExtendsContentIntoTitleBar = true;
+        var titleBar = new Grid { ColumnSpacing = 6 };
+        titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        titleBar.ColumnDefinitions.Add(new ColumnDefinition());
+        titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) }); // Minimise, maximise and close are drawn here by Windows.
+        var toggle = ActionButton("切换侧栏","\uE90C",() => { sidebarOpen = !sidebarOpen; LayoutSidebar(); return Task.CompletedTask; });
+        toggle.VerticalAlignment = VerticalAlignment.Center; titleBar.Children.Add(toggle);
+        windowTitle.FontSize = 13; windowTitle.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold; windowTitle.Foreground = ink;
+        windowTitle.VerticalAlignment = VerticalAlignment.Center; windowTitle.TextTrimming = TextTrimming.CharacterEllipsis;
+        var drag = new Grid { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+        drag.Children.Add(windowTitle); Grid.SetColumn(drag,1); titleBar.Children.Add(drag);
+        Grid.SetColumnSpan(titleBar,2); root.Children.Add(titleBar); SetTitleBar(drag);
+
+        railPanel.Background = rail; railPanel.CornerRadius = new CornerRadius(10);
+        railPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         railPanel.RowDefinitions.Add(new RowDefinition()); railPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.Children.Add(railPanel);
-        sidebar.Padding = new Thickness(12); sidebar.Spacing = 8;
-        var brand = new TextBlock { Text = "claude-mirror", FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink, Margin = new Thickness(7,4,0,6) };
-        sidebar.Children.Add(brand);
-        hosts.ItemsSource = local.Hosts; hosts.MinWidth = 0;
+        Grid.SetRow(railPanel,1); root.Children.Add(railPanel);
+        sidebar.Padding = new Thickness(8,8,8,2); sidebar.Spacing = 6;
+        hosts.ItemsSource = local.Hosts; hosts.MinWidth = 0; hosts.FontSize = 13;
         var switcher = new Grid { ColumnSpacing = 2 };
         switcher.ColumnDefinitions.Add(new ColumnDefinition());
         switcher.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         hosts.BorderThickness=new Thickness(0);hosts.Background=new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         hosts.Padding=new Thickness(8,4,6,4);
         var hostPicker=new Grid {ColumnSpacing=2};hostPicker.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});hostPicker.ColumnDefinitions.Add(new ColumnDefinition());
-        hostDot.Margin=new Thickness(6,0,0,0);hostPicker.Children.Add(hostDot);Grid.SetColumn(hosts,1);hostPicker.Children.Add(hosts);switcher.Children.Add(hostPicker);
+        hostDot.Margin=new Thickness(8,0,0,0);hostPicker.Children.Add(hostDot);Grid.SetColumn(hosts,1);hostPicker.Children.Add(hosts);switcher.Children.Add(hostPicker);
         connectHost=ActionButton("连接","\uE839",() => ConnectDialogAsync(hosts.SelectedItem as HostProfile));
         hosts.SelectionChanged+=(_,_)=>UpdateHostPicker();
         var tools = Row(connectHost,
             ActionButton("添加主机","\uE710",() => ConnectDialogAsync(null)));
-        Grid.SetColumn(tools,1); switcher.Children.Add(tools); sidebar.Children.Add(switcher);
-        fresh = ActionButton("新建对话","\uE70F",NewConversationAsync,true);
+        tools.Spacing = 0; Grid.SetColumn(tools,1); switcher.Children.Add(tools); sidebar.Children.Add(switcher);
+        fresh = ActionButton("新建对话","\uE70F",NewConversationAsync);
         fresh.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.N, Modifiers = VirtualKeyModifiers.Control });
         sync = ActionButton("同步历史","\uE72C",RefreshHistoryAsync);
         var find = ActionButton("搜索对话","\uE721",() => {
@@ -144,47 +197,57 @@ public sealed partial class MainWindow
             if(search.Visibility == Visibility.Visible) search.Focus(FocusState.Programmatic); else search.Text = "";
             return Task.CompletedTask;
         });
-        sidebar.Children.Add(Row(fresh,find,sync)); sidebar.Children.Add(search);
+        var heading = new Grid { Margin = new Thickness(0,4,0,0) };
+        heading.Children.Add(new TextBlock { Text = "项目", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8,0,0,0) });
+        var listTools = Row(fresh,sync,find); listTools.Spacing = 0; listTools.HorizontalAlignment = HorizontalAlignment.Right; heading.Children.Add(listTools);
+        sidebar.Children.Add(heading); search.FontSize = 13; sidebar.Children.Add(search);
         search.TextChanged += (_,_) => RenderHistory();
-        At(railPanel,sidebar,0); projects.Padding = new Thickness(12,8,12,12);
+        At(railPanel,sidebar,0); projects.Padding = new Thickness(8,2,8,8); projects.Spacing = 1;
         At(railPanel,new ScrollViewer { Content = projects },1);
-        status.Foreground = muted; status.Margin = new Thickness(16,12,16,12);
-        At(railPanel,status,2);
+        var footer = new Grid { Margin = new Thickness(8,0,8,0), Padding = new Thickness(0,4,0,4), BorderBrush = edge, BorderThickness = new Thickness(0,1,0,0) };
+        archiveToggle = ActionButton("归档","\uE7B8",() => { showArchived = !showArchived; RenderHistory(); return Task.CompletedTask; },true);
+        archiveToggle.HorizontalAlignment = HorizontalAlignment.Left; footer.Children.Add(archiveToggle);
+        var gear = ActionButton("设置","\uE713",SettingsAsync); gear.HorizontalAlignment = HorizontalAlignment.Right; footer.Children.Add(gear);
+        At(railPanel,footer,2);
+
+        // The strip under the cards: connection, working directory, and the latest notice.
+        var statusBar = new Grid { ColumnSpacing = 8, Padding = new Thickness(8,0,8,0) };
+        foreach(var width in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1,GridUnitType.Star) }) statusBar.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+        connection.FontSize = subtitle.FontSize = 12; connection.Foreground = subtitle.Foreground = status.Foreground = muted;
+        subtitle.TextTrimming = status.TextTrimming = TextTrimming.CharacterEllipsis; status.TextWrapping = TextWrapping.NoWrap;
+        subtitle.Margin = new Thickness(12,0,0,0); status.HorizontalAlignment = HorizontalAlignment.Right;
+        status.RegisterPropertyChangedCallback(TextBlock.TextProperty,(_,_) => ToolTipService.SetToolTip(status,status.Text.Length > 0 ? status.Text : null));
+        int column = 0;
+        foreach(FrameworkElement item in new FrameworkElement[] { stateDot, connection, subtitle, status }) { item.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(item,column++); statusBar.Children.Add(item); }
+        Grid.SetRow(statusBar,2); Grid.SetColumnSpan(statusBar,2); root.Children.Add(statusBar);
 
         var area = Rows(GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto);
         BuildSplit(area);
-        var bar = new Grid { Padding = new Thickness(12,8,12,8), ColumnSpacing = 10 };
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var bar = new Grid { Padding = new Thickness(16,4,6,4), ColumnSpacing = 10, MinHeight = 40 };
         bar.ColumnDefinitions.Add(new ColumnDefinition()); bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var toggle = ActionButton("切换侧栏","\uE700",() => { sidebarOpen = !sidebarOpen; LayoutSidebar(); return Task.CompletedTask; });
-        bar.Children.Add(toggle);
-        var headings = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold; title.Foreground = ink; title.TextTrimming = TextTrimming.CharacterEllipsis;
-        subtitle.FontSize = 12; subtitle.Foreground = muted; subtitle.TextTrimming = TextTrimming.CharacterEllipsis;
-        headings.Children.Add(title); headings.Children.Add(subtitle); Grid.SetColumn(headings,1); bar.Children.Add(headings);
+        title.FontSize = 13; title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold; title.Foreground = ink;
+        title.TextTrimming = TextTrimming.CharacterEllipsis; title.VerticalAlignment = VerticalAlignment.Center; bar.Children.Add(title);
         var update = ActionButton("检查更新","\uE895",()=>CheckUpdatesAsync(true),true);
         At(area,bar,0);
-        scroll.MaxWidth = 800; scroll.HorizontalAlignment = HorizontalAlignment.Stretch;
+        scroll.HorizontalAlignment = HorizontalAlignment.Stretch;
         scroll.HorizontalContentAlignment = HorizontalAlignment.Stretch; scroll.HorizontalScrollMode = ScrollMode.Disabled;
         scroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         bool followReply = true;
         scroll.ViewChanged += (_,_) => followReply = scroll.ScrollableHeight-scroll.VerticalOffset < 48;
         messages.SizeChanged += (_,e) => { if(followReply && e.NewSize.Height > e.PreviousSize.Height)
             DispatcherQueue.TryEnqueue(()=>scroll.ChangeView(null,scroll.ScrollableHeight,null,true)); };
-        messages.HorizontalAlignment = HorizontalAlignment.Stretch;
+        // The conversation column is 680 wide and centred, whatever the width of the pane.
+        messages.HorizontalAlignment = HorizontalAlignment.Stretch; messages.MaxWidth = 728; messages.Padding = new Thickness(24,8,24,16); messages.Spacing = 14;
         scroll.Content = messages; At(area,scroll,1);
-        home.Margin = new Thickness(32,64,32,16);
+        home.Margin = new Thickness(24,40,24,16);
         home.VerticalAlignment = VerticalAlignment.Top;
-        homeTitle.FontSize = 28; homeTitle.Foreground = ink; homeTitle.FontWeight=Microsoft.UI.Text.FontWeights.Medium;
-        welcomeIcon.Source=new BitmapImage(new Uri("ms-appx:///Assets/BrandIcon.png"));
-        welcomeHeading.Children.Add(welcomeIcon);welcomeHeading.Children.Add(homeTitle);
-        homeHint.Foreground = muted;
+        homeTitle.FontSize = 22; homeTitle.Foreground = ink; homeTitle.FontWeight=Microsoft.UI.Text.FontWeights.SemiBold;
+        homeHint.Foreground = muted; homeHint.FontSize = 13;
         homeHint.TextWrapping = TextWrapping.Wrap;
-        home.Children.Add(welcomeHeading); home.Children.Add(homeHint); home.Children.Add(healthPanel); home.Children.Add(homeActions);
+        home.Children.Add(homeTitle); home.Children.Add(homeHint); home.Children.Add(healthPanel); home.Children.Add(homeActions); home.Children.Add(homeRecent);
         At(area,home,1);
-        var composeArea = new StackPanel { MaxWidth = 800, Spacing = 8, Margin = new Thickness(20,6,20,14) };
+        var composeArea = new StackPanel { MaxWidth = 680, Spacing = 8, Margin = new Thickness(24,4,24,12) };
         composer.Child = composeArea; At(area,composer,2);
-        connection.FontSize = 12; connection.Foreground = sage; composeArea.Children.Add(connection);
         composeArea.Children.Add(permissionPanel); composeArea.Children.Add(queuePanel);
         var input = new StackPanel { Spacing = 6 }; prompt.MinHeight = 44;
         prompt.BorderThickness = new Thickness(0); prompt.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -192,17 +255,17 @@ public sealed partial class MainWindow
             prompt.Resources[key]=new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         prompt.Resources["TextControlBorderThemeThicknessFocused"]=new Thickness(0);
         prompt.Padding=new Thickness(2,3,2,3);
-        prompt.GotFocus+=(_,_)=>inputCard.BorderBrush=muted;
+        prompt.FontSize=14;prompt.GotFocus+=(_,_)=>inputCard.BorderBrush=dim;
         prompt.LostFocus+=(_,_)=>inputCard.BorderBrush=edge;
         input.Children.Add(prompt);
         var toolbar = new Grid(); toolbar.ColumnDefinitions.Add(new ColumnDefinition()); toolbar.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});
 
         commandMenu=PickerAction(false);modelMenu=PickerAction(true);UpdatePickerTitle();
-        toolbar.Children.Add(Row(ActionButton("附件","\uE723",UploadAsync),commandMenu,PermissionPicker()));
-        send = ActionButton("发送","\uE74A",SendAsync); send.Background = ink; send.Foreground = canvas; send.CornerRadius = new CornerRadius(18);
+        var left=Row(ActionButton("附件","\uE710",UploadAsync),commandMenu,PermissionPicker());left.Spacing=2;toolbar.Children.Add(left);
+        send = Primary(ActionButton("发送","\uE74A",SendAsync)); send.CornerRadius = new CornerRadius(15); send.Width = send.Height = 30; send.Padding = new Thickness(0);
         stop = ActionButton("停止","\uE71A",StopAsync);
-        var actions = Row(modelMenu,stop,send); Grid.SetColumn(actions,1); toolbar.Children.Add(actions); input.Children.Add(toolbar);
-        inputCard.Background=surface;inputCard.BorderBrush=edge;inputCard.BorderThickness=new Thickness(1);inputCard.CornerRadius=new CornerRadius(16);inputCard.Padding=new Thickness(14,12,14,10);inputCard.Child=input;composeArea.Children.Add(inputCard);
+        var actions = Row(modelMenu,stop,send); actions.Spacing = 4; Grid.SetColumn(actions,1); toolbar.Children.Add(actions); input.Children.Add(toolbar);
+        inputCard.Background=surface;inputCard.BorderBrush=edge;inputCard.BorderThickness=new Thickness(1);inputCard.CornerRadius=new CornerRadius(14);inputCard.Padding=new Thickness(10,8,8,6);inputCard.Child=input;composeArea.Children.Add(inputCard);
         files = ActionButton("远端文件","\uE8B7",BrowseAsync);
         project = ActionButton("工作目录","\uE838",() => Task.CompletedTask);
         directory.Width = 230; directory.Header = "远端工作目录";
@@ -214,7 +277,7 @@ public sealed partial class MainWindow
         var changes=ActionButton("Git 变更","\uE8F1",ChangesAsync,true);
         var findInFiles=ActionButton("在文件中搜索","\uE721",SearchFilesAsync,true);
         var quick=ActionButton("快速打开文件（Ctrl+P）","\uE8E5",QuickOpenAsync,true);
-        more.Flyout=new Flyout { Content=new StackPanel {Children={ActionButton("设置","\uE713",SettingsAsync,true),ActionButton("状态：用量、MCP、插件、Agent","\uE9D9",StatusAsync,true),ActionButton("对话文本：跨消息选择和复制","\uE8B3",TranscriptAsync,true),changes,findInFiles,quick,project,editors,tunnels,update}} };
+        more.Flyout=new Flyout { Content=new StackPanel {Children={ActionButton("状态：用量、MCP、插件、Agent","\uE9D9",StatusAsync,true),ActionButton("对话文本：跨消息选择和复制","\uE8B3",TranscriptAsync,true),changes,findInFiles,quick,project,editors,tunnels,update}} };
         var quickKey=new KeyboardAccelerator { Key=VirtualKey.P, Modifiers=VirtualKeyModifiers.Control };
         quickKey.Invoked+=async (_,e)=>{ e.Handled=true; await RunAsync(QuickOpenAsync); };
         var findKey=new KeyboardAccelerator { Key=VirtualKey.F, Modifiers=VirtualKeyModifiers.Control|VirtualKeyModifiers.Shift };
@@ -223,9 +286,9 @@ public sealed partial class MainWindow
         restartButton=ActionButton("重启更新","\uE895",InstallUpdateAsync,true);
         restartButton.Visibility=Visibility.Collapsed;
         var headerActions = Row(restartButton,files,more);
-        Grid.SetColumn(headerActions,2); bar.Children.Add(headerActions);
+        headerActions.Spacing = 2; Grid.SetColumn(headerActions,1); bar.Children.Add(headerActions);
         directory.TextChanged += (_,_) => UpdateSubtitle();
-        prompt.TextChanged += (_,_) => {UpdateActions();ShowSuggestions();};
+        prompt.TextChanged += (_,_) => UpdateActions();
         prompt.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.Enter, Modifiers = VirtualKeyModifiers.Control });
         prompt.KeyboardAccelerators[0].Invoked += async (_,e) => { e.Handled = true; if(send.IsEnabled) await RunAsync(SendAsync); };
         root.SizeChanged += (_,e) => { if((e.PreviousSize.Width >= 720) != (e.NewSize.Width >= 720) || e.PreviousSize.Width == 0) { sidebarOpen = e.NewSize.Width >= 720; LayoutSidebar(); } };
@@ -234,7 +297,7 @@ public sealed partial class MainWindow
     private void LayoutSidebar()
     {
         railPanel.Visibility = sidebarOpen ? Visibility.Visible : Visibility.Collapsed;
-        root.ColumnDefinitions[0].Width = new GridLength(sidebarOpen ? 240 : 0);
+        root.ColumnDefinitions[0].Width = new GridLength(sidebarOpen ? 250 : 0); root.ColumnSpacing = sidebarOpen ? 6 : 0;
     }
     private bool showArchived;
     private string HostKeyOrEmpty => host == null ? "" : LocalState.HostKey(host);
@@ -242,58 +305,81 @@ public sealed partial class MainWindow
     private bool IsCurrent(Conversation c) => conversation is not null && c.Directory == conversation.Directory &&
         ((c.SessionId ?? c.Reference) is { } id ? id == (conversation.SessionId ?? conversation.Reference) : ReferenceEquals(c, conversation));
 
+    private TextBlock SectionLabel(string text) => new() { Text = text, Foreground = muted, FontSize = 12, Margin = new Thickness(8,8,0,2) };
     private void RenderHistory()
     {
         projects.Children.Clear();
         var list = Sessions.Visible(history,local,HostKeyOrEmpty,search.Text);
         var archive = Sessions.Visible(history,local,HostKeyOrEmpty,search.Text,true);
-        projects.Children.Add(new TextBlock { Text = list.Count > 0 ? "项目" : search.Text.Length > 0 ? "没有找到匹配的对话" : "暂无历史对话", Foreground = muted, FontSize = 13 });
-        if(history.Count == 0 && host == null) projects.Children.Add(new TextBlock { Text = "连接后自动同步这台机器的对话", Foreground = muted, FontSize = 12 });
-        var pinned = list.Where(entry => entry.Pinned).ToList();
-        if(pinned.Count > 0)
-        {
-            projects.Children.Insert(0,new TextBlock { Text="已固定", Foreground=muted, FontSize=13 });
-            for(int i=0;i<pinned.Count;i++) projects.Children.Insert(i+1,ConversationRow(pinned[i],"\uE718"));
-        }
         if(parked.Count > 0)
         {
             // Conversations left running, newest first: one click brings each back as it was.
-            int at = 0;
-            projects.Children.Insert(at++,new TextBlock { Text="后台对话", Foreground=muted, FontSize=13 });
-            foreach(var waiting in parked.Values.Reverse()) projects.Children.Insert(at++,ParkedRow(waiting));
+            projects.Children.Add(SectionLabel("后台对话"));
+            foreach(var waiting in parked.Values.Reverse()) projects.Children.Add(ParkedRow(waiting));
         }
+        var pinned = list.Where(entry => entry.Pinned).ToList();
+        if(pinned.Count > 0)
+        {
+            projects.Children.Add(SectionLabel("已固定"));
+            foreach(var entry in pinned) projects.Children.Add(ConversationRow(entry,"\uE718"));
+        }
+        if(list.Count == 0) projects.Children.Add(SectionLabel(search.Text.Length > 0 ? "没有找到匹配的对话" : "暂无历史对话"));
+        if(history.Count == 0 && host == null) projects.Children.Add(SectionLabel("连接后自动同步这台机器的对话"));
         int index = 0;
         foreach(var group in Sessions.Projects(list))
         {
-            var items = new StackPanel { Spacing = 2 };
+            var items = new StackPanel { Spacing = 1 };
             var path = group.Directory; var groupId = HostKeyOrEmpty + "|" + path;
-            items.Children.Add(ActionButton("新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); },true));
             foreach(var entry in group.Entries) items.Children.Add(ConversationRow(entry,null));
             var folder = ShortDirectory(path);
             bool expanded = search.Text.Length>0 || (openGroups.TryGetValue(groupId,out var remembered) ? remembered : index < 2 || group.Entries.Any(entry=>IsCurrent(entry.Conversation)));
             index++;
-            var arrow = new FontIcon { FontSize=11 };
+            var arrow = new FontIcon { FontSize=9, Foreground=muted, Width=12 };
             void SetExpanded(bool value) { expanded=value;arrow.Glyph=value?"\uE70D":"\uE76C";items.Visibility=value?Visibility.Visible:Visibility.Collapsed; }
-            var section = Button(folder ?? path,()=> { SetExpanded(!expanded); openGroups[groupId]=expanded;return Task.CompletedTask; });
-            section.Content=Row(arrow,new FontIcon {Glyph="\uE8B7",FontSize=15},new TextBlock {Text=string.IsNullOrEmpty(folder)?path:folder,TextTrimming=TextTrimming.CharacterEllipsis});
+            var section = Flat(Button(folder ?? path,()=> { SetExpanded(!expanded); openGroups[groupId]=expanded;return Task.CompletedTask; }));
+            var label = Row(arrow,new FontIcon {Glyph="\uE8B7",FontSize=14,Foreground=muted},new TextBlock {Text=string.IsNullOrEmpty(folder)?path:folder,FontSize=13,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,TextTrimming=TextTrimming.CharacterEllipsis});
+            label.Spacing = 6; section.Content = label; section.Padding = new Thickness(6,5,8,5);
             section.HorizontalContentAlignment=HorizontalAlignment.Left;section.HorizontalAlignment=HorizontalAlignment.Stretch;
-            section.Background=new SolidColorBrush(Microsoft.UI.Colors.Transparent);section.BorderThickness=new Thickness(0);
-            AutomationProperties.SetName(section,path);ToolTipService.SetToolTip(section,path);items.Margin=new Thickness(12,0,0,0);
+            AutomationProperties.SetName(section,path);ToolTipService.SetToolTip(section,path);items.Margin=new Thickness(14,0,0,0);
             var menu=new MenuFlyout();
             menu.Items.Add(MenuItem("在此目录新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); }));
             menu.Items.Add(MenuItem("把此项目的历史移到废纸篓…","\uE74D",() => TrashProjectAsync(path)));
             section.ContextFlyout=menu;
-            SetExpanded(expanded);projects.Children.Add(section);projects.Children.Add(items);
+            var add = ActionButton("在此目录新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); });
+            var header = new Grid(); header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            header.Children.Add(section); Grid.SetColumn(add,1); header.Children.Add(add);
+            SetExpanded(expanded);projects.Children.Add(header);projects.Children.Add(items);
         }
-        if(list.Count > 0 && search.Text.Length == 0) {
-            projects.Children.Add(new TextBlock { Text="最近对话", Foreground=muted, FontSize=13, Margin=new Thickness(4,12,0,0) });
-            foreach(var entry in list.Take(6)) projects.Children.Add(ConversationRow(entry,"\uE81C"));
-        }
-        if(archive.Count > 0)
+        archiveToggle.Visibility = archive.Count > 0 || showArchived ? Visibility.Visible : Visibility.Collapsed;
+        ToolTipService.SetToolTip(archiveToggle,showArchived ? "隐藏已归档的对话" : $"显示已归档的对话（{archive.Count}）");
+        if(showArchived)
         {
-            var toggle=ActionButton(showArchived?$"隐藏已归档（{archive.Count}）":$"显示已归档（{archive.Count}）","\uE7B8",()=>{ showArchived=!showArchived; RenderHistory(); return Task.CompletedTask; },true);
-            toggle.Margin=new Thickness(0,12,0,0); projects.Children.Add(toggle);
-            if(showArchived) foreach(var entry in archive) projects.Children.Add(ConversationRow(entry,"\uE7B8"));
+            projects.Children.Add(SectionLabel(archive.Count > 0 ? $"已归档（{archive.Count}）" : "没有已归档的对话"));
+            foreach(var entry in archive) projects.Children.Add(ConversationRow(entry,"\uE7B8"));
+        }
+        RenderRecent();
+    }
+    /// The home page lists the newest conversations of this server; the sidebar holds the full tree.
+    private void RenderRecent()
+    {
+        homeRecent.Children.Clear();
+        var list = agent?.Connected == true ? Sessions.Visible(history,local,HostKeyOrEmpty,"").Take(6).ToList() : [];
+        homeRecent.Visibility = list.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if(list.Count == 0) return;
+        homeRecent.Children.Add(new TextBlock { Text = "最近对话", FontSize = 12, Foreground = muted, Margin = new Thickness(0,12,0,4) });
+        foreach(var entry in list)
+        {
+            var c = entry.Conversation;
+            var row = Flat(Button(c.Name,() => SelectAsync(c)));
+            var text = new StackPanel { Spacing = 2 };
+            text.Children.Add(new TextBlock { Text = c.Name, FontSize = 13, Foreground = ink, TextTrimming = TextTrimming.CharacterEllipsis });
+            text.Children.Add(new TextBlock { Text = c.Directory, FontSize = 12, Foreground = muted, TextTrimming = TextTrimming.CharacterEllipsis });
+            var line = new Grid { ColumnSpacing = 12 }; line.ColumnDefinitions.Add(new ColumnDefinition()); line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var chevron = new FontIcon { Glyph = "\uE76C", FontSize = 10, Foreground = dim, VerticalAlignment = VerticalAlignment.Center };
+            line.Children.Add(text); Grid.SetColumn(chevron,1); line.Children.Add(chevron);
+            row.Content = line; row.Padding = new Thickness(10,6,10,6);
+            row.HorizontalAlignment = HorizontalAlignment.Stretch; row.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            homeRecent.Children.Add(row);
         }
     }
     private void RefreshWorkbench()
@@ -302,46 +388,32 @@ public sealed partial class MainWindow
         title.Text = conversation?.Name ?? (host == null ? "claude-mirror" : "新对话");
         UpdateSubtitle();UpdatePickerTitle();UpdateHostPicker();
         composer.Visibility = host != null ? Visibility.Visible : Visibility.Collapsed;
-        hostDot.Background=online?sage:muted;connection.Text="未连接";connection.Visibility=online?Visibility.Collapsed:Visibility.Visible;
+        hostDot.Background=stateDot.Background=online?sage:dim;connection.Text=online?"已连接":"未连接";
         fresh.IsEnabled = online; sync.IsEnabled = online;
         files.Visibility = project.Visibility = host == null ? Visibility.Collapsed : Visibility.Visible;
         files.IsEnabled = online; project.IsEnabled = online && !busy;
         home.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         scroll.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
         if(empty) {
-            homeTitle.Text = online ? "今天，想完成什么？" : host == null ? "开始使用" : agent?.SshConnected == true ? "设置服务器" : "连接服务器";
-            home.VerticalAlignment=online?VerticalAlignment.Center:VerticalAlignment.Top;
-            home.Margin=online?new Thickness(16,12,16,36):new Thickness(32,64,32,16);
-            home.Spacing=online?24:16;
-            welcomeHeading.HorizontalAlignment=homeActions.HorizontalAlignment=online?HorizontalAlignment.Center:HorizontalAlignment.Left;
-            welcomeIcon.Visibility=online?Visibility.Visible:Visibility.Collapsed;
-            homeHint.Text = host == null
+            homeTitle.Text = online ? "新对话" : host == null ? "开始使用" : agent?.SshConnected == true ? "设置服务器" : "连接服务器";
+            homeHint.Text = online ? host!.Name : host == null
                 ? "在这台电脑上使用服务器里的 Claude Code：代码和 Claude 都在服务器上运行，这里负责对话和审批。\n\n1. 准备一台能用 SSH 登录的 Linux 或 macOS 服务器\n2. 添加服务器：填写地址和密码\n3. 自动检查环境：缺少 Claude Code 或 Node.js 时一键安装，然后登录 Claude"
                 : agent?.SshConnected == true ? "SSH 已连接，按下面的提示完成设置。" : "使用服务器上的 Claude Code。";
-            homeHint.Visibility=online?Visibility.Collapsed:Visibility.Visible;
             homeActions.Children.Clear();
             if(!online) {
-                var add = ActionButton(host == null ? "添加服务器" : "重新连接","\uE710",()=>ConnectDialogAsync(host),true);
-                add.Background=ink;add.Foreground=canvas;add.HorizontalAlignment=HorizontalAlignment.Left;
+                var add = Primary(ActionButton(host == null ? "添加服务器" : "重新连接","\uE710",()=>ConnectDialogAsync(host),true));
+                add.HorizontalAlignment=HorizontalAlignment.Left;add.Padding=new Thickness(12,6,14,6);
                 if(agent?.SshConnected != true) homeActions.Children.Add(add);
                 if(host == null) homeActions.Children.Add(new HyperlinkButton { Content = "没有服务器？查看入门指南", NavigateUri = GettingStartedUrl });
             } else {
-                var suggestions = new StackPanel { Orientation=Orientation.Horizontal,Spacing=6 };
-                foreach(var (name,glyph,text) in new[]{("了解项目","\uE8B7","请梳理这个项目的目录结构、技术栈和主要入口。"),("检查代码","\uE721","请检查当前项目，找出影响使用的问题并给出改进建议。"),("实现功能","\uE943","我想实现一个新功能：")}) {
-                    var item = ActionButton(name,glyph,()=>{prompt.Text=text;prompt.Focus(FocusState.Programmatic);return Task.CompletedTask;},true);
-                    item.Background=surface;item.BorderBrush=edge;item.BorderThickness=new Thickness(1);item.CornerRadius=new CornerRadius(8);suggestions.Children.Add(item);
-                }
-                homeActions.Children.Add(suggestions);
+                var remote = agent!;
+                homeActions.Children.Add(Row(
+                    Bordered(ActionButton("在主目录开始对话","\uE80F",()=>{directory.Text=remote.Home;prompt.Focus(FocusState.Programmatic);return Task.CompletedTask;},true)),
+                    Bordered(ActionButton("打开项目目录","\uE838",BrowseAsync,true))));
             }
         }
-        ShowSuggestions();
+        RenderRecent();
         UpdateActions();
-    }
-    private void ShowSuggestions()
-    {
-        bool hidden = agent?.Connected==true && prompt.Text.Length>0;
-        homeActions.MinHeight=34;
-        if(homeActions.Children.Count>0) homeActions.Children[0].Visibility=hidden?Visibility.Collapsed:Visibility.Visible;
     }
     private void UpdateActions()
     {

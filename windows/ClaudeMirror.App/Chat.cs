@@ -91,10 +91,12 @@ public sealed partial class MainWindow
         var name = Presentation.Text(permission["name"]);
         bool elicitation = Presentation.Text(permission["kind"]) == "elicitation", asking = name == "AskUserQuestion", plan = name == "ExitPlanMode";
         var panel = new StackPanel { Spacing = 10 };
+        var waiting = Row(new FontIcon { Glyph = "\uE8A7", FontSize = 12, Foreground = accent }, new TextBlock { Text = "等待你的确认", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = accent });
+        waiting.Spacing = 6; panel.Children.Add(waiting);
         panel.Children.Add(new TextBlock
         {
             Text = PermissionText.Title(permission),
-            FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink, TextWrapping = TextWrapping.Wrap
+            FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink, TextWrapping = TextWrapping.Wrap
         });
         if (Presentation.Text(permission["description"]) is { Length: > 0 } description)
             panel.Children.Add(new TextBlock { Text = description, FontSize = 13, Foreground = muted, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
@@ -116,7 +118,7 @@ public sealed partial class MainWindow
         Button Choice(string label, bool primary, Func<Task> action)
         {
             var button = Button(label, action); button.CornerRadius = new CornerRadius(8); button.Padding = new Thickness(14, 6, 14, 6);
-            if (primary) { button.Background = ink; button.Foreground = canvas; }
+            if (primary) Primary(button);
             buttons.Children.Add(button); return button;
         }
         if (elicitation)
@@ -200,7 +202,7 @@ public sealed partial class MainWindow
         return new Border
         {
             Child = new ScrollViewer { Content = panel, MaxHeight = 420, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(0, 0, 8, 0) },
-            Background = surface, BorderBrush = amber, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 12, 6, 12)
+            Background = canvas, BorderBrush = accent, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(14, 12, 6, 12)
         };
     }
 

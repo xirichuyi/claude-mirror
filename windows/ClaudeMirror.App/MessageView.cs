@@ -48,11 +48,11 @@ public sealed partial class MainWindow
             Container = new Border
             {
                 Child=stack, HorizontalAlignment=user?HorizontalAlignment.Right:HorizontalAlignment.Stretch,
-                Padding=user?new Thickness(14,10,14,10):new Thickness(0), CornerRadius=new CornerRadius(16), Background=user?window.bubble:null,
-                MaxWidth=user?620:double.PositiveInfinity
+                Padding=user?new Thickness(12,8,12,8):new Thickness(0), CornerRadius=new CornerRadius(12), Background=user?window.bubble:null,
+                MaxWidth=user?540:double.PositiveInfinity
             };
             Container.Tag = this;
-            if(text.Length>0) body.Children.Add(Label(text,15,user?window.ink:window.muted));
+            if(text.Length>0) body.Children.Add(Label(text,14,user?window.ink:window.muted));
         }
 
         private static TextBlock Label(string text,double size,Brush color) => new() { Text=text,FontSize=size,Foreground=color,TextWrapping=TextWrapping.Wrap,IsTextSelectionEnabled=true };
@@ -71,9 +71,9 @@ public sealed partial class MainWindow
             {
                 plain=Protocol.MessageText(message);
                 body.Children.Clear(); parts.Clear();
-                if(user) body.Children.Add(Label(plain,15,window.ink));
+                if(user) body.Children.Add(Label(plain,14,window.ink));
                 else if(plain.Length>0) body.Children.Add(window.MarkdownView(plain,null,live));
-                else if(live) body.Children.Add(Label("正在回复…",15,window.muted));
+                else if(live) body.Children.Add(Label("正在回复…",14,window.muted));
             }
             else
             {
@@ -137,21 +137,18 @@ public sealed partial class MainWindow
     private Border Disclosure(string glyph,string title,string? subject,FrameworkElement? status,bool open,Func<FrameworkElement> content)
     {
         var chevron=new FontIcon { Glyph=open?"\uE70D":"\uE76C",FontSize=10,Foreground=muted,VerticalAlignment=VerticalAlignment.Center };
-        var head=new Grid { ColumnSpacing=8 };
+        var head=new Grid { ColumnSpacing=7 };
         foreach(var width in new[] { GridLength.Auto,GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto }) head.ColumnDefinitions.Add(new ColumnDefinition { Width=width });
-        var icon=new FontIcon { Glyph=glyph,FontSize=14,Foreground=muted,VerticalAlignment=VerticalAlignment.Center };
-        var name=new TextBlock { Text=title,FontSize=13,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,Foreground=ink,VerticalAlignment=VerticalAlignment.Center };
-        var detail=new TextBlock { Text=subject ?? "",FontSize=13,Foreground=muted,TextTrimming=TextTrimming.CharacterEllipsis,TextWrapping=TextWrapping.NoWrap,VerticalAlignment=VerticalAlignment.Center };
+        var icon=new FontIcon { Glyph=glyph,FontSize=13,Foreground=muted,VerticalAlignment=VerticalAlignment.Center };
+        var name=new TextBlock { Text=title,FontSize=12,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,Foreground=ink,VerticalAlignment=VerticalAlignment.Center };
+        var detail=new TextBlock { Text=subject ?? "",FontSize=12,Foreground=muted,TextTrimming=TextTrimming.CharacterEllipsis,TextWrapping=TextWrapping.NoWrap,VerticalAlignment=VerticalAlignment.Center };
         Grid.SetColumn(icon,1); Grid.SetColumn(name,2); Grid.SetColumn(detail,3);
         head.Children.Add(chevron); head.Children.Add(icon); head.Children.Add(name); head.Children.Add(detail);
         if(status is not null) { Grid.SetColumn(status,4); head.Children.Add(status); }
-        var toggle=new Button
-        {
-            Content=head,HorizontalAlignment=HorizontalAlignment.Stretch,HorizontalContentAlignment=HorizontalAlignment.Stretch,
-            Background=new SolidColorBrush(Microsoft.UI.Colors.Transparent),BorderThickness=new Thickness(0),Padding=new Thickness(10,7,10,7),CornerRadius=new CornerRadius(8)
-        };
+        // A quiet line in the reply, not a card: only what it opens is framed.
+        var toggle=Flat(new Button { Content=head,HorizontalAlignment=HorizontalAlignment.Stretch,HorizontalContentAlignment=HorizontalAlignment.Stretch,Padding=new Thickness(4,3,8,3) });
         AutomationProperties.SetName(toggle,subject is null ? title : title+" "+subject);
-        var holder=new ContentControl { HorizontalContentAlignment=HorizontalAlignment.Stretch,Margin=new Thickness(10,0,10,10),Visibility=Visibility.Collapsed };
+        var holder=new ContentControl { HorizontalContentAlignment=HorizontalAlignment.Stretch,Margin=new Thickness(20,4,0,6),Visibility=Visibility.Collapsed };
         void Set(bool show)
         {
             if(show && holder.Content is null) holder.Content=content(); // Built on first open: most cards are never opened.
@@ -160,7 +157,7 @@ public sealed partial class MainWindow
         toggle.Click+=(_,_)=>Set(holder.Visibility==Visibility.Collapsed);
         if(open) Set(true);
         var panel=new StackPanel(); panel.Children.Add(toggle); panel.Children.Add(holder);
-        return new Border { Child=panel,BorderBrush=edge,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8),Background=surface,Tag=holder };
+        return new Border { Child=panel,Margin=new Thickness(-4,0,0,0),Tag=holder };
     }
 
     /// A tool call: what it is and on which file, whether it is running or failed, and its input and output when opened.

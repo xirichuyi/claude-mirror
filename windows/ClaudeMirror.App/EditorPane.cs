@@ -32,7 +32,7 @@ public sealed partial class MainWindow
     {
         chatArea=chat; split.ColumnDefinitions.Add(new ColumnDefinition());split.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(0)});
         split.Children.Add(chat);Grid.SetColumn(editorTabs,1);split.Children.Add(editorTabs);
-        Grid.SetColumn(split,1);root.Children.Add(split);
+        Grid.SetColumn(split,1);Grid.SetRow(split,1);split.Background=canvas;split.CornerRadius=new CornerRadius(10);root.Children.Add(split);
         editorTabs.TabCloseRequested+=async (_,e)=>await RunAsync(async ()=>{
             var file=openFiles.FirstOrDefault(x=>x.Tab==e.Tab);
             if(file==null){editorTabs.TabItems.Remove(e.Tab);LayoutSplit();return;} // A changes, diff, search or PDF tab holds nothing to save.

@@ -30,17 +30,17 @@ public sealed partial class MainWindow
                     panel.Children.Add(CodePanel(code.Lines.ToString(), (code as FencedCodeBlock)?.Info ?? "", follow && ReferenceEquals(block, blocks.LastChild)));
                     break;
                 case LeafBlock { Inline: { } inline }:
-                    var text = new TextBlock { Foreground = ink, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FontSize = 15 };
+                    var text = new TextBlock { Foreground = ink, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 22 };
                     if (block is HeadingBlock heading)
                     {
-                        text.FontSize = heading.Level switch { 1 => 23, 2 => 19, 3 => 16, _ => 14 };
+                        text.FontSize = heading.Level switch { 1 => 20, 2 => 17, 3 => 15, _ => 14 }; text.LineHeight = 0;
                         text.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
                     }
                     AddInlines(text.Inlines, inline,basePath);
                     panel.Children.Add(text);
                     break;
                 case QuoteBlock quote:
-                    panel.Children.Add(new Border { BorderBrush = edge, BorderThickness = new Thickness(3,0,0,0), Padding = new Thickness(12,0,0,0), Child = RenderBlocks(quote,basePath) });
+                    panel.Children.Add(new Border { BorderBrush = dim, BorderThickness = new Thickness(3,0,0,0), Padding = new Thickness(10,0,0,0), Child = RenderBlocks(quote,basePath) });
                     break;
                 case ListBlock list:
                     int number = int.TryParse(list.OrderedStart, out var first) ? first : 1;
@@ -119,13 +119,14 @@ public sealed partial class MainWindow
     /// Long lines scroll sideways and tall blocks scroll inside a capped box; `follow` keeps the newest lines of a block that is still streaming in view.
     private FrameworkElement CodePanel(string code,string language,bool follow=false,string? title=null)
     {
-        var text=new TextBlock {FontFamily=new FontFamily("Cascadia Mono, Consolas"),Foreground=ink,FontSize=13,IsTextSelectionEnabled=true,TextWrapping=TextWrapping.NoWrap};
+        var text=new TextBlock {FontFamily=Mono,Foreground=ink,FontSize=12.5,LineHeight=19,IsTextSelectionEnabled=true,TextWrapping=TextWrapping.NoWrap};
         if(code.Length<80000 && Languages.Contains(language))
         {
+            // The macOS palettes' syntax colours.
             bool dark=root.ActualTheme==ElementTheme.Dark;
-            var str=dark?Brush(159,205,156):Brush(41,108,64);
-            var num=dark?Brush(243,181,121):Brush(149,75,21);
-            var kw=dark?Brush(205,167,240):Brush(117,59,147);
+            var str=dark?Brush(0x75,0xB1,0x8B):Brush(0x1D,0x69,0x1A);
+            var num=dark?Brush(0xC2,0x8E,0xC4):Brush(0x58,0x30,0x9D);
+            var kw=dark?Brush(0xD7,0x91,0x5C):Brush(0xA4,0x3E,0x3A);
             int offset=0;
             foreach(Match m in Tokens.Matches(code))
             {
@@ -135,13 +136,19 @@ public sealed partial class MainWindow
             }
             if(offset<code.Length)text.Inlines.Add(new Run{Text=code[offset..]});
         } else text.Text=code;
-        var header=new Grid();
-        header.Children.Add(new TextBlock {Text=title ?? (language.Length==0?"代码":language),Foreground=muted,FontSize=12,VerticalAlignment=VerticalAlignment.Center});
-        var copy=ActionButton("复制代码","\uE8C8",()=>{var data=new DataPackage();data.SetText(code);Clipboard.SetContent(data);return Task.CompletedTask;});
-        copy.HorizontalAlignment=HorizontalAlignment.Right;header.Children.Add(copy);
-        var box=new ScrollViewer {Content=text,MaxHeight=CodeHeightLimit,HorizontalScrollBarVisibility=ScrollBarVisibility.Auto,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollMode=ScrollMode.Auto,Padding=new Thickness(0,0,0,10)};
+        // A header strip over the code: what it is on the left, its length and the copy action on the right.
+        int lines=code.TrimEnd('\n').Count(c=>c=='\n')+1;
+        var header=new Grid {Background=hover,BorderBrush=edge,BorderThickness=new Thickness(0,0,0,1),Padding=new Thickness(12,1,3,1)};
+        header.Children.Add(new TextBlock {Text=title ?? (language.Length==0?"代码":language),FontFamily=title is null?Mono:null,Foreground=muted,FontSize=12,VerticalAlignment=VerticalAlignment.Center});
+        var copy=ActionButton("复制","\uE8C8",()=>{var data=new DataPackage();data.SetText(code);Clipboard.SetContent(data);return Task.CompletedTask;},true);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(copy,"复制代码");copy.Foreground=muted;
+        if(copy.Content is StackPanel label) { ((FontIcon)label.Children[0]).FontSize=12; ((TextBlock)label.Children[1]).FontSize=12; }
+        var side=Row(copy);side.Spacing=6;side.HorizontalAlignment=HorizontalAlignment.Right;
+        if(lines>1) side.Children.Insert(0,new TextBlock {Text=lines+" 行",FontSize=11,Foreground=dim,VerticalAlignment=VerticalAlignment.Center});
+        header.Children.Add(side);
+        var box=new ScrollViewer {Content=text,MaxHeight=CodeHeightLimit,HorizontalScrollBarVisibility=ScrollBarVisibility.Auto,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollMode=ScrollMode.Auto,Padding=new Thickness(12,10,12,12)};
         if(follow) box.Loaded+=(_,_)=>box.ChangeView(null,box.ScrollableHeight,null,true);
-        var panel=new StackPanel {Spacing=6};panel.Children.Add(header);panel.Children.Add(box);
-        return new Border {Child=panel,Padding=new Thickness(12),BorderBrush=edge,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8),Background=surface};
+        var panel=new StackPanel();panel.Children.Add(header);panel.Children.Add(box);
+        return new Border {Child=panel,BorderBrush=edge,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8),Background=surface};
     }
 }

@@ -95,7 +95,14 @@ public sealed partial class MainWindow
         RefreshWorkbench();
     }
 
-    private Button Primary(Button button) { button.Background = ink; button.Foreground = canvas; return button; }
+    /// The one main action of a page or card: the accent fill with white text, in every pointer state.
+    private Button Primary(Button button)
+    {
+        foreach (var state in new[] { "", "PointerOver", "Pressed" }) { button.Resources["ButtonBackground" + state] = accentFill; button.Resources["ButtonForeground" + state] = onAccent; }
+        button.Resources["ButtonBackgroundDisabled"] = edge; button.Resources["ButtonForegroundDisabled"] = dim;
+        button.Background = accentFill; button.Foreground = onAccent; button.BorderThickness = new Thickness(0);
+        return button;
+    }
 
     private void Copy(string text, string note)
     {
