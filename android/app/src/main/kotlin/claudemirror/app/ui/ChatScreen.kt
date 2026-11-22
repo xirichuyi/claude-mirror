@@ -119,6 +119,8 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
     }
     val connections by model.connections.collectAsStateWithLifecycle()
     var draft by rememberSaveable(sessionId) { mutableStateOf("") }
+    val online = connections[session.hostId] is ConnectionState.Connected
+    LaunchedEffect(sessionId, online) { if (online) model.refresh(sessionId) }
 
     // A phone on its side with its keyboard up: the title gives its room to the conversation.
     val screen = LocalConfiguration.current
@@ -162,7 +164,7 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
                 }
                 // The composer keeps its place below, however short the window and however much waits above it.
                 Column(Modifier.weight(1f)) {
-                    Transcript(session, Modifier.weight(1f)) { permission, answer -> model.respond(sessionId, permission, answer) }
+                    Transcript(session, Modifier.weight(1f), onEarlier = { model.loadEarlier(sessionId) }) { permission, answer -> model.respond(sessionId, permission, answer) }
                     // Editing a queued message must not throw away what is already being written.
                     Queue(session, model, queueRoom, onEdit = { item -> draft = if (draft.isBlank()) item else draft.trimEnd() + "\n" + item })
                 }
@@ -179,7 +181,7 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
 }
 
 @Composable
-private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (permission: String, JsonObject) -> Unit) {
+private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -> Unit, onAnswer: (permission: String, JsonObject) -> Unit) {
     val list = rememberLazyListState()
     // One row per block, so a long reply only redraws the part that is still being written.
     val rows = remember(session.messages) {
@@ -227,7 +229,12 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
     LaunchedEffect(asked) {
         if (asked != null) { following = true; list.scrollToItem(rows.size) }
     }
-    LazyColumn(modifier.fillMaxWidth().nestedScroll(reader), state = list) {
+    Column(modifier) {
+    // A conversation brought over from the server shows its latest part; the rest comes on request.
+    if (session.historyBefore != null && !list.canScrollBackward) {
+        TextButton(onClick = onEarlier, Modifier.align(Alignment.CenterHorizontally)) { Text("更早", color = palette.muted) }
+    }
+    LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(reader), state = list) {
         items(rows.size, key = { rows[it].first }) { index ->
             val (_, message, part) = rows[index]
             when (part) {
@@ -255,6 +262,7 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
         items(session.permissions, key = { "permission:" + it.id }) { permission ->
             PermissionCard(permission) { answer -> onAnswer(permission.id, answer) }
         }
+    }
     }
 }
 

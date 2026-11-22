@@ -376,4 +376,67 @@ class EngineTest {
         engine.loadModels(session.id)
         assertEquals(listOf("sonnet"), engine.models.value[testHost.id]?.map { it.value })
     }
+
+    private fun record(id: String, role: String, text: String) =
+        """{"type":"$role","uuid":"$id","message":{"content":[{"type":"text","text":"$text"}]}}"""
+
+    @Test fun `a conversation from the server is continued here, not started over`() = engineTest {
+        agent.onHistory = { request ->
+            when (request["operation"].string()) {
+                "list" -> json("""{"sessions":[{"reference":"p/s1.jsonl","sessionId":"s1","directory":"/srv/other","name":"<b>fix</b> it","updatedAt":5000}],"nextOffset":null}""")
+                else -> if (request["before"].string() == "m3") json("""{"records":[${record("m1", "user", "first")},${record("m2", "assistant", "one")}],"directory":"/srv/other","before":null}""")
+                    else json("""{"records":[${record("m3", "user", "second")},${record("m4", "assistant", "two")}],"directory":"/srv/other","before":"m3"}""")
+            }
+        }
+        val item = engine.history(testHost).single()
+        val session = engine.adopt(testHost, item)
+        assertEquals("fix it", session.name)
+        assertEquals("/srv/other", session.directory)
+        assertEquals(listOf("m3", "m4"), session.messages.map { it.id })
+        assertEquals(session.id, engine.adopt(testHost, item).id)
+
+        engine.loadEarlier(session.id)
+        assertEquals(listOf("m1", "m2", "m3", "m4"), current(session.id).messages.map { it.id })
+        assertNull(current(session.id).historyBefore)
+
+        engine.send(session.id, "third")
+        until("the reply is started") { agent.starts().isNotEmpty() }
+        assertEquals("s1", agent.starts().single()["request"]!!.jsonObject["session"]!!.jsonObject["remoteSessionId"].string())
+    }
+
+    @Test fun `what was said elsewhere shows up, and what was said here is not lost to an older transcript`() = engineTest {
+        var transcript = listOf(record("m1", "user", "first"), record("m2", "assistant", "one"))
+        agent.onHistory = { json("""{"records":[${transcript.joinToString(",")}],"directory":"/srv/app","before":null}""") }
+        val session = engine.adopt(testHost, RemoteConversation("p/s1.jsonl", "s1", "/srv/app", "first"))
+
+        transcript = transcript + record("m3", "user", "from the terminal") + record("m4", "assistant", "two")
+        engine.refresh(session.id)
+        assertEquals(listOf("m1", "m2", "m3", "m4"), current(session.id).messages.map { it.id })
+
+        // A turn from the phone, finished, which Claude has not written to its transcript yet.
+        engine.send(session.id, "from the phone")
+        val task = current(session.id).remoteTask!!
+        until("the worker is followed") { agent.follows(task.id) }
+        agent.emit(task.id, state(task, 1, "idle", "three", ""","done":true"""))
+        until("the reply ends") { current(session.id).remoteTask == null && current(session.id).remoteOwner == null }
+        val shown = current(session.id).messages
+        engine.refresh(session.id)
+        assertEquals(shown, current(session.id).messages)
+
+        transcript = transcript + record("m5", "user", "from the phone") + record("m6", "assistant", "three") + record("m7", "user", "later, elsewhere")
+        engine.refresh(session.id)
+        assertEquals(listOf("m1", "m2", "m3", "m4", "m5", "m6", "m7"), current(session.id).messages.map { it.id })
+    }
+
+    @Test fun `a new conversation starts in the project it was asked for, and takes a new name`() = engineTest {
+        agent.listing = json("""{"path":"/srv","parent":"/","entries":[{"path":"/srv/app","name":"app","directory":true},{"path":"/srv/notes.txt","name":"notes.txt","directory":false}]}""")
+        assertEquals(listOf("app"), engine.folders(testHost, "/srv").entries.map { it.name })
+        val session = engine.create(testHost, "/srv/app2")
+        assertEquals("/srv/app2", session.directory)
+        engine.rename(session.id, "  renamed  ")
+        engine.rename(session.id, "   ")
+        assertEquals("renamed", current(session.id).name)
+        engine.send(session.id, "hello")
+        assertEquals("renamed", current(session.id).name)
+    }
 }

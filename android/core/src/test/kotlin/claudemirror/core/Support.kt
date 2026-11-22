@@ -44,6 +44,9 @@ class FakeAgent : Launcher {
     @Volatile var onCommand: (JsonObject) -> JsonObject = { json("""{"ok":true}""") }
     @Volatile var status: JsonObject = json("""{"done":false}""")
     @Volatile var inspection: JsonObject = json("{}")
+    @Volatile var listing: JsonObject = json("{}")
+    /** Answers a request about the conversations Claude Code keeps on the server. */
+    @Volatile var onHistory: (JsonObject) -> JsonObject = { json("{}") }
     @Volatile var launches = 0
     @Volatile var installedDelay = 0L
     private val subscriptions = HashMap<String, String>()
@@ -83,7 +86,8 @@ class FakeAgent : Launcher {
         val id = request["id"] ?: return
         val params = request["params"]!!.jsonObject
         val result: JsonElement = when (request["op"].string()) {
-            "file" -> json("""{"home":"/home/dev","hostname":"box","node":"v22.1.0","nodeSupported":true}""")
+            "file" -> if (params["operation"].string() == "list") listing else json("""{"home":"/home/dev","hostname":"box","node":"v22.1.0","nodeSupported":true}""")
+            "history" -> { calls += Call("history:" + params["operation"].string(), params); onHistory(params) }
             "taskWatch" -> {
                 synchronized(this) { subscriptions[params["taskId"].string()!!] = params["subscription"].string()!! }
                 return
