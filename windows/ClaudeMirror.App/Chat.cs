@@ -91,7 +91,7 @@ public sealed partial class MainWindow
         var name = Presentation.Text(permission["name"]);
         bool elicitation = Presentation.Text(permission["kind"]) == "elicitation", asking = name == "AskUserQuestion", plan = name == "ExitPlanMode";
         var panel = new StackPanel { Spacing = 10 };
-        var waiting = Row(new FontIcon { Glyph = "\uE8A7", FontSize = 12, Foreground = accent }, new TextBlock { Text = "等待你的确认", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = accent });
+        var waiting = Row(new FontIcon { Glyph = "\uE946", FontSize = 12, Foreground = accent }, new TextBlock { Text = "等待你的确认", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = accent });
         waiting.Spacing = 6; panel.Children.Add(waiting);
         panel.Children.Add(new TextBlock
         {
