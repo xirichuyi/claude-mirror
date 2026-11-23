@@ -142,9 +142,9 @@ public sealed partial class MainWindow
         var caption=new TextBlock {Text=title ?? (language.Length==0?"代码":language),Foreground=muted,FontSize=12,VerticalAlignment=VerticalAlignment.Center};
         if(title is null) caption.FontFamily=Mono;
         header.Children.Add(caption);
-        var copy=ActionButton("复制","\uE8C8",()=>{var data=new DataPackage();data.SetText(code);Clipboard.SetContent(data);return Task.CompletedTask;},true);
+        var copy=ActionButton("复制","\uE8C8",()=>{var data=new DataPackage();data.SetText(code);Clipboard.SetContent(data);return Task.CompletedTask;});
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(copy,"复制代码");copy.Foreground=muted;
-        if(copy.Content is StackPanel label) { ((FontIcon)label.Children[0]).FontSize=12; ((TextBlock)label.Children[1]).FontSize=12; }
+        if(copy.Content is FontIcon glyph) glyph.FontSize=12;
         var side=Row(copy);side.Spacing=6;side.HorizontalAlignment=HorizontalAlignment.Right;
         if(lines>1) side.Children.Insert(0,new TextBlock {Text=lines+" 行",FontSize=11,Foreground=dim,VerticalAlignment=VerticalAlignment.Center});
         header.Children.Add(side);

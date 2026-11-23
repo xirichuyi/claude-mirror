@@ -19,11 +19,13 @@ public sealed partial class MainWindow
         var rows = new StackPanel { Spacing = 2 };
         var heading = new Grid { ColumnSpacing = 6 };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        heading.Children.Add(new TextBlock
-        {
-            Text = queue.Paused ? $"已暂停 · {queue.Items.Count} 条" : $"排队 {queue.Items.Count} 条",
-            FontSize = 12, Foreground = muted, VerticalAlignment = VerticalAlignment.Center
-        });
+        // An icon and a count: a pause mark while the queue is held back, a list while it waits for the reply.
+        var count = Row(new FontIcon { Glyph = queue.Paused ? "\uE769" : "\uE8FD", FontSize = 12, Foreground = muted },
+            new TextBlock { Text = queue.Items.Count.ToString(), FontSize = 12, Foreground = muted, VerticalAlignment = VerticalAlignment.Center });
+        count.Spacing = 6; count.VerticalAlignment = VerticalAlignment.Center;
+        string state = queue.Paused ? "已暂停" : "排队";
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(count, $"{state} {queue.Items.Count}"); ToolTipService.SetToolTip(count, state);
+        heading.Children.Add(count);
         var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
         if (queue.Paused)
         {
@@ -32,7 +34,7 @@ public sealed partial class MainWindow
                 queue.Resume();
                 if (queue.Next(busy) is { } next) { RenderQueue(); await SendTextAsync(next.Text); }
                 else RenderQueue();
-            }, true);
+            });
             resume.IsEnabled = agent?.Connected == true && !busy;
             controls.Children.Add(resume);
         }

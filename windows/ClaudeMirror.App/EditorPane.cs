@@ -76,7 +76,7 @@ public sealed partial class MainWindow
         var edit=ActionButton(f.Editing?"保存到远端":"编辑",f.Editing?"\uE74E":"\uE70F",async ()=>{
             if(f.Editing) await SaveEditorAsync(f);
             else { f.Draft=f.Original;f.Editing=true;RenderEditor(f); }
-        },true);
+        });
         edit.IsEnabled=writable && !f.Saving;buttons.Children.Add(edit);
         buttons.Children.Add(ActionButton("重新加载","\uE72C",async ()=>{
             if(f.Saving || (f.Dirty && !await ConfirmDiscardAsync(f)))return;

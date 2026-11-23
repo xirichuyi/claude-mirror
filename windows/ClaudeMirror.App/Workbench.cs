@@ -217,7 +217,7 @@ public sealed partial class MainWindow
         At(railPanel,sidebar,0); projects.Padding = new Thickness(8,2,8,8); projects.Spacing = 1;
         At(railPanel,new ScrollViewer { Content = projects },1);
         var footer = new Grid { Margin = new Thickness(8,0,8,0), Padding = new Thickness(0,4,0,4), BorderBrush = edge, BorderThickness = new Thickness(0,1,0,0) };
-        archiveToggle = ActionButton("归档","\uE7B8",() => { showArchived = !showArchived; RenderHistory(); return Task.CompletedTask; },true);
+        archiveToggle = ActionButton("归档","\uE7B8",() => { showArchived = !showArchived; RenderHistory(); return Task.CompletedTask; });
         archiveToggle.HorizontalAlignment = HorizontalAlignment.Left; footer.Children.Add(archiveToggle);
         var gear = Row(ActionButton("添加服务器","\uE710",() => ConnectDialogAsync(null)),ActionButton("设置","\uE713",SettingsAsync));
         gear.Spacing = 0; gear.HorizontalAlignment = HorizontalAlignment.Right; footer.Children.Add(gear);
