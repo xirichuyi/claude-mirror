@@ -22,7 +22,7 @@ function Wait-Control([string]$name, [bool]$visible = $true) {
     throw "Timed out waiting for '$name' (expected visible: $visible)"
 }
 try {
-    foreach ($button in @('添加主机', '连接')) {
+    foreach ($button in @('添加服务器', '连接')) {
         (Wait-Control $button).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         (Wait-Control '取消').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Wait-Control '取消' $false
