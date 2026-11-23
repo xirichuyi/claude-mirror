@@ -29,7 +29,8 @@ public sealed partial class MainWindow
             lines.Children.Add(new TextBlock { Text = label, FontSize = 11, Foreground = waiting.Busy && Turn.NeedsAnswer(waiting.State) ? amber : sage });
             title = lines;
         }
-        row.Content = Row(new FontIcon { Glyph = glyph ?? "\uE8BD", FontSize = 13, Foreground = muted }, title);
+        title.VerticalAlignment = VerticalAlignment.Center;
+        var content = Row(RowIcon(glyph ?? "\uE8BD"), title); content.Spacing = 6; row.Content = content;
         row.HorizontalAlignment = HorizontalAlignment.Stretch; row.HorizontalContentAlignment = HorizontalAlignment.Left;
         row.Padding = new Thickness(8, 5, 8, 5);
         if (IsCurrent(c)) { row.Background = selected; row.Resources["ButtonBackgroundPointerOver"] = selected; row.Resources["ButtonBackgroundPressed"] = selected; }

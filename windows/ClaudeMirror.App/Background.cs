@@ -154,7 +154,7 @@ public sealed partial class MainWindow
         var text = new StackPanel();
         text.Children.Add(new TextBlock { Text = p.Conversation.Name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
         text.Children.Add(new TextBlock { Text = (p.Label ?? "空闲") + " · " + (ShortDirectory(p.Conversation.Directory) ?? p.Conversation.Directory), FontSize = 11, Foreground = p.Busy && Turn.NeedsAnswer(p.State) ? amber : muted, TextTrimming = TextTrimming.CharacterEllipsis });
-        row.Content = Row(new FontIcon { Glyph = p.Busy ? "\uE895" : p.Queue.Paused ? "\uE769" : "\uE8BD", FontSize = 13, Foreground = muted }, text);
+        var content = Row(RowIcon(p.Busy ? "\uE895" : p.Queue.Paused ? "\uE769" : "\uE8BD"), text); content.Spacing = 6; row.Content = content;
         row.HorizontalAlignment = HorizontalAlignment.Stretch; row.HorizontalContentAlignment = HorizontalAlignment.Left;
         row.Padding = new Thickness(8, 5, 8, 5);
         ToolTipService.SetToolTip(row, p.Conversation.Name + "\n" + p.Conversation.Directory);

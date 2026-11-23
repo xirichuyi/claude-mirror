@@ -330,6 +330,8 @@ public sealed partial class MainWindow
     private bool IsCurrent(Conversation c) => conversation is not null && c.Directory == conversation.Directory &&
         ((c.SessionId ?? c.Reference) is { } id ? id == (conversation.SessionId ?? conversation.Reference) : ReferenceEquals(c, conversation));
 
+    /// The icon that leads a sidebar row. One width for folders and conversations, so their icons and names line up in two columns.
+    private FontIcon RowIcon(string glyph) => new() { Glyph = glyph, FontSize = 14, Width = 16, Foreground = muted };
     private TextBlock SectionLabel(string text) => new() { Text = text, Foreground = muted, FontSize = 12, Margin = new Thickness(8,8,0,2) };
     private void RenderHistory()
     {
@@ -363,10 +365,12 @@ public sealed partial class MainWindow
             var arrow = new FontIcon { FontSize=9, Foreground=muted, Width=12 };
             void SetExpanded(bool value) { expanded=value;arrow.Glyph=value?"\uE70D":"\uE76C";items.Visibility=value?Visibility.Visible:Visibility.Collapsed; }
             var section = Flat(Button(folder ?? path,()=> { SetExpanded(!expanded); openGroups[groupId]=expanded;return Task.CompletedTask; }));
-            var label = Row(arrow,new FontIcon {Glyph="\uE8B7",FontSize=14,Foreground=muted},new TextBlock {Text=string.IsNullOrEmpty(folder)?path:folder,FontSize=13,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,TextTrimming=TextTrimming.CharacterEllipsis});
+            var label = Row(arrow,RowIcon("\uE8B7"),new TextBlock {Text=string.IsNullOrEmpty(folder)?path:folder,FontSize=13,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,TextTrimming=TextTrimming.CharacterEllipsis,VerticalAlignment=VerticalAlignment.Center});
             label.Spacing = 6; section.Content = label; section.Padding = new Thickness(6,5,8,5);
             section.HorizontalContentAlignment=HorizontalAlignment.Left;section.HorizontalAlignment=HorizontalAlignment.Stretch;
-            AutomationProperties.SetName(section,path);ToolTipService.SetToolTip(section,path);items.Margin=new Thickness(14,0,0,0);
+            AutomationProperties.SetName(section,path);ToolTipService.SetToolTip(section,path);
+            // A conversation's icon sits under its folder's: the folder row's padding, arrow and gap, less the row's own padding.
+            items.Margin=new Thickness(16,0,0,0);
             var menu=new MenuFlyout();
             menu.Items.Add(MenuItem("在此目录新建对话","\uE710",() => NewConversationAsync(path)));
             menu.Items.Add(MenuItem("把此项目的历史移到废纸篓…","\uE74D",() => TrashProjectAsync(path)));
