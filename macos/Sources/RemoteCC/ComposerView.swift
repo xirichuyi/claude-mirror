@@ -146,15 +146,20 @@ struct ComposerArea: View {
             let paused = session.queuePaused == true
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(paused ? "队列已暂停 · \(queue.count) 条未发送" : "排队 \(queue.count) 条 · 回复完成后依次发送")
+                    // An icon and a count: a pause mark while the queue is held back, a list while it waits for the reply.
+                    Label("\(queue.count)", systemImage: paused ? "pause.fill" : "list.bullet")
                         .foregroundStyle(WorkbenchTheme.inkMuted)
+                        .help(paused ? "已暂停" : "排队").accessibilityLabel((paused ? "已暂停" : "排队") + " \(queue.count)")
                     Spacer(minLength: 8)
-                    if paused {
-                        Button("继续发送") { model.perform { try model.engine?.resumeQueue(session.id) } }
-                            .buttonStyle(WorkbenchButtonStyle()).disabled(!model.isConnected || session.isBusy)
+                    Group {
+                        if paused {
+                            Button { model.perform { try model.engine?.resumeQueue(session.id) } } label: { WorkbenchIcon(symbol: "play.fill") }
+                                .help("继续发送").accessibilityLabel("继续发送").disabled(!model.isConnected || session.isBusy)
+                        }
+                        Button { model.perform { try model.engine?.clearQueue(session.id) } } label: { WorkbenchIcon(symbol: "trash") }
+                            .help("清空").accessibilityLabel("清空")
                     }
-                    Button("清空") { model.perform { try model.engine?.clearQueue(session.id) } }
-                        .buttonStyle(QuietButtonStyle()).foregroundStyle(WorkbenchTheme.inkMuted)
+                    .buttonStyle(WorkbenchIconButtonStyle(size: 22))
                 }
                 ForEach(queue) { item in queuedRow(item, session: session) }
             }
@@ -164,20 +169,18 @@ struct ComposerArea: View {
     }
 
     private func queuedRow(_ item: QueuedMessage, session: ChatSession) -> some View {
-        // While Claude replies, "send now" steers the running reply; otherwise it sends the message first.
-        let steerHelp = session.isBusy ? "立即发送 · Claude 会在下一步读到，不中断当前回复" : "立即发送"
-        return HStack(spacing: 2) {
+        HStack(spacing: 2) {
             Text(item.text).lineLimit(1).truncationMode(.tail)
             if !item.attachments.isEmpty {
-                Text("· \(item.attachments.count) 个附件").foregroundStyle(WorkbenchTheme.inkMuted).fixedSize()
+                Label("\(item.attachments.count)", systemImage: "paperclip").foregroundStyle(WorkbenchTheme.inkMuted).fixedSize()
             }
             Spacer(minLength: 8)
             Button { model.perform { try await model.engine?.steer(session.id, item: item.id) } } label: { WorkbenchIcon(symbol: "arrow.turn.right.up") }
-                .help(steerHelp).accessibilityLabel("立即发送").disabled(!model.isConnected || session.status == "stopping")
+                .help("立即发送").accessibilityLabel("立即发送").disabled(!model.isConnected || session.status == "stopping")
             Button { model.editQueued(item, in: session.id) } label: { WorkbenchIcon(symbol: "pencil") }
-                .help("放回输入框编辑").accessibilityLabel("编辑")
+                .help("编辑").accessibilityLabel("编辑")
             Button { model.perform { try model.engine?.cancelQueued(session.id, item: item.id) } } label: { WorkbenchIcon(symbol: "xmark") }
-                .help("从队列移除").accessibilityLabel("从队列移除")
+                .help("移除").accessibilityLabel("移除")
         }
         .buttonStyle(WorkbenchIconButtonStyle(size: 22))
     }
