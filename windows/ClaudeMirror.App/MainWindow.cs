@@ -212,9 +212,12 @@ public sealed partial class MainWindow : Window
         history = sessions; RenderHistory(); RefreshWorkbench();
         status.Text = $"已同步 {sessions.Count} 条会话" + (unread.Count > 0 ? "；读不到执行账号 " + string.Join("、", unread) + " 的历史" : "");
     }
-    private async Task NewConversationAsync()
+    private Task NewConversationAsync() => NewConversationAsync(null);
+    /// <param name="path">The project to start in. It is set once the open conversation has been left, which may be refused.</param>
+    private async Task NewConversationAsync(string? path)
     {
         await LeaveConversationAsync();
+        if (path is not null) directory.Text = path;
         UseAccount(null); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
     }

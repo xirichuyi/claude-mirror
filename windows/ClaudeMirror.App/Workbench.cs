@@ -368,10 +368,10 @@ public sealed partial class MainWindow
             section.HorizontalContentAlignment=HorizontalAlignment.Left;section.HorizontalAlignment=HorizontalAlignment.Stretch;
             AutomationProperties.SetName(section,path);ToolTipService.SetToolTip(section,path);items.Margin=new Thickness(14,0,0,0);
             var menu=new MenuFlyout();
-            menu.Items.Add(MenuItem("在此目录新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); }));
+            menu.Items.Add(MenuItem("在此目录新建对话","\uE710",() => NewConversationAsync(path)));
             menu.Items.Add(MenuItem("把此项目的历史移到废纸篓…","\uE74D",() => TrashProjectAsync(path)));
             section.ContextFlyout=menu;
-            var add = ActionButton("在此目录新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); });
+            var add = ActionButton("在此目录新建对话","\uE710",() => NewConversationAsync(path));
             var header = new Grid(); header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             header.Children.Add(section); Grid.SetColumn(add,1); header.Children.Add(add);
             SetExpanded(expanded);projects.Children.Add(header);projects.Children.Add(items);
