@@ -17,7 +17,7 @@ public sealed partial class MainWindow : Window
     private readonly StackPanel projects = new() { Spacing = 8 };
     private readonly StackPanel messages = new() { Spacing = 18, Padding = new Thickness(24) };
     private readonly ScrollViewer scroll = new();
-    private readonly TextBox prompt = new() { PlaceholderText = "发送消息，或输入 / 使用命令", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 90, MaxHeight = 220 };
+    private readonly TextBox prompt = new() { PlaceholderText = "发消息，/ 命令", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 90, MaxHeight = 220 };
     private readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     private readonly ComboBox hosts = new() { PlaceholderText = "选择主机", HorizontalAlignment = HorizontalAlignment.Stretch, DisplayMemberPath = "Name" };
     private List<ModelChoice> availableModels = [];
@@ -266,7 +266,8 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception e) { status.Text = "能力读取失败：" + e.Message; }
     }
-    private async Task SendAsync()
+    /// `now` hands the message to the running reply instead of waiting for it to end.
+    private async Task SendAsync(bool now = false)
     {
         if (string.IsNullOrWhiteSpace(prompt.Text)) return;
         if (conversation is not null && directory.Text != conversation.Directory)
@@ -274,13 +275,13 @@ public sealed partial class MainWindow : Window
         RequireAgent();
         var text = prompt.Text; prompt.Text = "";
         // The remote task refuses a second prompt while it is replying, so hold it here and send it when the reply ends.
-        if (busy) { queue.Add(text); RenderQueue(); return; }
+        if (busy) { var item = queue.Add(text); RenderQueue(); if (now) await SteerAsync(item.Id); return; }
         queue.Resume();
         await SendTextAsync(text);
     }
     private async Task SendTextAsync(string text)
     {
-        var remote = RequireAgent(); busy = true; sending = true; if (conversation is null && taskId is null) newTitle = Presentation.FirstLine(text, 40); AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
+        var remote = RequireAgent(); busy = true; sending = true; stopping = false; if (conversation is null && taskId is null) newTitle = Presentation.FirstLine(text, 40); AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
         var message = new { id = Guid.NewGuid().ToString(), role = "assistant", blocks = Array.Empty<object>() };
         try
         {
@@ -301,6 +302,28 @@ public sealed partial class MainWindow : Window
         catch { busy = false; queue.Pause(); RenderQueue(); RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
         finally { sending = false; }
     }
+    /// Sends a queued message now. While Claude replies it joins that reply and Claude reads it at its next step;
+    /// otherwise it goes out as the next prompt.
+    private async Task SteerAsync(string id)
+    {
+        if (queue.Take(id) is not { } item) return;
+        RenderQueue();
+        if (!busy) { queue.Resume(); await SendTextAsync(item.Text); return; }
+        // The task is still starting or stopping: the message stays first in line.
+        if (taskId is null || sending || stopping) { queue.Restore(item); RenderQueue(); return; }
+        try { await RequireAgent().TaskCommandAsync(taskId, new { kind = "steer", id = item.Id, text = item.Text, prompt = item.Text }); }
+        catch
+        {
+            // Only the acknowledgement was lost: the reply already shows the message.
+            if (Steered(item.Id)) return;
+            // The reply ended first or the link dropped. The message returns to the head of the queue, never lost.
+            queue.Restore(item); RenderQueue();
+            if (busy || queue.Paused) throw;
+            if (queue.Next(busy) is { } next) { RenderQueue(); await SendTextAsync(next.Text); }
+        }
+    }
+    private bool Steered(string id) => lastState?["message"]?["blocks"] is JsonArray blocks && blocks.Any(block =>
+        Presentation.Text(block?["type"]) == "user" && Presentation.Text(block?["id"]) == id && block?["cancelled"]?.GetValue<bool>() != true);
     private Task WatchCurrentAsync()
     {
         var watched = taskId!;
@@ -321,6 +344,7 @@ public sealed partial class MainWindow : Window
         if (state["tasks"] is JsonArray tasks) backgroundTasks = (JsonArray)tasks.DeepClone();
         // A reply that failed or was stopped keeps the queue until the user says to go on.
         if (wasBusy && !busy && Turn.Failed(state)) queue.Pause();
+        if (!busy) stopping = false;
         status.Text = busy ? "正在回复" : "就绪";
         if (state["remoteSessionId"] is JsonValue session && taskId is not null)
         {
@@ -338,7 +362,16 @@ public sealed partial class MainWindow : Window
         RenderQueue();
         RenderPermissions(watched, state["permissions"] as JsonArray);
     }
-    private async Task StopAsync() { queue.Pause(); RenderQueue(); if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
+    /// True from the stop request until the reply ends.
+    private bool stopping;
+    private async Task StopAsync()
+    {
+        queue.Pause(); RenderQueue();
+        if (taskId is null) return;
+        stopping = true; UpdateActions();
+        try { await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
+        catch { stopping = false; UpdateActions(); throw; }
+    }
     private async Task<string?> PickAsync()
     {
         var picker = new FileOpenPicker(); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); picker.FileTypeFilter.Add("*");

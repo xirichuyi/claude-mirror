@@ -95,6 +95,8 @@ public sealed class SendQueue
         if (items.Count == 0) Paused = false;
         return item;
     }
+    /// <summary>Puts a message that could not be sent back at the head of the queue.</summary>
+    public void Restore(Item item) => items.Insert(0, item);
     public void Pause() { if (items.Count > 0) Paused = true; }
     public void Resume() => Paused = false;
     public void Clear() { items.Clear(); Paused = false; }

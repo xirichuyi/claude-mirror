@@ -9,33 +9,59 @@ public sealed partial class MainWindow
 {
     private readonly StackPanel queuePanel = new() { Spacing = 4, Visibility = Visibility.Collapsed };
 
-    /// Messages waiting for the current reply to end, above the composer; each can be withdrawn.
+    /// Messages waiting for the current reply to end, above the composer, as on macOS:
+    /// each can be sent now, put back in the composer to edit, or removed.
     private void RenderQueue()
     {
         queuePanel.Children.Clear();
         queuePanel.Visibility = queue.Items.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (queue.Items.Count == 0) return;
-        var heading = new Grid();
-        heading.Children.Add(new TextBlock { Text = queue.Paused ? $"队列已暂停（{queue.Items.Count} 条）" : $"回复结束后发送（{queue.Items.Count} 条）", FontSize = 12, Foreground = muted, VerticalAlignment = VerticalAlignment.Center });
+        var rows = new StackPanel { Spacing = 2 };
+        var heading = new Grid { ColumnSpacing = 6 };
+        heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        heading.Children.Add(new TextBlock
+        {
+            Text = queue.Paused ? $"已暂停 · {queue.Items.Count} 条" : $"排队 {queue.Items.Count} 条",
+            FontSize = 12, Foreground = muted, VerticalAlignment = VerticalAlignment.Center
+        });
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
         if (queue.Paused)
         {
             var resume = ActionButton("继续发送", "\uE768", async () =>
             {
                 queue.Resume();
-                if (queue.Next(busy) is { } next) { RenderQueue(); await SendTextAsync(next.Text); } else RenderQueue();
+                if (queue.Next(busy) is { } next) { RenderQueue(); await SendTextAsync(next.Text); }
+                else RenderQueue();
             }, true);
-            resume.HorizontalAlignment = HorizontalAlignment.Right; heading.Children.Add(resume);
+            resume.IsEnabled = agent?.Connected == true && !busy;
+            controls.Children.Add(resume);
         }
-        queuePanel.Children.Add(heading);
+        controls.Children.Add(ActionButton("清空", "\uE74D", () => { queue.Clear(); RenderQueue(); return Task.CompletedTask; }));
+        Grid.SetColumn(controls, 1); heading.Children.Add(controls); rows.Children.Add(heading);
         foreach (var item in queue.Items)
         {
-            var row = new Grid { ColumnSpacing = 6 };
+            var row = new Grid { ColumnSpacing = 2 };
             row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = Presentation.FirstLine(item.Text, 120) ?? "", FontSize = 13, Foreground = ink, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center });
-            var cancel = ActionButton("取消这条消息", "\uE711", () => { queue.Cancel(item.Id); RenderQueue(); return Task.CompletedTask; });
-            Grid.SetColumn(cancel, 1); row.Children.Add(cancel);
-            queuePanel.Children.Add(new Border { Child = row, Background = surface, BorderBrush = edge, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 2, 4, 2) });
+            row.Children.Add(new TextBlock
+            {
+                Text = Presentation.FirstLine(item.Text, 120) ?? "", FontSize = 13, Foreground = ink,
+                TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center
+            });
+            var now = ActionButton("立即发送", "\uE724", () => SteerAsync(item.Id));
+            now.IsEnabled = agent?.Connected == true && !stopping;
+            var edit = ActionButton("编辑", "\uE70F", () =>
+            {
+                // The message goes back to the composer; a draft already there is kept after it.
+                if (queue.Take(item.Id) is not { } taken) return Task.CompletedTask;
+                prompt.Text = string.IsNullOrWhiteSpace(prompt.Text) ? taken.Text : taken.Text + "\n" + prompt.Text;
+                prompt.SelectionStart = prompt.Text.Length; prompt.Focus(FocusState.Programmatic);
+                RenderQueue(); return Task.CompletedTask;
+            });
+            var remove = ActionButton("移除", "\uE711", () => { queue.Cancel(item.Id); RenderQueue(); return Task.CompletedTask; });
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Children = { now, edit, remove } };
+            Grid.SetColumn(actions, 1); row.Children.Add(actions); rows.Children.Add(row);
         }
+        queuePanel.Children.Add(new Border { Child = rows, Background = surface, CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 6, 6, 6) });
     }
 
     /// Puts the files Claude changed since a message back the way they were: preview what would change, then confirm.

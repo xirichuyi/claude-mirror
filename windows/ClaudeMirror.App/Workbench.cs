@@ -26,7 +26,12 @@ public sealed partial class MainWindow
     private readonly Border composer = new();
     private List<Conversation> history = [];
     private readonly Dictionary<string,bool> openGroups = [];
-    private Button send = null!, stop = null!, fresh = null!, sync = null!;
+    private Button send = null!, steer = null!, enqueue = null!, fresh = null!, sync = null!;
+    private readonly FontIcon sendIcon = new() { Glyph = "\uE74A", FontSize = 14 };
+    private readonly TextBlock contextMeter = new() { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4,0,4,0) };
+    /// True while an input method is composing: Enter then belongs to it, not to send.
+    private bool composing;
+    private static bool Held(VirtualKey key) => Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
     private Button files = null!, project = null!;
     private bool sidebarOpen = true;
     private readonly Border hostDot = new() { Width=7, Height=7, CornerRadius=new CornerRadius(3.5), VerticalAlignment=VerticalAlignment.Center };
@@ -54,7 +59,7 @@ public sealed partial class MainWindow
 
     private Button PickerAction(bool model)
     {
-        var trigger=ActionButton(model?"模型":"命令", model?"\uE70D":"\uE756",()=>Task.CompletedTask,true);
+        var trigger=ActionButton(model?"模型":"命令", model?"\uE70D":"\uE756",()=>Task.CompletedTask,model);
         var menu=new MenuFlyout();
         menu.Opening+=(_,_)=>{
             menu.Items.Clear();
@@ -266,10 +271,14 @@ public sealed partial class MainWindow
 
         commandMenu=PickerAction(false);modelMenu=PickerAction(true);UpdatePickerTitle();
         var left=Row(ActionButton("附件","\uE710",UploadAsync),commandMenu,PermissionPicker());left.Spacing=2;toolbar.Children.Add(left);
-        send = Primary(ActionButton("发送","\uE74A",SendAsync)); send.CornerRadius = new CornerRadius(15); send.Width = send.Height = 30; send.Padding = new Thickness(0);
-        stop = ActionButton("停止","\uE71A",StopAsync);
-        var actions = Row(modelMenu,stop,send); actions.Spacing = 4; Grid.SetColumn(actions,1); toolbar.Children.Add(actions); input.Children.Add(toolbar);
-        inputCard.Background=surface;inputCard.BorderBrush=edge;inputCard.BorderThickness=new Thickness(1);inputCard.CornerRadius=new CornerRadius(14);inputCard.Padding=new Thickness(10,8,8,6);inputCard.Child=input;composeArea.Children.Add(inputCard);
+        // One button, as on macOS: it sends, and while Claude replies it stops. Typing during a reply adds "send now" and "queue".
+        send = Primary(ActionButton("发送","\uE74A",()=>busy ? StopAsync() : SendAsync())); send.Content = sendIcon;
+        send.CornerRadius = new CornerRadius(15); send.Width = send.Height = 30; send.Padding = new Thickness(0);
+        steer = ActionButton("立即发送 · Ctrl+Enter","\uE724",()=>SendAsync(true));
+        enqueue = ActionButton("加入队列 · Enter","\uE8FD",()=>SendAsync());
+        contextMeter.Foreground = muted; ToolTipService.SetToolTip(contextMeter,"上下文");
+        var actions = Row(modelMenu,contextMeter,steer,enqueue,send); actions.Spacing = 4; Grid.SetColumn(actions,1); toolbar.Children.Add(actions); input.Children.Add(toolbar);
+        inputCard.Background=surface;inputCard.BorderBrush=edge;inputCard.BorderThickness=new Thickness(1);inputCard.CornerRadius=new CornerRadius(12);inputCard.Padding=new Thickness(10,8,8,6);inputCard.Child=input;composeArea.Children.Add(inputCard);
         files = ActionButton("远端文件","\uE8B7",BrowseAsync);
         project = ActionButton("工作目录","\uE838",() => Task.CompletedTask);
         directory.Width = 230; directory.Header = "远端工作目录";
@@ -293,8 +302,16 @@ public sealed partial class MainWindow
         headerActions.Spacing = 2; Grid.SetColumn(headerActions,1); bar.Children.Add(headerActions);
         directory.TextChanged += (_,_) => UpdateSubtitle();
         prompt.TextChanged += (_,_) => UpdateActions();
-        prompt.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.Enter, Modifiers = VirtualKeyModifiers.Control });
-        prompt.KeyboardAccelerators[0].Invoked += async (_,e) => { e.Handled = true; if(send.IsEnabled) await RunAsync(SendAsync); };
+        // Enter sends and Shift+Enter breaks the line, as on macOS; Ctrl+Enter hands the message to the running reply.
+        prompt.TextCompositionStarted += (_,_) => composing = true; prompt.TextCompositionEnded += (_,_) => composing = false;
+        prompt.PreviewKeyDown += async (_,e) =>
+        {
+            if(e.Key != VirtualKey.Enter || composing || Held(VirtualKey.Shift)) return;
+            e.Handled = true; bool now = Held(VirtualKey.Control);
+            if(agent?.Connected == true && !string.IsNullOrWhiteSpace(prompt.Text)) await RunAsync(()=>SendAsync(now));
+        };
+        // Esc stops the reply wherever the focus is. An open menu or dialog takes the key first and only closes.
+        root.KeyDown += async (_,e) => { if(e.Key != VirtualKey.Escape || !busy || stopping) return; e.Handled = true; await RunAsync(StopAsync); };
         root.SizeChanged += (_,e) => { if((e.PreviousSize.Width >= 720) != (e.NewSize.Width >= 720) || e.PreviousSize.Width == 0) { sidebarOpen = e.NewSize.Width >= 720; LayoutSidebar(); } };
         Content = root; RenderHistory();
     }
@@ -421,8 +438,13 @@ public sealed partial class MainWindow
     }
     private void UpdateActions()
     {
-        send.IsEnabled = agent?.Connected == true && !string.IsNullOrWhiteSpace(prompt.Text);
-        ToolTipService.SetToolTip(send, busy ? "加入队列，当前回复结束后发送" : "发送");
-        stop.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        bool online = agent?.Connected == true, typed = !string.IsNullOrWhiteSpace(prompt.Text);
+        string name = busy ? (stopping ? "正在停止…" : "停止 · Esc") : "发送 · Enter";
+        sendIcon.Glyph = busy ? "\uE71A" : "\uE74A";
+        send.IsEnabled = online && (busy ? !stopping : typed);
+        AutomationProperties.SetName(send, name); ToolTipService.SetToolTip(send, name);
+        steer.Visibility = enqueue.Visibility = busy && typed && online ? Visibility.Visible : Visibility.Collapsed;
+        contextMeter.Text = Turn.Context(lastState) ?? "";
+        contextMeter.Visibility = contextMeter.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 }

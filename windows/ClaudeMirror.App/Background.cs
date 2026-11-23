@@ -54,7 +54,7 @@ public sealed partial class MainWindow
         {
             try { await agent.UnwatchAsync(taskId); } catch (IOException) { } // The connection just dropped; there is nothing left to cancel.
         }
-        conversation = null; taskId = null; taskKey = null; reply = null; lastState = null; newTitle = null; busy = false;
+        conversation = null; taskId = null; taskKey = null; reply = null; lastState = null; newTitle = null; busy = false; stopping = false;
         queue = new SendQueue(); backgroundTasks = []; messages.Children.Clear();
     }
 
@@ -63,7 +63,7 @@ public sealed partial class MainWindow
     {
         parked.Remove(p.TaskId);
         conversation = p.Conversation; taskId = p.Done ? null : p.TaskId; taskKey = p.TaskKey; queue = p.Queue; reply = p.Reply;
-        lastState = p.State; backgroundTasks = p.Tasks; busy = p.Busy; newTitle = p.Conversation.Name;
+        lastState = p.State; backgroundTasks = p.Tasks; busy = p.Busy; stopping = false; newTitle = p.Conversation.Name;
         executionUser = p.ExecutionUser; permissionMode = p.PermissionMode; UpdatePermissionTitle();
         directory.Text = p.Conversation.Directory;
         messages.Children.Clear(); foreach (var view in p.Views) messages.Children.Add(view);
