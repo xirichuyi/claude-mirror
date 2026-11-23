@@ -102,7 +102,7 @@ public sealed partial class MainWindow
         add.VerticalAlignment = VerticalAlignment.Bottom;
         var panel = new StackPanel { Spacing = 12, Width = 340 };
         panel.Children.Add(new TextBlock { Text = "端口转发", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink });
-        panel.Children.Add(new TextBlock { Text = "把服务器上只在本机监听的端口（例如开发服务器）接到这台电脑的 127.0.0.1。", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = "把服务器的本地端口接到这台电脑的 127.0.0.1", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(Row(localPort, remotePort, add)); panel.Children.Add(tunnelList);
         RenderTunnels();
         return panel;

@@ -126,7 +126,7 @@ public sealed partial class MainWindow
         ScrollViewer.SetVerticalScrollBarVisibility(log, ScrollBarVisibility.Auto);
         var summary = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = ink };
         var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(new TextBlock { Text = "会在服务器上安装缺少的 Claude Code 和 Node.js，全部装在你的用户目录，不需要管理员权限，也不会读取或修改 Claude 的登录信息。通常需要 1–3 分钟。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
+        panel.Children.Add(new TextBlock { Text = "安装到你的用户目录，不需要管理员权限。约 1–3 分钟。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
         panel.Children.Add(log); panel.Children.Add(summary);
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = "设置 " + (host?.Name ?? "服务器"), Content = panel, PrimaryButtonText = "开始安装", CloseButtonText = "关闭", Background = canvas };
         using var cancel = new CancellationTokenSource();
@@ -162,7 +162,7 @@ public sealed partial class MainWindow
         var dialog = new ContentDialog
         {
             XamlRoot = root.XamlRoot, Title = "为 " + profile.Name + " 设置免密登录？", Background = canvas,
-            Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "以后连接不用再输入密码。\n\n• 在这台电脑上生成专用密钥 %USERPROFILE%\\.ssh\\claude_mirror_ed25519\n• 把公钥加入服务器的 ~/.ssh/authorized_keys，已有内容保持不变\n• 确认密钥能登录后才切换" },
+            Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "• 在本机生成专用密钥 %USERPROFILE%\\.ssh\\claude_mirror_ed25519\n• 把公钥加入服务器的 ~/.ssh/authorized_keys" },
             PrimaryButtonText = "设置免密登录", SecondaryButtonText = "不再询问", CloseButtonText = "以后再说",
         };
         var choice = await dialog.ShowAsync();

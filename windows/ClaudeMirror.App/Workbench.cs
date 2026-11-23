@@ -423,8 +423,8 @@ public sealed partial class MainWindow
         if(empty) {
             homeTitle.Text = online ? "新对话" : host == null ? "开始使用" : agent?.SshConnected == true ? "设置服务器" : "连接服务器";
             homeHint.Text = online ? host!.Name : host == null
-                ? "在这台电脑上使用服务器里的 Claude Code：代码和 Claude 都在服务器上运行，这里负责对话和审批。\n\n1. 准备一台能用 SSH 登录的 Linux 或 macOS 服务器\n2. 添加服务器：填写地址和密码\n3. 自动检查环境：缺少 Claude Code 或 Node.js 时一键安装，然后登录 Claude"
-                : agent?.SshConnected == true ? "SSH 已连接，按下面的提示完成设置。" : "使用服务器上的 Claude Code。";
+                ? "添加一台能用 SSH 登录的服务器"
+                : agent?.SshConnected == true ? "按提示完成设置" : "";
             homeActions.Children.Clear();
             if(!online) {
                 var add = Primary(ActionButton(host == null ? "添加服务器" : "重新连接","\uE710",()=>ConnectDialogAsync(host),true));

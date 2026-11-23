@@ -108,9 +108,9 @@ public sealed partial class MainWindow : Window
             jump.Visibility = mode.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
             note.Text = mode.SelectedIndex switch
             {
-                0 => "密码只用于这次连接，不会保存。连接成功后可以一键设置免密登录。首次连接会请你确认服务器指纹。",
-                1 => "使用所选私钥登录，私钥不会上传。首次连接会请你确认服务器指纹。",
-                _ => "用这台电脑自带的 OpenSSH 连接，和在终端里输入 ssh 一样：读取 ~/.ssh/config，使用 ssh-agent 里的密钥，经跳板机时不在本机开端口。地址可以填配置里的别名；用户名和端口留空时由配置决定。不能输入密码，带口令的私钥请先 ssh-add。"
+                0 => "密码不保存",
+                1 => "私钥不上传",
+                _ => "使用本机 OpenSSH：~/.ssh/config、ssh-agent、跳板机。不能输入密码。"
             };
         }
         mode.SelectionChanged += (_, _) => UpdateMode(); UpdateMode();
@@ -137,7 +137,7 @@ public sealed partial class MainWindow : Window
             expander.IsExpanded = entry.Port != 22;
         };
         var panel = new StackPanel { Spacing = 14 };
-        panel.Children.Add(new TextBlock { Text = "填写服务器地址和登录方式。Claude Code 和项目都在服务器上运行，本机只负责显示和操作。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
+        panel.Children.Add(new TextBlock { Text = "Claude Code 和项目都在服务器上运行。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
         foreach (var element in new UIElement[] { import, jumpNote, address, mode, password, key, pick, phrase, jump, note, expander }) panel.Children.Add(element);
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = existing == null ? "添加服务器" : "连接服务器", Content = new ScrollViewer { Content = panel }, Background = canvas, PrimaryButtonText = "连接", CloseButtonText = "取消" };
         (string User, string Host) Target()
