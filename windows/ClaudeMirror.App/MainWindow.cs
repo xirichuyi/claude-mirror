@@ -314,9 +314,12 @@ public sealed partial class MainWindow : Window
         if (!busy) { queue.Resume(); await SendTextAsync(item.Text); return; }
         // The task is still starting or stopping: the message stays first in line.
         if (taskId is null || sending || stopping) { queue.Restore(item); RenderQueue(); return; }
+        var owner = queue;
         try { await RequireAgent().TaskCommandAsync(taskId, new { kind = "steer", id = item.Id, text = item.Text, prompt = item.Text }); }
         catch
         {
+            // Another conversation was opened meanwhile: the message goes back to its own queue, which went with its conversation.
+            if (!ReferenceEquals(queue, owner)) { owner.Restore(item); throw; }
             // Only the acknowledgement was lost: the reply already shows the message.
             if (Steered(item.Id)) return;
             // The reply ended first or the link dropped. The message returns to the head of the queue, never lost.
