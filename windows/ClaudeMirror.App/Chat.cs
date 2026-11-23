@@ -317,6 +317,6 @@ public sealed partial class MainWindow
     private void UpdatePermissionTitle()
     {
         var label = PermissionModes.Label(permissionMode);
-        permissionMenu.Content = Row(new FontIcon { Glyph = "\uE72E", FontSize = 13 }, new TextBlock { Text = label }, new FontIcon { Glyph = "\uE70D", FontSize = 10 });
+        permissionMenu.Content = new TextBlock { Text = label, FontSize = 12 }; permissionMenu.Foreground = muted;
     }
 }
