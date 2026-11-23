@@ -105,7 +105,7 @@ public sealed partial class MainWindow
     /// here it runs from any message to any other.
     private Task TranscriptAsync()
     {
-        var entries = Transcript.Entries(messages.Children.OfType<FrameworkElement>().Select(element => element.Tag).OfType<MessageView>().Select(view => (view.User, view.Plain)));
+        var entries = Transcript.Entries(messages.Children.OfType<FrameworkElement>().Select(element => element.Tag).OfType<MessageView>().SelectMany(view => view.Entries));
         if (entries.Count == 0) throw new IOException("这个对话还没有可以选择的文字");
         var text = new RichTextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FontSize = 14, Foreground = ink, Margin = new Thickness(18, 6, 18, 18), LineHeight = 22 };
         foreach (var entry in entries)

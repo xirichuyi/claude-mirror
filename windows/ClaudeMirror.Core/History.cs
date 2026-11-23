@@ -117,6 +117,20 @@ public static class Transcript
     public static List<Entry> Entries(IEnumerable<(bool User, string Text)> messages) =>
         messages.Where(message => !string.IsNullOrWhiteSpace(message.Text)).Select(message => new Entry(message.User, message.Text.Trim())).ToList();
     public static string Speaker(bool user) => user ? "你" : "Claude";
+    /// <summary>A reply's text in order, split where Claude read a message sent while it ran. Messages still waiting or never delivered are left out.</summary>
+    public static List<(bool User, string Text)> Reply(JsonArray blocks)
+    {
+        var parts = new List<(bool User, string Text)>(); var said = new List<string>();
+        void Flush() { if (said.Count > 0) parts.Add((false, string.Join("\n\n", said))); said.Clear(); }
+        foreach (var block in blocks)
+        {
+            string type = Presentation.Text(block?["type"]) ?? "", text = Presentation.Text(block?["text"]) ?? "";
+            if (type == "text") said.Add(text);
+            else if (type == "user" && block?["pending"]?.GetValue<bool>() != true && block?["cancelled"]?.GetValue<bool>() != true) { Flush(); parts.Add((true, text)); }
+        }
+        Flush();
+        return parts;
+    }
     public static string Text(IEnumerable<(bool User, string Text)> messages) =>
         string.Join("\n\n", Entries(messages).Select(entry => Speaker(entry.User) + "：\n" + entry.Text));
 }

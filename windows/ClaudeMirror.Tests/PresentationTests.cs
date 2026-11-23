@@ -78,6 +78,18 @@ public class PresentationTests
     }
 
     [Fact]
+    public void ATranscriptSplitsAReplyWhereClaudeReadASteeredMessage()
+    {
+        var blocks = (JsonArray)JsonNode.Parse("""
+            [{"type":"text","text":"先看测试。"},{"type":"tool","name":"Bash"},{"type":"text","text":"失败了一条。"},
+             {"type":"user","id":"u1","text":"过期的也测一下"},{"type":"user","id":"u2","text":"还没读到","pending":true},
+             {"type":"user","id":"u3","text":"没送达","cancelled":true},{"type":"text","text":"好，加上了。"}]
+            """)!;
+        Assert.Equal([(false, "先看测试。\n\n失败了一条。"), (true, "过期的也测一下"), (false, "好，加上了。")], Transcript.Reply(blocks));
+        Assert.Empty(Transcript.Reply([]));
+    }
+
+    [Fact]
     public void ContextInUseReadsAsUsedOverTotal()
     {
         Assert.Equal("128k / 1M", Turn.Context(JsonNode.Parse("""{"context":{"usedTokens":128400,"maxTokens":1000000}}""")));

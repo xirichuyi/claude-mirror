@@ -38,6 +38,9 @@ public sealed partial class MainWindow
         public bool User => user;
         /// The message's text without tool calls or thinking.
         public string Plain => plain;
+        /// The message as transcript entries: a reply splits where Claude read a message sent while it ran.
+        public IEnumerable<(bool User, string Text)> Entries => entries ?? [(user, plain)];
+        private List<(bool User, string Text)>? entries;
 
         public MessageView(MainWindow window,bool user,string text)
         {
@@ -69,7 +72,7 @@ public sealed partial class MainWindow
             var blocks=message?["blocks"] as JsonArray ?? message?["content"] as JsonArray;
             if(user || blocks is not { Count: > 0 })
             {
-                plain=Protocol.MessageText(message);
+                plain=Protocol.MessageText(message); entries=null;
                 body.Children.Clear(); parts.Clear();
                 if(user) body.Children.Add(Label(plain,14,window.ink));
                 else if(plain.Length>0) body.Children.Add(window.MarkdownView(plain,null,live));
@@ -79,6 +82,7 @@ public sealed partial class MainWindow
             {
                 if(parts.Count==0) body.Children.Clear();
                 plain=string.Join("\n\n",blocks.Where(b=>Presentation.Text(b?["type"])=="text").Select(b=>Presentation.Text(b?["text"])));
+                entries=Transcript.Reply(blocks);
                 for(int i=0;i<blocks.Count;i++)
                 {
                     var block=blocks[i]!; var type=Presentation.Text(block["type"]) ?? "";
