@@ -65,6 +65,29 @@ public class PresentationTests
     }
 
     [Fact]
+    public void AQueuedMessageIsTakenOutOnceToSendNowOrToEdit()
+    {
+        var queue = new SendQueue();
+        var first = queue.Add("one"); var second = queue.Add("two");
+        queue.Pause();
+        Assert.Equal("two", queue.Take(second.Id)!.Text);
+        Assert.Null(queue.Take(second.Id));
+        Assert.True(queue.Paused);
+        Assert.Equal("one", queue.Take(first.Id)!.Text);
+        Assert.False(queue.Paused); // Nothing is left to hold back.
+    }
+
+    [Fact]
+    public void ContextInUseReadsAsUsedOverTotal()
+    {
+        Assert.Equal("128k / 1M", Turn.Context(JsonNode.Parse("""{"context":{"usedTokens":128400,"maxTokens":1000000}}""")));
+        Assert.Equal("950 / 200k", Turn.Context(JsonNode.Parse("""{"context":{"usedTokens":950,"maxTokens":200000}}""")));
+        Assert.Equal("1.3M", Turn.Tokens(1_250_000));
+        Assert.Null(Turn.Context(JsonNode.Parse("""{"status":"idle"}""")));
+        Assert.Null(Turn.Context(JsonNode.Parse("""{"context":{"usedTokens":10,"maxTokens":0}}""")));
+    }
+
+    [Fact]
     public void QueueHoldsMessagesUntilTheReplyEndsAndPausesAfterAFailure()
     {
         var queue = new SendQueue();

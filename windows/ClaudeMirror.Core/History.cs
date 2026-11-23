@@ -87,6 +87,14 @@ public sealed class SendQueue
 
     public Item Add(string text) { var item = new Item(Guid.NewGuid().ToString(), text); items.Add(item); return item; }
     public bool Cancel(string id) => items.RemoveAll(item => item.Id == id) > 0;
+    /// <summary>Takes a message out of the queue to send it now or to edit it, or null when it has already gone.</summary>
+    public Item? Take(string id)
+    {
+        var item = items.Find(queued => queued.Id == id);
+        if (item is not null) items.Remove(item);
+        if (items.Count == 0) Paused = false;
+        return item;
+    }
     public void Pause() { if (items.Count > 0) Paused = true; }
     public void Resume() => Paused = false;
     public void Clear() { items.Clear(); Paused = false; }
@@ -115,6 +123,19 @@ public static class Transcript
 public static class Turn
 {
     /// <param name="sending">A prompt is on its way: the control commands sent before it publish idle snapshots that must not count as the end of a reply.</param>
+    /// <summary>The context window in use as "128k / 1M", or null when the server has not reported it.</summary>
+    public static string? Context(JsonNode? state)
+    {
+        if (state?["context"] is not JsonObject context || Number(context["usedTokens"]) is not { } used || Number(context["maxTokens"]) is not { } max || max <= 0) return null;
+        return Tokens(used) + " / " + Tokens(max);
+    }
+    private static double? Number(JsonNode? node) => node is JsonValue value && value.TryGetValue<double>(out var number) ? number : null;
+    public static string Tokens(double count) => count switch
+    {
+        >= 999_950 => (count / 1_000_000).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "M",
+        >= 1000 => Math.Round(count / 1000).ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "k",
+        _ => Math.Round(Math.Max(0, count)).ToString("0", System.Globalization.CultureInfo.InvariantCulture)
+    };
     public static bool Busy(JsonNode? state, bool sending) =>
         sending || state?["status"]?.GetValue<string>() is "working" or "connecting" or "permission" or "stopping";
     public static bool NeedsAnswer(JsonNode? state) =>
