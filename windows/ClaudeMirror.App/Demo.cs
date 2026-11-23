@@ -72,6 +72,8 @@ public sealed partial class MainWindow
             Queue = new SendQueue(), PermissionMode = "default", ExecutionUser = "", Views = [], Busy = true
         };
         await SelectAsync(history[0]);
+        // A queue held back after the reply ended, with its send-now, edit and remove buttons.
+        if (scene == "finished") { queue.Add("测试通过后更新 README 的接口说明"); queue.Pause(); RenderQueue(); }
         if (scene != "permission") return;
         queue.Add("推送之后顺便开一个 PR"); queue.Add("再把 CHANGELOG 更新一下"); RenderQueue();
     }
