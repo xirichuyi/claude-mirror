@@ -196,3 +196,14 @@ test('an upload dropped before its first byte can be retried', async () => {
     assert.deepEqual(fs.readdirSync(path.dirname(reply.result.path)), ['empty-start.bin']);
   } finally { second.close(); }
 });
+
+test('a workspace upload cut off by a disconnect leaves no file behind', async () => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'frames-workspace-'));
+  const agent = framedAgent();
+  agent.request(2, 'file', { operation: 'write', directory: folder, name: 'cut.bin', size: 4096 });
+  await agent.until(() => agent.frames.find(item => item.type === 5 && item.id === 2));
+  agent.child.stdin.write(frame(3, 2, crypto.randomBytes(1024)));
+  agent.child.stdin.end();
+  await new Promise(wake => agent.child.once('exit', wake));
+  try { assert.deepEqual(fs.readdirSync(folder), []); } finally { fs.rmSync(folder, { recursive: true, force: true }); }
+});

@@ -1407,8 +1407,8 @@ async function framedWrite(id, request, token, wire) {
   }
   const target = await fsp.open(temporary, claimed ? 'a' : 'wx', 0o600);
   const box = inbox();
-  // Called when the channel dies; the bytes already on disk are what the next upload resumes from.
-  if (cached) box.save = () => { try { fs.renameSync(temporary, partial); } catch { /* Nothing kept. */ } };
+  // Called when the channel dies: an attachment keeps its bytes for the next upload to resume, anything else is removed.
+  box.save = () => { try { if (cached) fs.renameSync(temporary, partial); else fs.rmSync(temporary, { force: true }); } catch { /* Nothing to keep. */ } };
   wire.uploads.set(id, box);
   token.cancel = () => box.push({ error: '已取消' });
   try {
