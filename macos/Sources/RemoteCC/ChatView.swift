@@ -185,8 +185,6 @@ struct MessagesList: View {
                        session.messages.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) == "/usage" {
                         VStack(alignment: .leading, spacing: 12) {
                             Label("这条历史记录未保存用量结果", systemImage: "chart.bar").font(.callout.weight(.medium))
-                            Text("可直接查看账户当前的五小时与本周用量，无需发送消息。")
-                                .font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
                             Button("查看当前用量") { model.presentation = .accountUsage }
                                 .buttonStyle(WorkbenchButtonStyle())
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
@@ -438,7 +436,7 @@ struct MessageRow: View, Equatable {
               let index = session.messages.firstIndex(where: { $0.id == message.id }),
               let request = session.messages[..<index].last(where: { $0.role == "user" }) else { return }
         guard (model.drafts[session.id] ?? "").isEmpty, (model.attachments[session.id] ?? []).isEmpty else {
-            model.show("输入框已有草稿，请先保留或发送草稿后再重新编辑。"); return
+            model.show("请先处理输入框里的草稿"); return
         }
         model.drafts[session.id] = request.text ?? ""
         model.attachments[session.id] = request.attachments ?? []

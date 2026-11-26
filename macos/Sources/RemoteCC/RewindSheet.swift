@@ -13,7 +13,7 @@ struct RewindSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             SheetHeading(title: "回退本轮之前的文件") { dismiss() }.disabled(busy)
-            Text("这会恢复已跟踪文件，也可能删除本轮新建的文件。聊天记录保持原样；Bash 与子代理修改不保证被跟踪。").font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
+            Text("聊天记录不变；Bash 和子代理的修改可能不会恢复。").font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
             if busy { ProgressView("正在处理…") }
             if let preview {
                 ScrollView { VStack(alignment: .leading, spacing: 6) {
@@ -42,7 +42,7 @@ struct RewindSheet: View {
                 let result = try await engine.rewindFiles(sessionId, checkpoint: checkpoint, token: token)
                 if apply {
                     guard result["canRewind"]?.bool == true else { error = result["error"]?.string ?? "回退未完成"; preview = nil; return }
-                    model.show((result["skippedLinks"]?.int ?? 0) > 0 ? "回退已执行，部分特殊路径被跳过，请检查文件。" : "文件已回退，聊天记录保持不变。")
+                    model.show((result["skippedLinks"]?.int ?? 0) > 0 ? "已回退，部分路径已跳过" : "已回退")
                     if model.activeId == sessionId { await model.activeWorkspace?.reload(force: true) }
                     dismiss()
                 } else { preview = result }

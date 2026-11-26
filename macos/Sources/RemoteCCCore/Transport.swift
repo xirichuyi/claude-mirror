@@ -458,7 +458,7 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         let name = ReverseSetup.socketName()
         var result = ReverseAccess(name: name)
         if !localSSHAvailable() {
-            result.error = "本机未开启远程登录（系统设置 → 通用 → 共享 → 远程登录）"
+            result.error = "未开启远程登录（系统设置 → 通用 → 共享）"
         } else {
             do {
                 let user = NSUserName()

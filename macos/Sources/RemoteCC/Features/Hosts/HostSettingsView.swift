@@ -86,7 +86,7 @@ struct HostSettingsView: View {
                         get: { model.savedMachines.first { $0.key == machine.key }?.reverseAccess == true },
                         set: { model.setReverseAccess(machine, enabled: $0) })
                 )
-                .help("允许这台服务器通过 SSH 以你的用户身份访问本机")
+                .help("服务器以你的身份登录本机")
                 .toggleStyle(WorkbenchToggleStyle())
                 if machine.reverseAccess == true {
                     HStack {

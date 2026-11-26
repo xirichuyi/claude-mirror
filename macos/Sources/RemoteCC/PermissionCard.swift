@@ -46,7 +46,7 @@ struct PermissionCard: View {
             try? await Task.sleep(for: .seconds(20))
             guard !Task.isCancelled, sending else { return }
             sending = false
-            error = "已提交，但远端还没有确认。可以稍等，或再提交一次。"
+            error = "远端未确认，可重新提交"
         }
     }
 
@@ -240,7 +240,7 @@ struct PermissionCard: View {
             }
             actionRow(acceptTitle: "提交", supported: true) { ["action": "accept", "content": .object(form)] }
         } else {
-            Text("此表单包含暂不支持的结构，可以拒绝或取消。").font(WorkbenchMetrics.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+            Text("不支持此表单").font(WorkbenchMetrics.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             actionRow(acceptTitle: "提交", supported: false) { ["action": "accept"] }
         }
     }

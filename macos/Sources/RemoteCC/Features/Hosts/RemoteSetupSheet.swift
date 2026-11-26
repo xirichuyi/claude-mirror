@@ -13,8 +13,6 @@ struct RemoteSetupSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             SheetHeading(title: "设置 \(machine.displayName)") { close() }.disabled(running)
-            Text("会在服务器上安装缺少的 Claude Code 和 Node.js，全部装在你的用户目录，不需要管理员权限，也不会读取或修改 Claude 的登录信息。通常需要 1–3 分钟。")
-                .font(.callout).foregroundStyle(WorkbenchTheme.inkMuted).fixedSize(horizontal: false, vertical: true)
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {

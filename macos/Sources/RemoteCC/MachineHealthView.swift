@@ -45,7 +45,7 @@ struct MachineHealthBanner: View {
                     Button("在终端登录") { model.runInTerminal(config, command: command) }.buttonStyle(WorkbenchButtonStyle(prominent: true))
                     Button("复制登录命令") { model.copyCommand(command, note: "已复制，SSH 登录服务器后运行即可") }
                 case .copy(let command):
-                    Button("复制命令") { model.copyCommand(command, note: "已复制，请在服务器上运行；如提示权限不足，请联系管理员") }
+                    Button("复制命令") { model.copyCommand(command, note: "已复制，请在服务器上运行") }
                 case nil:
                     EmptyView()
                 }
