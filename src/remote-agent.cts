@@ -1389,9 +1389,9 @@ async function framedWrite(id, request, token, wire) {
   if (!Number.isInteger(request.size) || request.size < 0 || request.size > 1024 ** 3) throw new Error('文件大小超出限制（1 GB）');
   const destination = cached ? await attachmentLocation(request) : path.join(resolve(request.directory), checkName(request.name));
   const folder = path.dirname(destination);
-  // An attachment's folder is private and named by its digest, so a broken upload left there can be resumed.
-  // Renaming it away first gives it to one upload only.
-  const partial = path.join(folder, '.remotecc-partial');
+  // An attachment's folder is private and named by its digest, so a broken upload kept beside it can be resumed.
+  // It sits outside the folder so no stored attachment can share its name; renaming it away gives it to one upload only.
+  const partial = folder + '.partial';
   const temporary = temporaryName(folder, 'upload');
   const hash = cached ? crypto.createHash('sha256') : null;
   let offset = 0, claimed = false;
@@ -1411,6 +1411,7 @@ async function framedWrite(id, request, token, wire) {
   box.save = () => { try { if (cached) fs.renameSync(temporary, partial); else fs.rmSync(temporary, { force: true }); } catch { /* Nothing to keep. */ } };
   wire.uploads.set(id, box);
   token.cancel = () => box.push({ error: '已取消' });
+  if (token.cancelled) token.cancel();
   try {
     wire.send({ stream: id, offset });
     const grant = bytes => { const value = Buffer.alloc(4); value.writeUInt32BE(bytes); return wire.write(frame(FRAME.CREDIT, id, value)); };
@@ -1423,7 +1424,7 @@ async function framedWrite(id, request, token, wire) {
       received += item.data.length;
       if (received > request.size) throw new Error('上传大小不匹配');
       hash?.update(item.data);
-      await target.write(item.data);
+      await target.writeFile(item.data);
       await grant(item.data.length);
     }
     if (received !== request.size) throw new Error('上传未完成');
