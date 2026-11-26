@@ -299,7 +299,7 @@ public final class AgentChannel: @unchecked Sendable {
         var request = params
         request["operation"] = "write"
         let reply = Task { try await call("file", request, timeout: 24 * 3600, id: id) }
-        let sender = Task {
+        let sender = Task { do {
             await upload.wait { $0.offset != nil }
             guard let offset = upload.lock.withLock({ upload.offset }) else { return }
             let input = try FileHandle(forReadingFrom: file)
@@ -320,7 +320,11 @@ public final class AgentChannel: @unchecked Sendable {
                 sent(total)
             }
             writeFrame(FrameType.end, id)
-        }
+        } catch is CancellationError {
+        } catch {
+            // The local file failed: end the upload so the reply comes back instead of waiting a day.
+            self.write(["cancel": .number(Double(id))])
+        } }
         return try await withTaskCancellationHandler {
             do {
                 let result = try await reply.value
