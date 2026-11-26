@@ -2,7 +2,7 @@
 
 The client talks to `remote-agent.cjs` over one SSH channel (stdin/stdout). The channel starts in
 JSON lines. A client that sends `{"id":N,"op":"frames","params":{"version":1}}` gets the line
-`{"id":N,"result":{"version":1,"chunk":262144,"window":1048576}}`. From then on both directions
+`{"id":N,"result":{"version":1,"chunk":131072,"window":1048576}}`. From then on both directions
 use binary frames. The client sends nothing else after the upgrade line until that reply arrives.
 
 ## Frame

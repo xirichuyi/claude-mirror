@@ -1340,7 +1340,7 @@ function createDirectoryWatcher(emit) {
 // ---------------------------------------------------------------- framed transfers (docs/agent-wire.md)
 
 const FRAME = { JSON: 1, BLOB: 2, DATA: 3, END: 4, CREDIT: 5 };
-const FRAME_CHUNK = 256 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
+const FRAME_CHUNK = 128 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
 const SKIP_REPLY = Symbol('skip reply');
 function frame(type, id, payload = Buffer.alloc(0)) {
   const head = Buffer.alloc(9);

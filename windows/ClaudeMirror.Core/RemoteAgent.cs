@@ -380,7 +380,7 @@ public sealed class RemoteAgent : IDisposable
         };
         try
         {
-            var reply = await CallAsync(id, "file", new { operation = "read", path = remotePath, window = 2 * 1024 * 1024 }, TimeSpan.FromSeconds(60));
+            var reply = await CallAsync(id, "file", new { operation = "read", path = remotePath, window = 1024 * 1024 }, TimeSpan.FromSeconds(60));
             await done.Task.WaitAsync(lifetime.Token);
             if (file.Length != reply["size"]!.GetValue<long>()) throw new IOException("下载未完成，可重试");
         }
