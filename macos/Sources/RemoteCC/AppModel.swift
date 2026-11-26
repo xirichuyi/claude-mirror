@@ -906,7 +906,7 @@ final class AppModel: ObservableObject {
         guard let engine else { return }
         if !confirmed {
             presentation = .confirmation(WorkbenchConfirmation(title: "删除此项目的远端聊天记录？",
-                detail: project.directory + "\n聊天记录移入远端回收目录，项目文件不受影响。",
+                detail: project.directory + "\n聊天记录移入远端回收目录，仅在本机的对话直接删除；项目文件不受影响。",
                 actionTitle: "移入远端回收目录", destructive: true) { [weak self] in self?.deleteProjectHistory(project, confirmed: true) })
             return
         }
