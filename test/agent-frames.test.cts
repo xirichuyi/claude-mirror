@@ -128,7 +128,7 @@ test('an attachment upload resumes after the connection drops', async () => {
     const reply = await second.json(message => message.id === 2);
     assert.equal(reply.error, undefined);
     assert.ok(fs.readFileSync(reply.result.path).equals(content));
-    assert.ok(!fs.existsSync(path.join(path.dirname(reply.result.path), '.remotecc-partial')));
+    assert.ok(!fs.existsSync(path.dirname(reply.result.path) + '.partial'));
   } finally { second.close(); }
 });
 

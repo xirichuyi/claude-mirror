@@ -32,5 +32,5 @@ a change gives an END error. `{"cancel": id}` stops the stream with END `已取�
 
 `params`: the fields of the old `transfer upload` request (`attachment`, `digest`, `name`, `directory`, `size`).
 The agent answers with JSON `{"stream":id,"offset":n}`. `n > 0` only for an attachment whose broken upload
-(same digest, kept as `.remotecc-partial` in its folder) is still there and no other upload has taken it; the client sends from there. Then it sends CREDIT; the client sends DATA within it and END.
+(same digest, kept as `<digest>.partial` beside its folder) is still there and no other upload has taken it; the client sends from there. Then it sends CREDIT; the client sends DATA within it and END.
 The final reply `{id, result}` is the stored file's metadata, as before.
