@@ -1340,7 +1340,7 @@ function createDirectoryWatcher(emit) {
 // ---------------------------------------------------------------- framed transfers (docs/agent-wire.md)
 
 const FRAME = { JSON: 1, BLOB: 2, DATA: 3, END: 4, CREDIT: 5 };
-const FRAME_CHUNK = 256 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = MEGABYTE + 1024;
+const FRAME_CHUNK = 256 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
 const SKIP_REPLY = Symbol('skip reply');
 function frame(type, id, payload = Buffer.alloc(0)) {
   const head = Buffer.alloc(9);
@@ -1388,12 +1388,15 @@ async function framedWrite(id, request, token, wire) {
   if (!Number.isInteger(request.size) || request.size < 0 || request.size > 1024 ** 3) throw new Error('文件大小超出限制（1 GB）');
   const destination = cached ? await attachmentLocation(request) : path.join(resolve(request.directory), checkName(request.name));
   const folder = path.dirname(destination);
-  // An attachment's folder is private and named by its digest, so a partial upload there can be resumed.
-  const temporary = cached ? destination + '.partial' : temporaryName(folder, 'upload');
+  // An attachment's folder is private and named by its digest, so a broken upload left there can be resumed.
+  // Renaming it away first gives it to one upload only.
+  const partial = path.join(folder, '.remotecc-partial');
+  const temporary = temporaryName(folder, 'upload');
   const hash = cached ? crypto.createHash('sha256') : null;
   let offset = 0;
   if (cached) {
     try {
+      await fsp.rename(partial, temporary);
       const info = await fsp.lstat(temporary);
       if (info.isFile() && info.size <= request.size) {
         for await (const chunk of fs.createReadStream(temporary)) hash.update(chunk);
@@ -1401,7 +1404,7 @@ async function framedWrite(id, request, token, wire) {
       } else await fsp.rm(temporary, { force: true });
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
-  const target = await fsp.open(temporary, cached ? 'a' : 'wx', 0o600);
+  const target = await fsp.open(temporary, offset ? 'a' : 'wx', 0o600);
   const box = inbox();
   wire.uploads.set(id, box);
   token.cancel = () => box.push({ error: '已取消' });
@@ -1438,7 +1441,8 @@ async function framedWrite(id, request, token, wire) {
   } finally {
     wire.uploads.delete(id);
     await target.close().catch(() => {});
-    if (!keep) await fsp.rm(temporary, { force: true });
+    if (keep) await fsp.rename(temporary, partial).catch(() => fsp.rm(temporary, { force: true }));
+    else await fsp.rm(temporary, { force: true });
   }
 }
 

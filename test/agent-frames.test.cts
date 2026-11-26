@@ -128,7 +128,7 @@ test('an attachment upload resumes after the connection drops', async () => {
     const reply = await second.json(message => message.id === 2);
     assert.equal(reply.error, undefined);
     assert.ok(fs.readFileSync(reply.result.path).equals(content));
-    assert.ok(!fs.existsSync(reply.result.path + '.partial'));
+    assert.ok(!fs.existsSync(path.join(path.dirname(reply.result.path), '.remotecc-partial')));
   } finally { second.close(); }
 });
 
@@ -147,4 +147,30 @@ test('a framed preview carries image bytes in a BLOB frame instead of base64', a
     assert.equal(reply.result.inlineBytes, png.length);
     assert.ok(blob.payload.subarray(4 + length).equals(png));
   } finally { agent.close(); fs.rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('an upload never treats an existing attachment as its partial, and concurrent uploads stay apart', async () => {
+  const content = crypto.randomBytes(1536 * 1024);
+  const digest = crypto.createHash('sha256').update(content).digest('hex');
+  const upload = async (agent: ReturnType<typeof framedAgent>, name: string) => {
+    agent.request(2, 'file', { operation: 'write', attachment: true, digest, name, size: content.length });
+    assert.equal((await agent.json(message => message.stream === 2)).offset, 0);
+    return async () => {
+      for (let at = 0; at < content.length; at += 256 * 1024) {
+        await agent.until(() => agent.frames.filter(item => item.type === 5 && item.id === 2).length * 1024 * 1024 >= at + 1 || undefined);
+        agent.child.stdin.write(frame(3, 2, content.subarray(at, at + 256 * 1024)));
+      }
+      agent.child.stdin.write(frame(4, 2));
+      const reply = await agent.json(message => message.id === 2);
+      assert.equal(reply.error, undefined);
+      return reply.result.path as string;
+    };
+  };
+  const first = framedAgent(), second = framedAgent();
+  try {
+    const [finishFirst, finishSecond] = await Promise.all([upload(first, 'report.partial'), upload(second, 'report')]);
+    const [one, two] = await Promise.all([finishFirst(), finishSecond()]);
+    assert.ok(fs.readFileSync(one).equals(content));
+    assert.ok(fs.readFileSync(two).equals(content));
+  } finally { first.close(); second.close(); }
 });
