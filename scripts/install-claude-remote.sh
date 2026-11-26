@@ -134,6 +134,19 @@ else
   echo 'Background sessions keep running after SSH disconnects.'
 fi
 
+# A large JPEG or WebP previews from a small copy made on the server, which needs one image tool.
+# PNG needs none. Installing it is a convenience: without it previews download the original.
+if python3 -c 'import PIL' 2>/dev/null || command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1 || command -v ffmpeg >/dev/null 2>&1; then :
+elif [ "$(id -u)" -eq 0 ]; then
+  if command -v apt-get >/dev/null 2>&1; then { apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3-pil; } >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then dnf install -y -q python3-pillow >/dev/null 2>&1 || true
+  elif command -v yum >/dev/null 2>&1; then yum install -y -q python3-pillow >/dev/null 2>&1 || true
+  fi
+  python3 -c 'import PIL' 2>/dev/null && echo 'Image previews: installed Pillow.' || echo 'Image previews: JPEG and WebP load in full. Install python3-pil, ImageMagick or ffmpeg for faster previews.'
+else
+  echo 'Image previews: JPEG and WebP load in full. Install python3-pil, ImageMagick or ffmpeg for faster previews.'
+fi
+
 # Claude refuses Full Access as root. The runner is an ordinary account that Claude Mirror
 # switches to with runuser; it gets its own Claude install and login, and only the project.
 setup_runner() {

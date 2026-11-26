@@ -24,12 +24,13 @@ struct ChatAttachmentView: View {
             HStack {
                 Button("打开") { model.open(file.path) }
                 Button("下载") { model.download(file.path) }
-                if imageFile && thumbnail == nil { Button("加载缩略图") { load() }.disabled(loading) }
+                if imageFile && thumbnail == nil && !error.isEmpty { Button("重试") { load() }.disabled(loading) }
                 if loading { ProgressView().controlSize(.mini) }
             }.font(.caption).buttonStyle(QuietButtonStyle()).disabled(!model.isConnected)
             if !error.isEmpty { Text(error).font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted).lineLimit(2) }
         }.padding(12).background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium))
             .overlay(RoundedRectangle(cornerRadius: WorkbenchTheme.Radius.medium).strokeBorder(WorkbenchTheme.border))
+            .task(id: model.isConnected) { if imageFile && thumbnail == nil && model.isConnected { load() } }
             .onDisappear { loadTask?.cancel() }
     }
     private func load() {

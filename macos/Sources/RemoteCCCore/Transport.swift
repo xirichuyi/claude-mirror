@@ -127,6 +127,49 @@ struct LineBuffer {
     }
 }
 
+/// The agent channel: JSON lines until the `frames` upgrade, then `[u32 length][u8 type][u32 id][payload]` (docs/agent-wire.md).
+struct WireBuffer {
+    private var pending = Data()
+    private(set) var framed = false
+    /// `line` returns true when that line switches the channel to frames.
+    mutating func append(_ data: Data, line: (Data) -> Bool, frame: (UInt8, Int, Data) -> Void) {
+        pending.append(data)
+        var start = pending.startIndex
+        while true {
+            if !framed {
+                guard let newline = pending[start...].firstIndex(of: 10) else { break }
+                let text = Data(pending[start..<newline])
+                start = newline + 1
+                if line(text) { framed = true }
+            } else {
+                let available = pending.endIndex - start
+                guard available >= 4 else { break }
+                let length = Int(Self.uint32(pending, start))
+                guard length >= 5, length <= 64 * 1024 * 1024 else { pending = Data(); return }
+                guard available >= 4 + length else { break }
+                frame(pending[start + 4], Int(Self.uint32(pending, start + 5)), Data(pending[(start + 9)..<(start + 4 + length)]))
+                start += 4 + length
+            }
+        }
+        if start != pending.startIndex { pending = Data(pending[start...]) }
+    }
+
+    static func uint32(_ data: Data, _ at: Int) -> UInt32 {
+        data[at..<(at + 4)].reduce(0) { $0 << 8 | UInt32($1) }
+    }
+
+    static func frame(_ type: UInt8, _ id: Int, _ payload: Data = Data()) -> Data {
+        var data = Data(capacity: 9 + payload.count)
+        func append(_ value: Int) { withUnsafeBytes(of: UInt32(truncatingIfNeeded: value).bigEndian) { data.append(contentsOf: $0) } }
+        append(5 + payload.count); data.append(type); append(id); data.append(payload)
+        return data
+    }
+}
+
+enum FrameType {
+    static let json: UInt8 = 1, blob: UInt8 = 2, data: UInt8 = 3, end: UInt8 = 4, credit: UInt8 = 5
+}
+
 public enum ConnectionStatus: String, Sendable { case disconnected, connecting, connected, reconnecting, error }
 
 public struct ConnectionState: Sendable, Equatable {

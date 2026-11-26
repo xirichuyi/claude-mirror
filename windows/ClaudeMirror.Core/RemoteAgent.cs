@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -18,6 +19,20 @@ public sealed class RemoteAgent : IDisposable
     private readonly CancellationTokenSource lifetime = new();
     private int sequence;
     private bool channelClosed, attached;
+    // After the `frames` upgrade the channel carries binary frames (docs/agent-wire.md).
+    private volatile bool framed;
+    private int upgradeId = -1;
+    private readonly ConcurrentDictionary<int, Func<byte[]?, string?, Task>> reads = new();
+    private readonly ConcurrentDictionary<int, Upload> uploads = new();
+    private sealed class Upload
+    {
+        public readonly TaskCompletionSource<long> Offset = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private long credit;
+        private TaskCompletionSource signal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void Grant(long bytes) { TaskCompletionSource old; lock (this) { credit += bytes; old = signal; signal = new(TaskCreationOptions.RunContinuationsAsynchronously); } old.TrySetResult(); }
+        public void Spend(long bytes) { lock (this) credit -= bytes; }
+        public (long Credit, Task Changed) State() { lock (this) return (credit, signal.Task); }
+    }
     public string Home { get; private set; } = "~";
     public string Digest { get; private set; } = "";
     /// <summary>The agent's hello reply: claude path, persistence warning, Node version.</summary>
@@ -71,7 +86,7 @@ public sealed class RemoteAgent : IDisposable
     public async Task StartAgentAsync(string resourceDirectory)
     {
         if (ssh is null || !ssh.Connected) throw new IOException("请先连接服务器");
-        command?.Dispose(); writer = null; channelClosed = false; Hello = null;
+        command?.Dispose(); writer = null; channelClosed = false; Hello = null; framed = false;
         var manifest = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(resourceDirectory, "manifest.json")))!;
         Digest = manifest["bundleDigest"]!.GetValue<string>();
         var digest = manifest["agentDigest"]!.GetValue<string>();
@@ -95,6 +110,8 @@ public sealed class RemoteAgent : IDisposable
         var channel = command!;
         var ready = Listen(channel.Output, channel.Exit, () => channel == command);
         await ready.WaitAsync(TimeSpan.FromSeconds(30));
+        upgradeId = Interlocked.Increment(ref sequence);
+        await CallAsync(upgradeId, "frames", new { version = 1 }, TimeSpan.FromSeconds(60));
         var hello = await CallAsync("file", new { operation = "hello" });
         Home = hello["home"]!.GetValue<string>();
         if (hello["nodeSupported"]?.GetValue<bool>() != true) { channelClosed = true; throw new RemoteSetupException(true, hello["node"]?.GetValue<string>()); }
@@ -110,22 +127,43 @@ public sealed class RemoteAgent : IDisposable
         {
             try
             {
-                using var reader = new StreamReader(output);
-                while (await reader.ReadLineAsync(lifetime.Token) is { } line)
+                var chunk = new byte[256 * 1024];
+                var buffer = new byte[1024 * 1024];
+                int length = 0, read;
+                while ((read = await output.ReadAsync(chunk, lifetime.Token)) > 0)
                 {
-                    if (line == "__RCC_NO_NODE__") { setupFailure = new RemoteSetupException(false); ready.TrySetException(setupFailure); continue; }
-                    if (line.StartsWith("__RCC_OLD_NODE__ ")) { setupFailure = new RemoteSetupException(true, line["__RCC_OLD_NODE__ ".Length..]); ready.TrySetException(setupFailure); continue; }
-                    if (!line.StartsWith('{')) continue;
-                    var message = JsonNode.Parse(line)!.AsObject();
-                    if (message["rcc"]?.GetValue<string>() == "ready") { ready.TrySetResult(); continue; }
-                    if (message["sub"] is JsonValue sub)
+                    if (length + read > buffer.Length) Array.Resize(ref buffer, Math.Max(buffer.Length * 2, length + read));
+                    Buffer.BlockCopy(chunk, 0, buffer, length, read); length += read;
+                    var position = 0;
+                    while (true)
                     {
-                        if (watches.TryGetValue(sub.GetValue<string>(), out var receive) && message["packet"] is JsonObject packet) receive(packet);
-                        continue;
+                        if (!framed)
+                        {
+                            var newline = Array.IndexOf(buffer, (byte)10, position, length - position);
+                            if (newline < 0) break;
+                            var line = Encoding.UTF8.GetString(buffer, position, newline - position).TrimEnd('\r');
+                            position = newline + 1;
+                            if (line == "__RCC_NO_NODE__") { setupFailure = new RemoteSetupException(false); ready.TrySetException(setupFailure); continue; }
+                            if (line.StartsWith("__RCC_OLD_NODE__ ")) { setupFailure = new RemoteSetupException(true, line["__RCC_OLD_NODE__ ".Length..]); ready.TrySetException(setupFailure); continue; }
+                            if (!line.StartsWith('{')) continue;
+                            var message = JsonNode.Parse(line)!.AsObject();
+                            if (message["rcc"]?.GetValue<string>() == "ready") { ready.TrySetResult(); continue; }
+                            Dispatch(message);
+                        }
+                        else
+                        {
+                            if (length - position < 4) break;
+                            var size = BinaryPrimitives.ReadInt32BigEndian(buffer.AsSpan(position));
+                            if (size < 5 || size > 64 * 1024 * 1024) throw new IOException("远端代理数据损坏");
+                            if (length - position < 4 + size) break;
+                            var type = buffer[position + 4];
+                            var id = BinaryPrimitives.ReadInt32BigEndian(buffer.AsSpan(position + 5));
+                            var payload = buffer.AsSpan(position + 9, size - 5).ToArray();
+                            position += 4 + size;
+                            await ReceiveFrame(type, id, payload);
+                        }
                     }
-                    if (message["id"] is not JsonValue id || !requests.TryRemove(id.GetValue<int>(), out var pending)) continue;
-                    if (message["error"] is not null) pending.TrySetException(new IOException(message["error"]!.GetValue<string>()));
-                    else pending.TrySetResult(message["result"]?.DeepClone() ?? new JsonObject());
+                    Buffer.BlockCopy(buffer, position, buffer, 0, length - position); length -= position;
                 }
                 await finished;
                 throw new IOException("SSH 通道已断开，请重新连接；远端任务会保留");
@@ -136,12 +174,72 @@ public sealed class RemoteAgent : IDisposable
                 ready.TrySetException(e);
                 foreach (var request in requests.Values) request.TrySetException(e);
                 requests.Clear();
+                foreach (var stream in reads.Values) _ = stream(null, e.Message);
+                foreach (var upload in uploads.Values) { upload.Offset.TrySetException(e); upload.Grant(0); }
                 // A missing Node.js is reported by ConnectAsync as a setup step, not as a lost connection.
                 if (!lifetime.IsCancellationRequested && setupFailure is null && current()) Disconnected?.Invoke(e.Message);
             }
         });
         return ready.Task;
     }
+
+    private void Dispatch(JsonObject message)
+    {
+        if (message["sub"] is JsonValue sub)
+        {
+            if (watches.TryGetValue(sub.GetValue<string>(), out var receive) && message["packet"] is JsonObject packet) receive(packet);
+            return;
+        }
+        if (message["stream"] is JsonValue stream)
+        {
+            if (uploads.TryGetValue(stream.GetValue<int>(), out var upload)) upload.Offset.TrySetResult(message["offset"]?.GetValue<long>() ?? 0);
+            return;
+        }
+        if (message["id"] is not JsonValue value) return;
+        var id = value.GetValue<int>();
+        // Switch before anyone waiting on the reply writes again.
+        if (id == upgradeId && message["result"]?["version"]?.GetValue<int>() == 1) framed = true;
+        if (!requests.TryRemove(id, out var pending)) return;
+        if (message["error"] is not null) pending.TrySetException(new IOException(message["error"]!.GetValue<string>()));
+        else pending.TrySetResult(message["result"]?.DeepClone() ?? new JsonObject());
+    }
+
+    private async Task ReceiveFrame(byte type, int id, byte[] payload)
+    {
+        switch (type)
+        {
+            case 1: Dispatch(JsonNode.Parse(payload)!.AsObject()); break;
+            case 2 when payload.Length >= 4:
+                var size = BinaryPrimitives.ReadInt32BigEndian(payload);
+                var message = JsonNode.Parse(payload.AsSpan(4, size))!.AsObject();
+                if (message["result"] is JsonObject result) result["inlineData"] = Convert.ToBase64String(payload, 4 + size, payload.Length - 4 - size);
+                Dispatch(message); break;
+            case 3: if (reads.TryGetValue(id, out var stream)) await stream(payload, null); break;
+            case 4: if (reads.TryRemove(id, out var ended)) await ended(null, payload.Length == 0 ? null : Encoding.UTF8.GetString(payload)); break;
+            case 5 when payload.Length >= 4: if (uploads.TryGetValue(id, out var upload)) upload.Grant(BinaryPrimitives.ReadUInt32BigEndian(payload)); break;
+        }
+    }
+
+    private static byte[] Frame(byte type, int id, ReadOnlySpan<byte> payload)
+    {
+        var frame = new byte[9 + payload.Length];
+        BinaryPrimitives.WriteInt32BigEndian(frame, 5 + payload.Length); frame[4] = type;
+        BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(5), id); payload.CopyTo(frame.AsSpan(9));
+        return frame;
+    }
+
+    private async Task WriteFrameAsync(byte type, int id, ReadOnlyMemory<byte> payload)
+    {
+        await writeLock.WaitAsync(lifetime.Token);
+        try
+        {
+            var stream = (writer ?? throw new IOException("未连接")).BaseStream;
+            await stream.WriteAsync(Frame(type, id, payload.Span), lifetime.Token); await stream.FlushAsync(lifetime.Token);
+        }
+        finally { writeLock.Release(); }
+    }
+
+    private static byte[] Credit(int bytes) { var value = new byte[4]; BinaryPrimitives.WriteInt32BigEndian(value, bytes); return value; }
 
     /// <summary>Speaks the agent protocol over two streams instead of SSH: the built-in demo, or a local agent in tests.</summary>
     public static async Task<RemoteAgent> AttachAsync(Stream toAgent, Stream fromAgent, HostProfile profile)
@@ -189,22 +287,33 @@ public sealed class RemoteAgent : IDisposable
         return await reading;
     }
 
-    public async Task<JsonNode> CallAsync(string operation, object parameters)
+    public Task<JsonNode> CallAsync(string operation, object parameters) =>
+        CallAsync(Interlocked.Increment(ref sequence), operation, parameters, TimeSpan.FromSeconds(60));
+
+    private async Task<JsonNode> CallAsync(int id, string operation, object parameters, TimeSpan timeout)
     {
-        var id = Interlocked.Increment(ref sequence);
         var pending = new TaskCompletionSource<JsonNode>(TaskCreationOptions.RunContinuationsAsynchronously);
         requests[id] = pending;
         try
         {
             await WriteAsync(new { id, op = operation, @params = parameters });
-            return await pending.Task.WaitAsync(TimeSpan.FromSeconds(60), lifetime.Token);
+            return await pending.Task.WaitAsync(timeout, lifetime.Token);
         }
         finally { requests.TryRemove(id, out _); }
     }
     private async Task WriteAsync(object value)
     {
         await writeLock.WaitAsync(lifetime.Token);
-        try { await (writer ?? throw new IOException("未连接")).WriteLineAsync(System.Text.Json.JsonSerializer.Serialize(value)); }
+        try
+        {
+            var current = writer ?? throw new IOException("未连接");
+            if (!framed) await current.WriteLineAsync(System.Text.Json.JsonSerializer.Serialize(value));
+            else
+            {
+                await current.BaseStream.WriteAsync(Frame(1, 0, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(value)), lifetime.Token);
+                await current.BaseStream.FlushAsync(lifetime.Token);
+            }
+        }
         finally { writeLock.Release(); }
     }
     /// <summary>Follows a remote task. Several tasks can be followed at once; watching a task again replaces its earlier watch.</summary>
@@ -247,11 +356,74 @@ public sealed class RemoteAgent : IDisposable
     }
     public async Task DownloadAsync(string remotePath, string localPath)
     {
+        if (framed) { await ReadAsync(remotePath, localPath); return; }
         using var download = ssh!.Run("cat -- " + Protocol.Quote(remotePath), false, lifetime.Token);
         await using var file = File.Create(localPath);
         await download.Output.CopyToAsync(file, lifetime.Token);
         if (await download.Exit != 0) throw new IOException(download.Error);
     }
+    /// <summary>Streams a file over the agent channel; the agent sends no more than the credit granted back as bytes are written.</summary>
+    private async Task ReadAsync(string remotePath, string localPath)
+    {
+        var id = Interlocked.Increment(ref sequence);
+        await using var file = File.Create(localPath);
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        reads[id] = async (data, error) =>
+        {
+            if (data is not null)
+            {
+                try { await file.WriteAsync(data, lifetime.Token); await WriteFrameAsync(5, id, Credit(data.Length)); }
+                catch (Exception e) { reads.TryRemove(id, out _); done.TrySetException(e); }
+            }
+            else if (error is null) done.TrySetResult();
+            else done.TrySetException(new IOException(error));
+        };
+        try
+        {
+            var reply = await CallAsync(id, "file", new { operation = "read", path = remotePath, window = 1024 * 1024 }, TimeSpan.FromSeconds(60));
+            await done.Task.WaitAsync(lifetime.Token);
+            if (file.Length != reply["size"]!.GetValue<long>()) throw new IOException("下载未完成，可重试");
+        }
+        catch
+        {
+            if (reads.TryRemove(id, out _)) await WriteAsync(new { cancel = id });
+            throw;
+        }
+    }
+
+    /// <summary>Sends an attachment over the agent channel. The agent keeps a broken upload and asks for the rest next time.</summary>
+    private async Task<string> WriteAsync(FileStream file, string hash, string name)
+    {
+        var lookup = await CallAsync("file", new { operation = "attachmentLookup", name, digest = hash });
+        if (lookup["file"] is JsonObject stored) return stored["path"]!.GetValue<string>();
+        var id = Interlocked.Increment(ref sequence);
+        var upload = new Upload();
+        uploads[id] = upload;
+        try
+        {
+            var reply = CallAsync(id, "file", new { operation = "write", attachment = true, digest = hash, name, size = file.Length }, TimeSpan.FromHours(24));
+            if (await Task.WhenAny(upload.Offset.Task, reply) == reply) await reply;
+            file.Position = await upload.Offset.Task;
+            var chunk = new byte[256 * 1024];
+            while (true)
+            {
+                var (credit, changed) = upload.State();
+                if (credit <= 0)
+                {
+                    if (await Task.WhenAny(changed, reply) == reply) { await reply; throw new IOException("上传未完成"); }
+                    continue;
+                }
+                var count = await file.ReadAsync(chunk.AsMemory(0, (int)Math.Min(credit, chunk.Length)), lifetime.Token);
+                if (count == 0) break;
+                upload.Spend(count);
+                await WriteFrameAsync(3, id, chunk.AsMemory(0, count));
+            }
+            await WriteFrameAsync(4, id, ReadOnlyMemory<byte>.Empty);
+            return (await reply)["path"]!.GetValue<string>();
+        }
+        finally { uploads.TryRemove(id, out _); }
+    }
+
     /// <summary>
     /// Stores an attachment where the account Claude runs as can read it. A root login writes it as that account, into that account's home:
     /// root's own folders are closed to it, and writing as root into a folder the account controls would follow any link left there.
@@ -278,6 +450,7 @@ public sealed class RemoteAgent : IDisposable
             if (await stored.Exit != 0 || (await path).Length == 0) throw new IOException(stored.Error.Trim().Length > 0 ? stored.Error.Trim() : $"无法把附件交给执行账号 {account}");
             return await path;
         }
+        if (framed) return await WriteAsync(file, hash, Path.GetFileName(localPath));
         var folder = Home + "/.cache/claude-mirror/attachments/" + hash;
         var remote = folder + "/" + Path.GetFileName(localPath);
         using (var existing = ssh!.Run("test -f " + Protocol.Quote(remote), false, lifetime.Token))

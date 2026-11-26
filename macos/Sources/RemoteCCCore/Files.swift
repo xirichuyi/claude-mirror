@@ -104,7 +104,15 @@ public final class RemoteFiles: @unchecked Sendable {
         }
     }
 
-    private func fetchPreview(_ config: ConnectionConfig, _ file: String, original: Bool) async throws -> FilePreview {
+    /// Fetches an image's thumbnail before it is asked for. An original is never downloaded for this.
+    public func warm(_ config: ConnectionConfig, _ file: String) async {
+        let key = "warm:" + previewKey(config, file, original: false)
+        _ = try? await previewRequests.value(for: key) {
+            try await self.fetchPreview(config, file, original: false, thumbnailOnly: true)
+        }
+    }
+
+    private func fetchPreview(_ config: ConnectionConfig, _ file: String, original: Bool, thumbnailOnly: Bool = false) async throws -> FilePreview {
         let key = previewKey(config, file, original: original)
         let previous = await cachedPreview(config, file, original: original)
         var params: [String: JSON] = ["path": .string(file), "inlineMedia": .bool(true), "thumbnail": .bool(!original), "textLimit": .number(65536)]
@@ -113,6 +121,7 @@ public final class RemoteFiles: @unchecked Sendable {
         try Task.checkCancellation()
         var info = try response.decode(FilePreview.self)
         if info.notModified == true, let previous { return previous }
+        if thumbnailOnly && info.thumbnail != true { throw CancellationError() }
         if info.kind == "image" || info.kind == "pdf" {
             let inline = response["inlineData"]?.string.flatMap { Data(base64Encoded: $0) }
             info.data = try Data(contentsOf: try await cached(config, info, inline: inline), options: .mappedIfSafe)
@@ -186,35 +195,48 @@ public final class RemoteFiles: @unchecked Sendable {
         }
     }
 
+    /// Downloads over the agent channel. A versioned download that breaks keeps its bytes and resumes next time.
     private func transferDown(_ config: ConnectionConfig, path: String, version: String?, name: String, size: Int, to destination: URL) async throws {
-        var request: JSON = ["operation": "download", "path": .string(path), "base": .string(config.directory)]
-        if let version { request["version"] = .string(version) }
-        let process = try await agents.spawnTransfer(config, request: request)
-        process.closeInput()
-        guard FileManager.default.createFile(atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600]),
-              let output = try? FileHandle(forWritingTo: destination) else { process.kill(); throw RemoteError("无法写入本地文件") }
-        final class Counter: @unchecked Sendable { var bytes = 0; var last = Date.distantPast; var failed = false }
+        let partial = version.map { cacheDirectory.appendingPathComponent(cacheName("\(config.key)|\(path)|\($0)") + ".partial") }
+        let target = partial ?? destination
+        let existing = partial.flatMap { (try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? NSNumber)?.intValue } ?? 0
+        let offset = existing <= size ? existing : 0
+        if partial != nil { try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true) }
+        if offset == 0 || partial == nil {
+            guard FileManager.default.createFile(atPath: target.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw RemoteError("无法写入本地文件") }
+        }
+        guard let output = try? FileHandle(forWritingTo: target) else { throw RemoteError("无法写入本地文件") }
+        final class Counter: @unchecked Sendable { var bytes = 0; var last = Date.distantPast }
         let counter = Counter()
         let progress = onProgress
-        await withTaskCancellationHandler(operation: {
-          await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            process.readOutput(chunk: { data in
-                do { try output.write(contentsOf: data) } catch { counter.failed = true; process.kill() }
-                counter.bytes += data.count
+        var request: JSON = ["path": .string(path), "base": .string(config.directory)]
+        if let version { request["version"] = .string(version) }
+        do {
+            try output.seek(toOffset: UInt64(offset))
+            counter.bytes = offset
+            let channel = try await agents.channel(config)
+            _ = try await channel.read(request, offset: offset, into: output) { count in
+                counter.bytes += count
                 if Date().timeIntervalSince(counter.last) > 0.15 {
                     counter.last = Date()
                     progress?(TransferProgress(config: config, name: name, bytes: counter.bytes, total: size, finished: false))
                 }
-            }, done: { done.resume() })
-          }
-        }, onCancel: { process.kill() })
-        do { try output.close() } catch { counter.failed = true }
-        let code = await process.waitForExit()
-        try Task.checkCancellation()
-        if code != 0 || counter.failed || counter.bytes != size {
-            let message = process.stderrText.isEmpty ? "下载未完成（收到 \(counter.bytes)/\(size) 字节，退出码 \(code)），可重试" : process.stderrText
+            }
+            try output.close()
+            guard counter.bytes == size else { throw RemoteError("下载未完成（\(counter.bytes)/\(size)），可重试") }
+            if let partial, rename(partial.path, destination.path) != 0 {
+                guard errno == EXDEV else { throw RemoteError("无法写入本地文件：" + String(cString: strerror(errno))) }
+                try? FileManager.default.removeItem(at: destination)
+                try FileManager.default.copyItem(at: partial, to: destination)
+                try? FileManager.default.removeItem(at: partial)
+            }
+        } catch {
+            try? output.close()
+            // A changed file can never resume; keep only bytes of the version that was asked for.
+            if let partial, error.localizedDescription.contains("已变化") { try? FileManager.default.removeItem(at: partial) }
+            let message = error is CancellationError ? "请求已取消" : error.localizedDescription
             progress?(TransferProgress(config: config, name: name, bytes: counter.bytes, total: size, finished: true, error: message))
-            throw RemoteError(message)
+            throw error
         }
         progress?(TransferProgress(config: config, name: name, bytes: counter.bytes, total: size, finished: true))
     }
@@ -287,39 +309,28 @@ public final class RemoteFiles: @unchecked Sendable {
             request["attachment"] = .bool(true)
             request["digest"] = .string(digest)
         }
-        let process = try await agents.spawnTransfer(config, request: request)
-        defer { process.kill() }
-        let received = Task<Data, Never> {
-            await withCheckedContinuation { done in
-                final class Output: @unchecked Sendable { var data = Data() }
-                let output = Output()
-                process.readOutput(chunk: { output.data.append($0) }, done: { done.resume(returning: output.data) })
+        final class Sent: @unchecked Sendable { var bytes = 0; var last = Date.distantPast }
+        let sent = Sent()
+        let progress = onProgress
+        let entry: FileEntry
+        do {
+            let channel = try await agents.channel(config)
+            let reply = try await channel.write(request, file: file) { total in
+                sent.bytes = total
+                if Date().timeIntervalSince(sent.last) > 0.15 {
+                    sent.last = Date()
+                    progress?(TransferProgress(config: config, name: name, bytes: total, total: size, finished: false))
+                }
             }
+            invalidate(config)
+            entry = try reply.decode(FileEntry.self)
+        } catch {
+            invalidate(config)
+            progress?(TransferProgress(config: config, name: name, bytes: sent.bytes, total: size, finished: true, error: error.localizedDescription))
+            throw error
         }
-        let input = try FileHandle(forReadingFrom: file)
-        defer { try? input.close() }
-        var sent = 0, last = Date.distantPast
-        while let chunk = try input.read(upToCount: 256 * 1024), !chunk.isEmpty {
-            try await process.writeAndWait(chunk)
-            sent += chunk.count
-            if Date().timeIntervalSince(last) > 0.15 {
-                last = Date()
-                onProgress?(TransferProgress(config: config, name: name, bytes: sent, total: size, finished: false))
-            }
-        }
-        process.closeInput()
-        let code = await process.waitForExit()
-        invalidate(config)
-        if code != 0 {
-            let message = process.stderrText.isEmpty ? "上传失败" : process.stderrText
-            onProgress?(TransferProgress(config: config, name: name, bytes: sent, total: size, finished: true, error: message))
-            throw RemoteError(message)
-        }
-        // Process exit and stdout EOF are separate events; wait for the whole ACK.
-        let data = await received.value
-        let entry = try JSONDecoder().decode(FileEntry.self, from: data)
-        guard sent == size, entry.size == size else { throw RemoteError("上传文件大小不一致，请重试") }
-        onProgress?(TransferProgress(config: config, name: name, bytes: sent, total: size, finished: true))
+        guard entry.size == size else { throw RemoteError("上传文件大小不一致，请重试") }
+        onProgress?(TransferProgress(config: config, name: name, bytes: size, total: size, finished: true))
         return Attachment(name: entry.name, path: entry.path, size: entry.size)
     }
 }
