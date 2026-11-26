@@ -27,6 +27,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -187,8 +189,8 @@ class AgentChannel internal constructor(
         val bytes = ByteArrayOutputStream()
         while (true) {
             val byte = input.read()
-            if (byte < 0) return if (bytes.size() == 0) null else bytes.toString(Charsets.UTF_8)
-            if (byte == '\n'.code) return bytes.toString(Charsets.UTF_8)
+            if (byte < 0) return if (bytes.size() == 0) null else String(bytes.toByteArray(), Charsets.UTF_8)
+            if (byte == '\n'.code) return String(bytes.toByteArray(), Charsets.UTF_8)
             bytes.write(byte)
         }
     }
@@ -387,6 +389,8 @@ sealed interface ConnectionState {
 /** One agent per server, started on first use and shared by every conversation on that server. */
 class AgentPool(private val launcher: Launcher, val resources: ServerResources) {
     private companion object { const val MAX_UPLOAD = 1L shl 30 }
+    // Each upload can have a window of bytes queued ahead of a stop or an approval; two keep that short.
+    private val transfers = Semaphore(2)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val channels = HashMap<String, Deferred<AgentChannel>>()
@@ -444,7 +448,7 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
         val request = buildJsonObject {
             put("operation", "write"); put("name", file); put("size", size); put("attachment", true); put("digest", digest)
         }
-        val path = channel(host).write(request, open, sent).obj()?.get("path").string() ?: throw RemoteException("上传失败")
+        val path = transfers.withPermit { channel(host).write(request, open, sent) }.obj()?.get("path").string() ?: throw RemoteException("上传失败")
         return Attachment(file, path, size)
     }
 
