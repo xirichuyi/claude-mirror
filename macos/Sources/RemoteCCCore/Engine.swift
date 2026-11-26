@@ -337,7 +337,7 @@ public final class ChatEngine {
             changed(id)
             if !running.contains(id), sessions[current].queuePaused != true { return drainQueue(id) }
             // A worker started by an older app version does not know the request.
-            throw error.localizedDescription == "未知会话请求" ? RemoteError("旧会话不支持插队，已排到队首") : error
+            throw error.localizedDescription == "未知会话请求" ? RemoteError("旧版本会话不支持插队，已排到队首") : error
         }
     }
 
@@ -941,13 +941,13 @@ public final class ChatEngine {
            let anchor = original.messages.firstIndex(where: { $0.id == incoming[first].id }) {
             let incomingIDs = Set(incoming.map(\.id))
             guard original.messages[anchor...].allSatisfy({ incomingIDs.contains($0.id) }) else {
-                throw RemoteError("远端历史已分叉，已保留本地消息")
+                throw RemoteError("远端历史分支已变化，已保留本地消息")
             }
             sessions[position].messages = Array(original.messages[..<anchor]) + Array(incoming[first...])
         } else if original.messages.isEmpty {
             sessions[position].messages = incoming
         } else if !incoming.isEmpty {
-            throw RemoteError("远端历史已变化，已保留本地记录")
+            throw RemoteError("远端历史已重置或分支已变化，已保留本地记录")
         }
         if sessions[position].messages != original.messages {
             sessions[position].updatedAt = max(original.updatedAt, incoming.last?.createdAt ?? 0)
