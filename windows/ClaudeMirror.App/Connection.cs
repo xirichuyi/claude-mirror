@@ -47,7 +47,7 @@ public sealed partial class MainWindow
                 await next.ConnectAsync(profile, "", "", ServerResources, fingerprint =>
                     Task.FromResult(trusted = local.Fingerprints.GetValueOrDefault(LocalState.HostKey(profile)) == fingerprint));
             }
-            catch (RemoteSetupException) { next.Dispose(); status.Text = "已重新连上 SSH，但服务器需要重新设置，请手动连接"; return; }
+            catch (RemoteSetupException) { next.Dispose(); status.Text = "服务器需要重新设置"; return; }
             // The system client was refused a login or a host key: trying again will not change that.
             catch (SystemSshException e) when (e.Kind != SystemSshFailure.Other) { next.Dispose(); status.Text = "自动重连已停止：" + e.Message; return; }
             catch (Exception e) when (e is Renci.SshNet.Common.SshAuthenticationException or Renci.SshNet.Common.SshPassPhraseNullOrEmptyException or FileNotFoundException)
@@ -55,7 +55,7 @@ public sealed partial class MainWindow
             catch (Exception)
             {
                 next.Dispose();
-                if (!trusted) { status.Text = "自动重连已停止：主机指纹与上次不同，请核实服务器后手动连接"; return; }
+                if (!trusted) { status.Text = "主机指纹已变化，已停止重连"; return; }
                 continue;
             }
             if (attempt.IsCancellationRequested || host != profile) { next.Dispose(); return; }
@@ -83,7 +83,7 @@ public sealed partial class MainWindow
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = "需要先确认主机密钥", Content = new TextBlock { Text = message + "\n\n" + command, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true }, PrimaryButtonText = "在终端确认", CloseButtonText = "关闭" };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/k " + command) { UseShellExecute = true }); }
-        catch (System.ComponentModel.Win32Exception) { Copy(command, "无法打开终端，已复制命令，请粘贴到 PowerShell 运行"); }
+        catch (System.ComponentModel.Win32Exception) { Copy(command, "已复制命令"); }
     }
 
     private readonly StackPanel tunnelList = new() { Spacing = 6 };
@@ -102,7 +102,7 @@ public sealed partial class MainWindow
         add.VerticalAlignment = VerticalAlignment.Bottom;
         var panel = new StackPanel { Spacing = 12, Width = 340 };
         panel.Children.Add(new TextBlock { Text = "端口转发", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink });
-        panel.Children.Add(new TextBlock { Text = "把服务器的本地端口接到这台电脑的 127.0.0.1", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = "转发到本机 127.0.0.1", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(Row(localPort, remotePort, add)); panel.Children.Add(tunnelList);
         RenderTunnels();
         return panel;

@@ -119,7 +119,7 @@ public sealed partial class MainWindow
         catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException)
         {
             p.Busy = false; p.Queue.Pause();
-            status.Text = $"“{p.Conversation.Name}”的排队消息发送结果未确认，请打开这个对话查看，不要重复发送";
+            status.Text = $"“{p.Conversation.Name}”的排队消息未确认送达";
         }
         finally { p.Sending = false; }
     }

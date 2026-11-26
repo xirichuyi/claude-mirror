@@ -41,7 +41,7 @@ public sealed partial class MainWindow
             openFiles.Remove(file);editorTabs.TabItems.Remove(file.Tab);LayoutSplit();
         });
         split.SizeChanged+=(_,_)=>LayoutSplit();
-        AppWindow.Closing+=(_,e)=>{ if(openFiles.Any(f=>f.Dirty || f.Saving)){e.Cancel=true;showEditor=true;LayoutSplit();status.Text="文件仍有更改或正在保存，请先保存或关闭标签。";} };
+        AppWindow.Closing+=(_,e)=>{ if(openFiles.Any(f=>f.Dirty || f.Saving)){e.Cancel=true;showEditor=true;LayoutSplit();status.Text="请先保存或关闭文件";} };
         LayoutSplit();
     }
     private void LayoutSplit()

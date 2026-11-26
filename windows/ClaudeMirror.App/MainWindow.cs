@@ -72,7 +72,7 @@ public sealed partial class MainWindow : Window
         var key = LocalState.HostKey(profile);
         if (local.Fingerprints.TryGetValue(key, out var previous))
         {
-            if (previous != fingerprint) throw new IOException("主机指纹发生变化，连接已拒绝。请核实服务器后更新本地信任记录。");
+            if (previous != fingerprint) throw new IOException("主机指纹已变化，已拒绝连接");
             return Task.FromResult(true);
         }
         var result = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -131,7 +131,7 @@ public sealed partial class MainWindow : Window
             key.Text = entry.KeyFile ?? ""; mode.SelectedIndex = entry.KeyFile is null ? 0 : 1;
             // A host behind a jump host is left to OpenSSH, which reads the whole config entry by its alias.
             if (entry.ProxyJump is not null) { address.Text = entry.Alias; port.Value = double.NaN; mode.SelectedIndex = 2; jump.Text = ""; }
-            jumpNote.Text = entry.ProxyJump is null ? "" : $"SSH 配置里这台主机经过跳板机 {entry.ProxyJump} 连接，已改用系统 SSH。";
+            jumpNote.Text = entry.ProxyJump is null ? "" : $"经跳板机 {entry.ProxyJump}，已改用系统 SSH";
             jumpNote.Foreground = muted;
             jumpNote.Visibility = entry.ProxyJump is null ? Visibility.Collapsed : Visibility.Visible;
             expander.IsExpanded = entry.Port != 22;
@@ -190,7 +190,7 @@ public sealed partial class MainWindow : Window
         await RefreshHealthAsync();
         if (usedPassword) await RunAsync(() => OfferKeyLoginAsync(profile, next));
     }
-    private RemoteAgent RequireAgent() => agent?.Connected == true ? agent : throw new IOException(agent?.SshConnected == true ? "服务器还需要设置，请先按首页提示完成" : "请先连接服务器");
+    private RemoteAgent RequireAgent() => agent?.Connected == true ? agent : throw new IOException(agent?.SshConnected == true ? "服务器需要设置" : "请先连接服务器");
     private async Task RefreshHistoryAsync()
     {
         var remote = RequireAgent(); var sessions = new List<Conversation>(); var unread = new List<string>();
@@ -229,7 +229,7 @@ public sealed partial class MainWindow : Window
         if (count == 0) return;
         var dialog = new ContentDialog
         {
-            XamlRoot = root.XamlRoot, Title = "还有未发送的消息", Content = everywhere ? $"有 {count} 条排队的消息还没有发送，换服务器会丢弃它们。正在进行的回复会在原服务器上继续。" : $"队列里有 {count} 条消息还没有发送，离开这个对话会丢弃它们。",
+            XamlRoot = root.XamlRoot, Title = "还有未发送的消息", Content = everywhere ? $"{count} 条排队消息将被丢弃" : $"{count} 条排队消息将被丢弃",
             PrimaryButtonText = "丢弃并离开", CloseButtonText = "留在这里", DefaultButton = ContentDialogButton.Close
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) throw new IOException("已保留当前对话和未发送的消息");
@@ -244,7 +244,7 @@ public sealed partial class MainWindow : Window
         else
         {
             var waiting = ParkedFor(selected);
-            if (waiting?.Sending == true) throw new IOException("这个对话正在发送排队的消息，请稍候再打开");
+            if (waiting?.Sending == true) throw new IOException("正在发送排队消息，请稍候");
             await LeaveConversationAsync();
             // Left running earlier: it comes back as it was, with whatever arrived since.
             if (waiting is not null && parked.ContainsKey(waiting.TaskId)) { await RestoreAsync(waiting); return; }
@@ -302,7 +302,7 @@ public sealed partial class MainWindow : Window
                 await remote.TaskCommandAsync(taskId, new { kind = "send", prompt = text, message });
             }
         }
-        catch { busy = false; queue.Pause(); RenderQueue(); RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
+        catch { busy = false; queue.Pause(); RenderQueue(); RefreshWorkbench(); status.Text = "未确认送达，请重连查看"; throw; }
         finally { sending = false; }
     }
     /// Sends a queued message now. While Claude replies it joins that reply and Claude reads it at its next step;
@@ -455,7 +455,7 @@ public sealed partial class MainWindow : Window
         var delete = new MenuFlyoutSubItem { Text = "删除", Icon = new FontIcon { Glyph = "\uE74D" } };
         delete.Items.Add(MenuItem(folder ? $"确认删除文件夹“{name}”及其全部内容" : $"确认删除“{name}”", "\uE74D", () => guard(async () =>
         {
-            if (openFiles.Any(file => file.Dirty && (file.Path == path || file.Path.StartsWith(path + "/", StringComparison.Ordinal)))) throw new IOException("这个文件有未保存的更改，请先保存或关闭它的标签");
+            if (openFiles.Any(file => file.Dirty && (file.Path == path || file.Path.StartsWith(path + "/", StringComparison.Ordinal)))) throw new IOException("请先保存或关闭文件");
             await remote.CallAsync("file", new { operation = "remove", path, recursive = folder });
             await reload();
         })));

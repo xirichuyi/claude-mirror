@@ -102,8 +102,8 @@ public static class SystemSsh
     public static void Validate(HostProfile profile)
     {
         if (!Safe(profile.Host) || (profile.User.Length > 0 && !Safe(profile.User)) || profile.Port is < 0 or > 65535)
-            throw new ArgumentException("请填写主机名或 SSH 配置里的别名；用户名和端口可以留空，由 SSH 配置决定");
-        if (profile.Jump is { Length: > 0 } jump && !SafeJump(jump)) throw new ArgumentException("跳板机请写成 用户名@主机 或 SSH 配置里的别名，多台用逗号分隔");
+            throw new ArgumentException("请填写主机名或 SSH 别名");
+        if (profile.Jump is { Length: > 0 } jump && !SafeJump(jump)) throw new ArgumentException("跳板机格式：user@host 或别名，逗号分隔");
     }
 
     /// <summary>Where to log in: jump host, port, user and host. Empty parts are left to the SSH config.</summary>
@@ -145,11 +145,11 @@ public static class SystemSsh
     {
         var text = error.Trim();
         if (text.Contains("REMOTE HOST IDENTIFICATION HAS CHANGED"))
-            return new(SystemSshFailure.HostKey, "主机密钥与 known_hosts 里记录的不一样，连接已拒绝。请先核实服务器；确认无误后在终端用 ssh-keygen -R 删除旧记录再连接。");
+            return new(SystemSshFailure.HostKey, "主机密钥与 known_hosts 不一致，已拒绝。确认后运行 ssh-keygen -R 再连接");
         if (text.Contains("Host key verification failed") || text.Contains("host key is known"))
-            return new(SystemSshFailure.HostKey, "系统 SSH 还不认识这台服务器或跳板机的主机密钥。请在终端里连接一次，核对指纹后输入 yes，然后回来重新连接。");
+            return new(SystemSshFailure.HostKey, "主机密钥未知，请先在终端里 ssh 一次");
         if (text.Contains("Permission denied"))
-            return new(SystemSshFailure.Login, "系统 SSH 没能登录：服务器没有接受密钥。请确认密钥已加入 ssh-agent（在终端运行 ssh-add），或 SSH 配置里的 IdentityFile 正确。这种连接方式不能输入密码或私钥口令。");
+            return new(SystemSshFailure.Login, "服务器没有接受密钥，请先 ssh-add");
         var last = text.Split('\n').Select(line => line.Trim()).LastOrDefault(line => line.Length > 0);
         return new(SystemSshFailure.Other, "系统 SSH 连接失败" + (last is null ? "" : "：" + last));
     }
@@ -188,7 +188,7 @@ public sealed class SystemSshLink(HostProfile profile, string? config = null) : 
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         Process process;
         try { process = Process.Start(info) ?? throw new Win32Exception(); }
-        catch (Win32Exception) { throw new SystemSshException(SystemSshFailure.Missing, "这台电脑没有 OpenSSH 客户端。请在 Windows“设置 › 系统 › 可选功能”里添加“OpenSSH 客户端”，或改用密码、私钥文件登录。"); }
+        catch (Win32Exception) { throw new SystemSshException(SystemSshFailure.Missing, "未安装 OpenSSH 客户端（设置 › 系统 › 可选功能）"); }
         var run = new ProcessRun(process, input, token, finished => running.TryRemove(finished, out _));
         running[run] = true;
         if (closed) run.Dispose();

@@ -76,7 +76,7 @@ public sealed partial class MainWindow
         Line("服务器", host is null ? null : $"{host.Name}（{LocalState.HostKey(host)}）");
         Line("工作目录", c.Directory);
         Line("会话 ID", c.SessionId);
-        Line("远端任务", local.Tasks.GetValueOrDefault(entry.Key) is { } task ? task + ((IsCurrent(c) ? busy : ParkedFor(c)?.Busy == true) ? "（正在回复）" : "") : "没有保留的任务，继续对话时会重新启动");
+        Line("远端任务", local.Tasks.GetValueOrDefault(entry.Key) is { } task ? task + ((IsCurrent(c) ? busy : ParkedFor(c)?.Busy == true) ? "（正在回复）" : "") : "没有保留的任务");
         Line("状态", string.Join("、", new[] { entry.Pinned ? "已固定" : null, entry.Archived ? "已归档" : null, local.Names.ContainsKey(entry.Key) ? "已在本机重命名" : null }.Where(mark => mark is not null)));
         Line("继续此对话的命令", c.SessionId is null ? null : $"cd {Protocol.Quote(c.Directory)} && claude --resume {c.SessionId}");
         await new ContentDialog { XamlRoot = root.XamlRoot, Title = "对话详情", Content = new ScrollViewer { Content = panel, MaxHeight = 420 }, CloseButtonText = "关闭" }.ShowAsync();
@@ -85,11 +85,11 @@ public sealed partial class MainWindow
     private async Task RemoveAsync(Sessions.Entry entry)
     {
         if (IsCurrent(entry.Conversation) && busy) throw new IOException("请先停止当前回复，再移除对话");
-        if (!IsCurrent(entry.Conversation) && ParkedFor(entry.Conversation)?.Active == true) throw new IOException("这个对话还在后台回复或有排队的消息，请先打开它并停止");
+        if (!IsCurrent(entry.Conversation) && ParkedFor(entry.Conversation)?.Active == true) throw new IOException("请先停止这个对话");
         var dialog = new ContentDialog
         {
             XamlRoot = root.XamlRoot, Title = "从列表移除对话",
-            Content = new TextBlock { Text = $"“{entry.Conversation.Name}”将不再显示在这台电脑的列表里。服务器上的对话记录不会删除。", TextWrapping = TextWrapping.Wrap },
+            Content = new TextBlock { Text = "服务器上的记录不会删除。", TextWrapping = TextWrapping.Wrap },
             PrimaryButtonText = "移除", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
@@ -105,17 +105,17 @@ public sealed partial class MainWindow
     {
         if (busy && conversation?.Directory == path) throw new IOException("请先停止此项目的任务");
         var behind = parked.Values.Where(p => p.Conversation.Directory == path).ToList();
-        if (behind.Any(p => p.Active)) throw new IOException("此项目还有对话在后台回复或排队，请先打开并停止它们");
-        if (behind.Any(p => p.Tasks.Any(item => Presentation.Text(item?["status"]) == "running"))) throw new IOException("此项目还有后台任务在运行，请先在状态页停止它们");
+        if (behind.Any(p => p.Active)) throw new IOException("请先停止此项目的对话");
+        if (behind.Any(p => p.Tasks.Any(item => Presentation.Text(item?["status"]) == "running"))) throw new IOException("请先在状态页停止后台任务");
         // Closing the open conversation's worker would also end what it still runs in the background.
         if (taskId is not null && (conversation?.Directory == path || directory.Text == path) && backgroundTasks.Any(item => Presentation.Text(item?["status"]) == "running"))
-            throw new IOException("此项目还有后台任务在运行，请先在状态页停止它们");
+            throw new IOException("请先在状态页停止后台任务");
         var remote = RequireAgent();
         int count = history.Count(c => c.Directory == path);
         var dialog = new ContentDialog
         {
             XamlRoot = root.XamlRoot, Title = "把项目历史移到废纸篓",
-            Content = new TextBlock { Text = $"{path}\n\n这个目录的 {count} 条对话记录会移到服务器的废纸篓，这些对话在服务器上保留的进程会被关闭。项目里的文件不受影响。", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
+            Content = new TextBlock { Text = $"{path}\n\n{count} 条对话记录移到服务器废纸篓，项目文件不受影响。", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
             PrimaryButtonText = "移到废纸篓", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;

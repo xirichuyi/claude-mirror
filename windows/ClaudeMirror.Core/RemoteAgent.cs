@@ -128,7 +128,7 @@ public sealed class RemoteAgent : IDisposable
                     else pending.TrySetResult(message["result"]?.DeepClone() ?? new JsonObject());
                 }
                 await finished;
-                throw new IOException("SSH 通道已断开，请重新连接；远端任务会保留");
+                throw new IOException("SSH 已断开，远端任务保留");
             }
             catch (Exception e)
             {

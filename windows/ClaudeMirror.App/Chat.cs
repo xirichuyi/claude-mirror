@@ -70,7 +70,7 @@ public sealed partial class MainWindow
     private async Task RewindAsync(string checkpoint)
     {
         if (busy) throw new IOException("请先停止当前回复");
-        if (taskId is null) throw new IOException("这个对话的远端任务已结束，无法回退文件");
+        if (taskId is null) throw new IOException("远端任务已结束，无法回退");
         var remote = RequireAgent(); var task = taskId;
         // A control command answers { ok, value }; the preview is the value.
         var preview = (await remote.TaskCommandAsync(task, new { kind = "control", action = "rewind", value = new { checkpoint, preview = true } }))["value"] ?? new JsonObject();
@@ -79,7 +79,7 @@ public sealed partial class MainWindow
         var panel = new StackPanel { Spacing = 6 };
         panel.Children.Add(new TextBlock
         {
-            Text = !possible ? Presentation.Text(preview["error"]) ?? "这个检查点没有可回退的文件改动。" : $"将把 {changed.Count} 个文件恢复到这条回复之前的内容。对话记录不会改变。",
+            Text = !possible ? Presentation.Text(preview["error"]) ?? "这个检查点没有可回退的文件改动。" : $"恢复 {changed.Count} 个文件，对话记录不变。",
             TextWrapping = TextWrapping.Wrap
         });
         foreach (var file in changed.Take(50)) panel.Children.Add(new TextBlock { Text = file, FontFamily = Mono, FontSize = 12, Foreground = muted, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -155,7 +155,7 @@ public sealed partial class MainWindow
             if (Presentation.Text(request?["message"]) is { } message) panel.Children.Add(new TextBlock { Text = message, FontSize = 13, Foreground = ink, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
             bool link = Presentation.Text(request?["mode"]) == "url" && Uri.TryCreate(Presentation.Text(request?["url"]), UriKind.Absolute, out var url) && url.Scheme is "http" or "https";
             if (link) panel.Children.Add(new HyperlinkButton { Content = "打开 " + Presentation.Text(request?["url"]), NavigateUri = new Uri(Presentation.Text(request!["url"])!), Padding = new Thickness(0) });
-            else panel.Children.Add(new TextBlock { Text = "Windows 版暂不支持填写这种表单，可以取消或拒绝。", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
+            else panel.Children.Add(new TextBlock { Text = "不支持此表单", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
             Choice("取消", false, () => Answer(new { interaction = new { action = "cancel" } }));
             Choice("拒绝", false, () => Answer(new { interaction = new { action = "decline" } }));
             if (link) Choice("已完成，继续", true, () => Answer(new { interaction = new { action = "accept" } }));
