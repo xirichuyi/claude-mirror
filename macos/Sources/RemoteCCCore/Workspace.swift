@@ -328,6 +328,10 @@ public struct TreeRow: Identifiable, Equatable {
             tab.isValidating = false; tab.loadTask = nil
             changed()
             await syncWatches()
+            // The thumbnail is shown first; the original follows on the same channel.
+            if result.thumbnail == true, !original, result.size <= 20 * 1024 * 1024, !tab.isDirty {
+                await open(file, line: line, original: true)
+            }
         } catch {
             guard tab.loadID == id else { return }
             tab.isValidating = false; tab.loadTask = nil
