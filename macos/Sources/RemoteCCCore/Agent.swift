@@ -313,7 +313,7 @@ public final class AgentChannel: @unchecked Sendable {
                 let credit: Int = upload.lock.withLock { upload.failure == nil ? upload.credit : -1 }
                 if credit < 0 { return }
                 if credit == 0 { continue }
-                guard let chunk = try input.read(upToCount: min(credit, 256 * 1024)), !chunk.isEmpty else { break }
+                guard let chunk = try input.read(upToCount: min(credit, 128 * 1024)), !chunk.isEmpty else { break }
                 upload.lock.withLock { upload.credit -= chunk.count }
                 writeFrame(FrameType.data, id, chunk)
                 total += chunk.count

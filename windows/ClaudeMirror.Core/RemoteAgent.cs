@@ -404,7 +404,7 @@ public sealed class RemoteAgent : IDisposable
             var reply = CallAsync(id, "file", new { operation = "write", attachment = true, digest = hash, name, size = file.Length }, TimeSpan.FromHours(24));
             if (await Task.WhenAny(upload.Offset.Task, reply) == reply) await reply;
             file.Position = await upload.Offset.Task;
-            var chunk = new byte[256 * 1024];
+            var chunk = new byte[128 * 1024];
             while (true)
             {
                 var (credit, changed) = upload.State();
