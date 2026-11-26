@@ -19,7 +19,9 @@ final class CutLauncher: RemoteLauncher, @unchecked Sendable {
     init(home: String, limit: Int, stall: Bool = false) { base = LocalLauncher(home: home); self.limit = limit; self.stall = stall }
     func spawn(_ config: ConnectionConfig, command: String) throws -> RemoteProcess {
         guard command.contains("exec node") else { return try base.spawn(config, command: command) }
-        let cut = stall ? "{ head -c \(limit); exec sleep 4; }" : "head -c \(limit)"
+        // `head -c` would hold the bytes in its buffer; this passes each chunk on as it arrives.
+        let after = stall ? "setTimeout(()=>process.exit(0),4000)" : "process.exit(0)"
+        let cut = #"node -e 'let n=\#(limit);process.stdin.on("data",d=>{if(n<=0)return;const s=d.subarray(0,n);n-=s.length;process.stdout.write(s,()=>{if(n<=0)\#(after)})})'"#
         return try base.spawn(config, command: "{ \(command); } | \(cut)")
     }
 }

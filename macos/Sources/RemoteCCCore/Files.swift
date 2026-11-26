@@ -201,6 +201,7 @@ public final class RemoteFiles: @unchecked Sendable {
         let target = partial ?? destination
         let existing = partial.flatMap { (try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? NSNumber)?.intValue } ?? 0
         let offset = existing <= size ? existing : 0
+        if partial != nil { try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true) }
         if offset == 0 || partial == nil {
             guard FileManager.default.createFile(atPath: target.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw RemoteError("无法写入本地文件") }
         }
@@ -223,9 +224,11 @@ public final class RemoteFiles: @unchecked Sendable {
             }
             try output.close()
             guard counter.bytes == size else { throw RemoteError("下载未完成（\(counter.bytes)/\(size)），可重试") }
-            if let partial {
+            if let partial, rename(partial.path, destination.path) != 0 {
+                guard errno == EXDEV else { throw RemoteError("无法写入本地文件：" + String(cString: strerror(errno))) }
                 try? FileManager.default.removeItem(at: destination)
-                try FileManager.default.moveItem(at: partial, to: destination)
+                try FileManager.default.copyItem(at: partial, to: destination)
+                try? FileManager.default.removeItem(at: partial)
             }
         } catch {
             try? output.close()
