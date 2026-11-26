@@ -1350,6 +1350,7 @@ function frame(type, id, payload = Buffer.alloc(0)) {
 function inbox() {
   const items = []; let wake = null;
   return {
+    save: null as null | (() => void),
     push(item) { items.push(item); const resume = wake; wake = null; resume?.(); },
     async next() { while (!items.length) await new Promise(resume => wake = resume); return items.shift(); },
   };
@@ -1393,22 +1394,23 @@ async function framedWrite(id, request, token, wire) {
   const partial = path.join(folder, '.remotecc-partial');
   const temporary = temporaryName(folder, 'upload');
   const hash = cached ? crypto.createHash('sha256') : null;
-  let offset = 0;
+  let offset = 0, claimed = false;
   if (cached) {
     try {
       await fsp.rename(partial, temporary);
       const info = await fsp.lstat(temporary);
       if (info.isFile() && info.size <= request.size) {
         for await (const chunk of fs.createReadStream(temporary)) hash.update(chunk);
-        offset = info.size;
+        offset = info.size; claimed = true;
       } else await fsp.rm(temporary, { force: true });
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
-  const target = await fsp.open(temporary, offset ? 'a' : 'wx', 0o600);
+  const target = await fsp.open(temporary, claimed ? 'a' : 'wx', 0o600);
   const box = inbox();
+  // Called when the channel dies; the bytes already on disk are what the next upload resumes from.
+  if (cached) box.save = () => { try { fs.renameSync(temporary, partial); } catch { /* Nothing kept. */ } };
   wire.uploads.set(id, box);
   token.cancel = () => box.push({ error: '已取消' });
-  let keep = false;
   try {
     wire.send({ stream: id, offset });
     const grant = bytes => { const value = Buffer.alloc(4); value.writeUInt32BE(bytes); return wire.write(frame(FRAME.CREDIT, id, value)); };
@@ -1416,7 +1418,7 @@ async function framedWrite(id, request, token, wire) {
     let received = offset;
     for (;;) {
       const item = await box.next();
-      if (item.error !== undefined) { keep = cached && item.error === ''; throw new Error(item.error || '上传未完成'); }
+      if (item.error !== undefined) throw new Error(item.error);
       if (item.end) break;
       received += item.data.length;
       if (received > request.size) throw new Error('上传大小不匹配');
@@ -1441,8 +1443,7 @@ async function framedWrite(id, request, token, wire) {
   } finally {
     wire.uploads.delete(id);
     await target.close().catch(() => {});
-    if (keep) await fsp.rename(temporary, partial).catch(() => fsp.rm(temporary, { force: true }));
-    else await fsp.rm(temporary, { force: true });
+    await fsp.rm(temporary, { force: true });
   }
 }
 
@@ -1543,14 +1544,13 @@ function serve() {
     if (!framed) lines();
     if (framed) frames();
   });
-  process.stdin.on('end', () => {
-    // Keep resumable attachment uploads on disk before exiting.
-    if (!wire.uploads.size) process.exit(0);
-    for (const box of wire.uploads.values()) box.push({ error: '' });
-    setTimeout(() => process.exit(0), 200);
-    setInterval(() => { if (!wire.uploads.size) process.exit(0); }, 10);
-  }); // The SSH channel closed; detached tasks keep running.
-  process.stdout.on('error', () => process.exit(0));
+  // The SSH channel closed; detached tasks keep running.
+  const closed = () => {
+    for (const box of wire.uploads.values()) box.save?.();
+    process.exit(0);
+  };
+  process.stdin.on('end', closed);
+  process.stdout.on('error', closed);
   send({ rcc: 'ready', pid: process.pid });
 }
 

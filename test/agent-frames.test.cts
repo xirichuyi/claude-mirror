@@ -174,3 +174,25 @@ test('an upload never treats an existing attachment as its partial, and concurre
     assert.ok(fs.readFileSync(two).equals(content));
   } finally { first.close(); second.close(); }
 });
+
+test('an upload dropped before its first byte can be retried', async () => {
+  const content = crypto.randomBytes(1000);
+  const digest = crypto.createHash('sha256').update(content).digest('hex');
+  const params = { operation: 'write', attachment: true, digest, name: 'empty-start.bin', size: content.length };
+  const first = framedAgent();
+  first.request(2, 'file', params);
+  await first.until(() => first.frames.find(item => item.type === 5 && item.id === 2));
+  first.child.stdin.end();
+  await new Promise(wake => first.child.once('exit', wake));
+  const second = framedAgent();
+  try {
+    second.request(2, 'file', params);
+    assert.equal((await second.json(message => message.stream === 2)).offset, 0);
+    second.child.stdin.write(frame(3, 2, content));
+    second.child.stdin.write(frame(4, 2));
+    const reply = await second.json(message => message.id === 2);
+    assert.equal(reply.error, undefined);
+    assert.ok(fs.readFileSync(reply.result.path).equals(content));
+    assert.deepEqual(fs.readdirSync(path.dirname(reply.result.path)), ['empty-start.bin']);
+  } finally { second.close(); }
+});
