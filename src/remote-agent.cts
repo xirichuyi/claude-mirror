@@ -1337,12 +1337,132 @@ function createDirectoryWatcher(emit) {
 
 // ---------------------------------------------------------------- RPC
 
+// ---------------------------------------------------------------- framed transfers (docs/agent-wire.md)
+
+const FRAME = { JSON: 1, BLOB: 2, DATA: 3, END: 4, CREDIT: 5 };
+const FRAME_CHUNK = 256 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = MEGABYTE + 1024;
+const SKIP_REPLY = Symbol('skip reply');
+function frame(type, id, payload = Buffer.alloc(0)) {
+  const head = Buffer.alloc(9);
+  head.writeUInt32BE(5 + payload.length, 0); head.writeUInt8(type, 4); head.writeUInt32BE(id >>> 0, 5);
+  return Buffer.concat([head, payload]);
+}
+function inbox() {
+  const items = []; let wake = null;
+  return {
+    push(item) { items.push(item); const resume = wake; wake = null; resume?.(); },
+    async next() { while (!items.length) await new Promise(resume => wake = resume); return items.shift(); },
+  };
+}
+
+async function framedRead(id, request, token, wire) {
+  const filename = resolve(request.path, request.base);
+  const before = await regular(filename);
+  if (request.version && request.version !== before.version) throw new Error('远端文件已变化，请重试');
+  const offset = Math.max(0, Math.min(Number.isInteger(request.offset) ? request.offset : 0, before.size));
+  const stream = { credit: Math.max(FRAME_CHUNK, Math.min(Number.isInteger(request.window) ? request.window : FRAME_WINDOW, 4 * MEGABYTE)), wake: null };
+  const source = await fsp.open(filename, 'r');
+  wire.credits.set(id, stream);
+  token.cancel = () => { const resume = stream.wake; stream.wake = null; resume?.(); };
+  wire.send({ id, result: { size: before.size, version: before.version, offset } });
+  try {
+    let position = offset;
+    while (position < before.size) {
+      if (token.cancelled) throw new Error('已取消');
+      if (stream.credit <= 0) { await new Promise(resume => stream.wake = resume); continue; }
+      const buffer = Buffer.allocUnsafe(Math.min(FRAME_CHUNK, stream.credit, before.size - position));
+      const { bytesRead } = await source.read(buffer, 0, buffer.length, position);
+      if (!bytesRead) throw new Error('传输期间远端文件已变化，请重试');
+      stream.credit -= bytesRead; position += bytesRead;
+      await wire.write(frame(FRAME.DATA, id, buffer.subarray(0, bytesRead)));
+    }
+    if ((await regular(filename)).version !== before.version) throw new Error('传输期间远端文件已变化，请重试');
+    await wire.write(frame(FRAME.END, id));
+  } catch (error) { await wire.write(frame(FRAME.END, id, Buffer.from(error.message || '读取失败'))); }
+  finally { wire.credits.delete(id); await source.close().catch(() => {}); }
+  return SKIP_REPLY;
+}
+
+async function framedWrite(id, request, token, wire) {
+  const cached = request.attachment === true;
+  if (!Number.isInteger(request.size) || request.size < 0 || request.size > 1024 ** 3) throw new Error('文件大小超出限制（1 GB）');
+  const destination = cached ? await attachmentLocation(request) : path.join(resolve(request.directory), checkName(request.name));
+  const folder = path.dirname(destination);
+  // An attachment's folder is private and named by its digest, so a partial upload there can be resumed.
+  const temporary = cached ? destination + '.partial' : temporaryName(folder, 'upload');
+  const hash = cached ? crypto.createHash('sha256') : null;
+  let offset = 0;
+  if (cached) {
+    try {
+      const info = await fsp.lstat(temporary);
+      if (info.isFile() && info.size <= request.size) {
+        for await (const chunk of fs.createReadStream(temporary)) hash.update(chunk);
+        offset = info.size;
+      } else await fsp.rm(temporary, { force: true });
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  const target = await fsp.open(temporary, cached ? 'a' : 'wx', 0o600);
+  const box = inbox();
+  wire.uploads.set(id, box);
+  token.cancel = () => box.push({ error: '已取消' });
+  let keep = false;
+  try {
+    wire.send({ stream: id, offset });
+    const grant = bytes => { const value = Buffer.alloc(4); value.writeUInt32BE(bytes); return wire.write(frame(FRAME.CREDIT, id, value)); };
+    await grant(FRAME_WINDOW);
+    let received = offset;
+    for (;;) {
+      const item = await box.next();
+      if (item.error !== undefined) { keep = cached && item.error === ''; throw new Error(item.error || '上传未完成'); }
+      if (item.end) break;
+      received += item.data.length;
+      if (received > request.size) throw new Error('上传大小不匹配');
+      hash?.update(item.data);
+      await target.write(item.data);
+      await grant(item.data.length);
+    }
+    if (received !== request.size) throw new Error('上传未完成');
+    if (hash && hash.digest('hex') !== request.digest) throw new Error('文件在上传期间发生变化，请重试');
+    await target.sync();
+    if (!cached) await target.chmod(0o666 & ~process.umask());
+    await target.close();
+    if (cached) {
+      const existing = await matchingAttachment(destination, request.digest);
+      if (existing) return existing;
+      await fsp.rename(temporary, destination);
+      return await metadata(destination);
+    }
+    try { await fsp.link(temporary, destination); }
+    catch (error) { if (error.code === 'EEXIST') throw new Error('同名文件已存在：' + path.basename(destination)); throw error; }
+    return await metadata(destination);
+  } finally {
+    wire.uploads.delete(id);
+    await target.close().catch(() => {});
+    if (!keep) await fsp.rm(temporary, { force: true });
+  }
+}
+
 function serve() {
   const tokens = new Map();
-  const send = value => process.stdout.write(JSON.stringify(value) + '\n');
+  let framed = false;
+  const write = data => process.stdout.write(data) ? Promise.resolve() : new Promise(resume => process.stdout.once('drain', resume));
+  const send = value => {
+    if (!framed) return void process.stdout.write(JSON.stringify(value) + '\n');
+    if (typeof value.result?.inlineData === 'string') {
+      const { inlineData, ...result } = value.result;
+      const bytes = Buffer.from(inlineData, 'base64');
+      const reply = Buffer.from(JSON.stringify({ ...value, result: { ...result, inlineBytes: bytes.length } }));
+      const length = Buffer.alloc(4); length.writeUInt32BE(reply.length);
+      return void write(frame(FRAME.BLOB, value.id, Buffer.concat([length, reply, bytes])));
+    }
+    void write(frame(FRAME.JSON, 0, Buffer.from(JSON.stringify(value))));
+  };
+  const wire = { send, write, credits: new Map(), uploads: new Map() };
   const watcher = createDirectoryWatcher(data => send({ event: 'fs', ...data }));
   const operations = {
-    file: (request, token) => {
+    file: (request, token, id) => {
+      if (framed && request.operation === 'read') return framedRead(id, request, token, wire);
+      if (framed && request.operation === 'write') return framedWrite(id, request, token, wire);
       const operation = fileOperations[request.operation];
       if (!operation) throw new Error('未知操作');
       return operation(request, token);
@@ -1374,23 +1494,58 @@ function serve() {
     try {
       const operation = operations[message.op];
       if (!operation) throw new Error('未知请求');
-      send({ id: message.id, result: await operation(message.params || {}, token) });
+      const result = await operation(message.params || {}, token, message.id);
+      if (result !== SKIP_REPLY) send({ id: message.id, result });
     } catch (error) { send({ id: message.id, error: error.message }); }
     finally { tokens.delete(message.id); }
   };
-  let buffered = '';
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', data => {
-    buffered += data;
-    let index;
-    while ((index = buffered.indexOf('\n')) >= 0) {
-      const line = buffered.slice(0, index);
-      buffered = buffered.slice(index + 1);
-      if (!line) continue;
-      try { void handle(JSON.parse(line)); } catch (error) { process.stderr.write(error.message + '\n'); }
+  let buffered = Buffer.alloc(0);
+  const dispatch = (type, id, payload) => {
+    if (type === FRAME.JSON) void handle(JSON.parse(payload.toString('utf8')));
+    else if (type === FRAME.DATA) wire.uploads.get(id)?.push({ data: payload });
+    else if (type === FRAME.END) wire.uploads.get(id)?.push(payload.length ? { error: payload.toString('utf8') } : { end: true });
+    else if (type === FRAME.CREDIT && payload.length >= 4) {
+      const stream = wire.credits.get(id);
+      if (stream) { stream.credit += payload.readUInt32BE(0); const resume = stream.wake; stream.wake = null; resume?.(); }
     }
+  };
+  const frames = () => {
+    while (buffered.length >= 4) {
+      const length = buffered.readUInt32BE(0);
+      if (length < 5 || length > MAX_FRAME) { process.stderr.write('bad frame\n'); process.exit(1); }
+      if (buffered.length < 4 + length) return;
+      const type = buffered[4], id = buffered.readUInt32BE(5), payload = buffered.subarray(9, 4 + length);
+      buffered = buffered.subarray(4 + length);
+      try { dispatch(type, id, payload); } catch (error) { process.stderr.write(error.message + '\n'); }
+    }
+  };
+  const lines = () => {
+    let index;
+    while (!framed && (index = buffered.indexOf(10)) >= 0) {
+      const line = buffered.subarray(0, index).toString('utf8');
+      buffered = buffered.subarray(index + 1);
+      if (!line) continue;
+      try {
+        const message = JSON.parse(line);
+        if (message.op === 'frames') {
+          send({ id: message.id, result: { version: 1, chunk: FRAME_CHUNK, window: FRAME_WINDOW } });
+          framed = true;
+        } else void handle(message);
+      } catch (error) { process.stderr.write(error.message + '\n'); }
+    }
+  };
+  process.stdin.on('data', data => {
+    buffered = buffered.length ? Buffer.concat([buffered, data]) : data;
+    if (!framed) lines();
+    if (framed) frames();
   });
-  process.stdin.on('end', () => process.exit(0)); // The SSH channel closed; detached tasks keep running.
+  process.stdin.on('end', () => {
+    // Keep resumable attachment uploads on disk before exiting.
+    if (!wire.uploads.size) process.exit(0);
+    for (const box of wire.uploads.values()) box.push({ error: '' });
+    setTimeout(() => process.exit(0), 200);
+    setInterval(() => { if (!wire.uploads.size) process.exit(0); }, 10);
+  }); // The SSH channel closed; detached tasks keep running.
   process.stdout.on('error', () => process.exit(0));
   send({ rcc: 'ready', pid: process.pid });
 }
