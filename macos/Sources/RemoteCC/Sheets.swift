@@ -58,7 +58,7 @@ struct PreferencesSheet: View {
                     .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             }
             if capabilities.permissionStatus?.requiresExecutionUser == true || !executionUser.isEmpty {
-                TextField("Claude 执行账号（例如 claude-runner）", text: $executionUser)
+                TextField("Claude 执行账号（留空以 SSH 用户运行）", text: $executionUser)
                     .disabled(session?.messages.isEmpty == false || session?.remoteSessionId != nil || session?.remoteOwner != nil)
             }
             DisclosureGroup("高级选项", isExpanded: $advanced) {

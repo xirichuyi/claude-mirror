@@ -73,7 +73,8 @@ export function resolveClaudeExecution(directory: string, preferences: import('.
 }
 
 export function permissionStatus(execution: ClaudeExecution) {
-  return { fullAccessAvailable: true, requiresExecutionUser: false, executionUser: execution.user };
+  // requiresExecutionUser keeps its old name for older clients: a root login may pick an account to run as.
+  return { fullAccessAvailable: true, requiresExecutionUser: execution.uid === 0, executionUser: execution.user };
 }
 
 export function executionEnvironment(execution: ClaudeExecution, environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

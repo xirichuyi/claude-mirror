@@ -11,7 +11,7 @@ test('a root login runs Full Access as root, marked as a sandbox for Claude', ()
   const root = { uid: 0, user: 'root', home: '/root', cwd: '/tmp', executable: '/bin/true' };
   assert.equal(executionEnvironment(root, { HOME: '/root' }).IS_SANDBOX, '1');
   assert.equal(executionEnvironment({ ...root, uid: 1000, user: 'dev', home: '/home/dev' }, { HOME: '/home/dev' }).IS_SANDBOX, undefined);
-  assert.deepEqual(permissionStatus(root), { fullAccessAvailable: true, requiresExecutionUser: false, executionUser: 'root' });
+  assert.deepEqual(permissionStatus(root), { fullAccessAvailable: true, requiresExecutionUser: true, executionUser: 'root' });
   assert.throws(() => preferencePatch({ executionUser: 'test;id' }));
   assert.equal(preferencePatch({ executionUser: 'claude-runner' }).executionUser, 'claude-runner');
 });
@@ -39,10 +39,10 @@ test('launcher actually drops UID and preserves argument boundaries', { skip: pr
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('root preflight offers Full Access without an execution account', { skip: process.getuid?.() !== 0 }, async () => {
+test('root preflight offers Full Access and an optional execution account', { skip: process.getuid?.() !== 0 }, async () => {
   const { execFileSync } = await import('node:child_process');
   const inspect = (preferences: object) => JSON.parse(execFileSync(process.execPath, [path.join(__dirname, '../src/task-inspect.cjs'), JSON.stringify({ action: 'permissionStatus', directory: '/tmp', preferences })], { encoding: 'utf8', env: { ...process.env, REMOTECC_CLAUDE_PATH: '/bin/true' } }).trim());
-  assert.equal(inspect({}).result.requiresExecutionUser, false);
+  assert.equal(inspect({}).result.requiresExecutionUser, true);
   assert.equal(inspect({ permissionMode: 'bypassPermissions' }).result.fullAccessAvailable, true);
   assert.match(inspect({ executionUser: 'bad;id' }).error, /无效/);
 });

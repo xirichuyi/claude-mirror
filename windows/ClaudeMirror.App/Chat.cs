@@ -250,7 +250,7 @@ public sealed partial class MainWindow
         var current = FullAccessStatus.From(await remote.CallAsync("task", new { operation = "inspect", digest = remote.Digest, directory = directory.Text, action = "permissionStatus", preferences = new { executionUser } }));
         var panel = new StackPanel { Spacing = 10, MaxWidth = 420 };
         panel.Children.Add(new TextBlock { Text = current.Account == "root" && executionUser.Length == 0 ? "跳过所有确认 · root" : "跳过所有确认", TextWrapping = TextWrapping.Wrap });
-        var account = new TextBox { Header = "Claude 执行账号", PlaceholderText = "例如 claude-runner", Text = executionUser, IsEnabled = !started };
+        var account = new TextBox { Header = "Claude 执行账号", PlaceholderText = "留空以 SSH 用户运行", Text = executionUser, IsEnabled = !started };
         var problem = new TextBlock { Foreground = danger, FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         if (current.NeedsAccount || executionUser.Length > 0)
         {
