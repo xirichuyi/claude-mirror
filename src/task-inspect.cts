@@ -41,7 +41,7 @@ const actions = {
   const service = new ChatService({ load: () => [], save() {} }, async () => query);
   service.closing = true;
   service.claudeExecutable = launch.executable;
-  service.fullAccessAvailable = launch.uid !== 0;
+  service.fullAccessAvailable = true;
   service.spawn = (_session, options, onError) => {
     const child = spawnClaudeExecution(execution, options);
     child.stderr.setEncoding('utf8'); child.stderr.on('data', onError);

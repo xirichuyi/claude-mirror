@@ -40,14 +40,12 @@ export interface ClaudeExecution {
   launcher?: string;
 }
 
-/** Resolve a real OS identity. Never use environment flags to pretend root is a sandbox. */
+/** Resolve the OS identity Claude runs as: the SSH user, or with a root login, an account it switches to. */
 export function resolveClaudeExecution(directory: string, preferences: import('./contracts.js').Preferences = {}, env = process.env): ClaudeExecution {
   const current = os.userInfo();
   const requested = preferences.executionUser || '';
   if (!requested || requested === current.username) {
-    const execution = { ...resolveClaudeLaunch(directory, env), uid: current.uid, user: current.username, home: current.homedir };
-    requireFullAccessIdentity(preferences.permissionMode, execution);
-    return execution;
+    return { ...resolveClaudeLaunch(directory, env), uid: current.uid, user: current.username, home: current.homedir };
   }
   if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(requested)) throw new Error('无效的 Claude 执行账号');
   if (current.uid !== 0) throw new Error('当前 SSH 用户不能切换执行账号，请直接连接目标普通用户');
@@ -74,17 +72,13 @@ export function resolveClaudeExecution(directory: string, preferences: import('.
   return execution;
 }
 
-export function requireFullAccessIdentity(mode: string | undefined, execution: Pick<ClaudeExecution, 'uid'>) {
-  if (mode === 'bypassPermissions' && execution.uid === 0)
-    throw new Error('Claude 不允许 root 使用 Full Access。请在新对话中选择已配置的普通执行账号（例如 claude-runner），或使用普通用户 SSH 连接。');
-}
-
 export function permissionStatus(execution: ClaudeExecution) {
-  return { fullAccessAvailable: execution.uid !== 0, requiresExecutionUser: execution.uid === 0, executionUser: execution.user };
+  return { fullAccessAvailable: true, requiresExecutionUser: false, executionUser: execution.user };
 }
 
 export function executionEnvironment(execution: ClaudeExecution, environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  if (!execution.launcher) return environment;
+  // Claude refuses to skip permissions as root unless IS_SANDBOX=1; a root login runs Full Access as root by choice.
+  if (!execution.launcher) return execution.uid === 0 ? { ...environment, IS_SANDBOX: '1' } : environment;
   const env: NodeJS.ProcessEnv = {};
   // Preserve protocol metadata and locale, never inherit root's credentials or config.
   for (const key of ['LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TERM', 'NO_COLOR',

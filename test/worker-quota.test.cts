@@ -15,7 +15,7 @@ async function runWorker(mode) {
     // Accelerate only the monitor clock; exercise the real worker and quota policy.
     const worker = path.join(dir, 'task-worker.cjs');
     fs.writeFileSync(worker, fs.readFileSync(worker, 'utf8').replace('}, 5000)', '}, 25)').replace('path.dirname(folder)', 'folder'));
-    fs.writeFileSync(path.join(dir, 'claude-launch.cjs'), 'exports.resolveClaudeExecution=d=>({cwd:d,executable:"unused",uid:1000,user:"test"});exports.permissionStatus=e=>({fullAccessAvailable:true,executionUser:e.user});exports.requireFullAccessIdentity=()=>{};exports.validateDirectory=()=>{};');
+    fs.writeFileSync(path.join(dir, 'claude-launch.cjs'), 'exports.resolveClaudeExecution=d=>({cwd:d,executable:"unused",uid:1000,user:"test"});exports.permissionStatus=e=>({fullAccessAvailable:true,executionUser:e.user});exports.validateDirectory=()=>{};');
     fs.writeFileSync(path.join(dir, 'checkpoint-control.cjs'), 'exports.checkpointControl=()=>()=>{};');
     fs.writeFileSync(path.join(dir, 'capabilities.cjs'), 'exports.catalogue=async()=>({});');
     fs.writeFileSync(path.join(dir, 'transcript.cjs'), 'exports.Transcript=class{};');

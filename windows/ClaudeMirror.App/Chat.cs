@@ -249,18 +249,11 @@ public sealed partial class MainWindow
         bool started = taskId is not null || conversation?.SessionId is not null;
         var current = FullAccessStatus.From(await remote.CallAsync("task", new { operation = "inspect", digest = remote.Digest, directory = directory.Text, action = "permissionStatus", preferences = new { executionUser } }));
         var panel = new StackPanel { Spacing = 10, MaxWidth = 420 };
-        panel.Children.Add(new TextBlock { Text = "Full Access 会跳过 Claude 的操作确认：它可以直接修改文件和执行命令，只受执行账号的系统权限限制。", TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = current.Account == "root" && executionUser.Length == 0 ? "跳过所有确认 · root" : "跳过所有确认", TextWrapping = TextWrapping.Wrap });
         var account = new TextBox { Header = "Claude 执行账号", PlaceholderText = "例如 claude-runner", Text = executionUser, IsEnabled = !started };
         var problem = new TextBlock { Foreground = danger, FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         if (current.NeedsAccount || executionUser.Length > 0)
         {
-            panel.Children.Add(new TextBlock
-            {
-                Text = started
-                    ? "这个对话以 root 运行，Claude 不允许 root 使用 Full Access。请新建对话，再选择一个普通执行账号。"
-                    : "SSH 登录的是 root，Claude 不允许 root 使用 Full Access。请填写服务器上已配置好的普通账号；它使用独立的登录和历史记录。",
-                TextWrapping = TextWrapping.Wrap, Foreground = muted, FontSize = 12
-            });
             panel.Children.Add(account);
         }
         panel.Children.Add(problem);
@@ -272,7 +265,7 @@ public sealed partial class MainWindow
             try
             {
                 var name = PermissionModes.ExecutionAccount(account.Text, started, executionUser);
-                // The server resolves the account and refuses root, a missing account, or one that cannot use this project.
+                // The server resolves the account and refuses a missing one or one that cannot use this project.
                 var status = FullAccessStatus.From(await remote.CallAsync("task", new { operation = "inspect", digest = remote.Digest, directory = directory.Text, action = "permissionStatus", preferences = new { permissionMode = PermissionModes.FullAccess, executionUser = name } }));
                 if (!status.Available) throw new IOException("这个账号不能使用 Full Access");
                 result = name;

@@ -106,7 +106,7 @@ public static class PermissionModes
     public static IEnumerable<(string Value, string Label, string Hint)> For(bool autoSupported) =>
         All.Where(mode => mode.Value != "auto" || autoSupported);
     public static string Label(string value) => All.FirstOrDefault(mode => mode.Value == value).Label ?? value;
-    /// <summary>The account name Claude runs as, or an error. Root cannot run Full Access, and the account can only be chosen before the conversation starts.</summary>
+    /// <summary>The account name Claude runs as, or an error. The account can only be chosen before the conversation starts.</summary>
     public static string ExecutionAccount(string? typed, bool conversationStarted, string current)
     {
         var name = (typed ?? "").Trim();

@@ -15,7 +15,7 @@ for (const staleBusy of [false, true]) test(`worker exits after quiescence and r
     fs.writeFileSync(path.join(dir,'idle-policy.cjs'), `const {IdlePolicy:Base}=require(${JSON.stringify(policy)});exports.IdlePolicy=class extends Base{constructor(){super(50)}};`);
     const workerPath = path.join(dir, 'task-worker.cjs');
     fs.writeFileSync(workerPath, fs.readFileSync(workerPath, 'utf8').replace('path.dirname(folder)', 'folder'));
-    fs.writeFileSync(path.join(dir,'claude-launch.cjs'), 'exports.resolveClaudeExecution=d=>({cwd:d,executable:"unused",uid:1000,user:"test"});exports.permissionStatus=e=>({fullAccessAvailable:true,executionUser:e.user});exports.requireFullAccessIdentity=()=>{};exports.validateDirectory=()=>{};');
+    fs.writeFileSync(path.join(dir,'claude-launch.cjs'), 'exports.resolveClaudeExecution=d=>({cwd:d,executable:"unused",uid:1000,user:"test"});exports.permissionStatus=e=>({fullAccessAvailable:true,executionUser:e.user});exports.validateDirectory=()=>{};');
     fs.writeFileSync(path.join(dir,'checkpoint-control.cjs'), 'exports.checkpointControl=()=>()=>{};');
     fs.writeFileSync(path.join(dir,'capabilities.cjs'), 'exports.catalogue=async()=>({});exports.preferencePatch=x=>x;');
     fs.writeFileSync(path.join(dir,'transcript.cjs'), 'exports.Transcript=class{};');
