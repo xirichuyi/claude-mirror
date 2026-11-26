@@ -84,6 +84,7 @@ class FakeAgent : Launcher {
 
     private fun answer(request: JsonObject) {
         val id = request["id"] ?: return
+        if (request["op"].string() == "frames") { send(buildJsonObject { put("id", id); put("error", "未知请求") }); return }
         val params = request["params"]!!.jsonObject
         val result: JsonElement = when (request["op"].string()) {
             "file" -> if (params["operation"].string() == "list") listing else json("""{"home":"/home/dev","hostname":"box","node":"v22.1.0","nodeSupported":true}""")

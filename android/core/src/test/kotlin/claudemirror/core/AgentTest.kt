@@ -61,14 +61,13 @@ class AgentTest {
                 assertEquals("a_b's \"photo\".png", first.name)
                 assertTrue(File(first.path).readBytes().contentEquals(bytes))
                 assertEquals(bytes.size.toLong(), progress)
-                assertEquals(before + 1, launches.size)
+                assertEquals("the bytes go over the agent's own channel", before, launches.size)
                 assertEquals(first, pool.upload(testHost, "a/b's \"photo\".png", bytes.size.toLong(), digest, { bytes.inputStream() }))
-                assertEquals("nothing is sent the second time", before + 1, launches.size)
                 val refused = runCatching { pool.upload(testHost, "other.bin", bytes.size.toLong(), "0".repeat(64), { bytes.inputStream() }) }.exceptionOrNull()
                 assertTrue(refused is RemoteException)
             } finally { File(first.path).parentFile!!.deleteRecursively() }
 
-            // Taking a file back while it is being sent ends the command, from a thread that may talk to the server.
+            // Taking a file back while it is being sent tells the agent at once; the channel stays up.
             val caller = Executors.newSingleThreadExecutor { Thread(it, "caller") }
             try {
                 val reached = CountDownLatch(1)
@@ -85,12 +84,15 @@ class AgentTest {
                 val sending = launch(caller.asCoroutineDispatcher()) { pool.upload(testHost, "slow.bin", 1_000_000, "1".repeat(64), { slow }) }
                 assertTrue(reached.await(30, TimeUnit.SECONDS))
                 sending.cancel()
+                val attachments = File(System.getProperty("java.io.tmpdir"), "claudock-attachments-" + java.nio.file.Files.getAttribute(home.toPath(), "unix:uid"))
                 val deadline = System.currentTimeMillis() + 30_000
-                while (killers.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
+                fun leftovers() = attachments.walkTopDown().count { it.name.startsWith(".remotecc-upload") }
+                while (leftovers() > 0 && System.currentTimeMillis() < deadline) Thread.sleep(10)
                 release.countDown()
                 sending.join()
-                assertEquals(1, killers.size)
-                assertTrue(killers.single(), killers.single() != "caller")
+                assertEquals(0, leftovers())
+                assertTrue(killers.isEmpty())
+                assertTrue(pool.call(testHost, "file", buildJsonObject { put("operation", "hello") }).obj()!!["home"] != null)
             } finally { caller.shutdown() }
 
             pool.close(testHost)
