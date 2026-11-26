@@ -154,7 +154,7 @@ public sealed class RemoteAgent : IDisposable
                         {
                             if (length - position < 4) break;
                             var size = BinaryPrimitives.ReadInt32BigEndian(buffer.AsSpan(position));
-                            if (size < 5 || size > 2 * 1024 * 1024) throw new IOException("远端代理数据损坏");
+                            if (size < 5 || size > 64 * 1024 * 1024) throw new IOException("远端代理数据损坏");
                             if (length - position < 4 + size) break;
                             var type = buffer[position + 4];
                             var id = BinaryPrimitives.ReadInt32BigEndian(buffer.AsSpan(position + 5));

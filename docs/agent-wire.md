@@ -8,7 +8,7 @@ use binary frames. The client sends nothing else after the upgrade line until th
 ## Frame
 
 ```
-[u32 length][u8 type][u32 id][payload]     big endian; length = 5 + payload bytes, at most 1 MiB + 1024
+[u32 length][u8 type][u32 id][payload]     big endian; length = 5 + payload bytes, at most 64 MiB
 ```
 
 | type | id | payload |
@@ -31,6 +31,6 @@ a change gives an END error. `{"cancel": id}` stops the stream with END `已取�
 ## Upload: `file` / `write`
 
 `params`: the fields of the old `transfer upload` request (`attachment`, `digest`, `name`, `directory`, `size`).
-The agent answers with JSON `{"stream":id,"offset":n}`. `n > 0` only for an attachment whose partial upload
-(same digest) is still on the server; the client sends from there. Then it sends CREDIT; the client sends DATA within it and END.
+The agent answers with JSON `{"stream":id,"offset":n}`. `n > 0` only for an attachment whose broken upload
+(same digest, kept as `.remotecc-partial` in its folder) is still there and no other upload has taken it; the client sends from there. Then it sends CREDIT; the client sends DATA within it and END.
 The final reply `{id, result}` is the stored file's metadata, as before.

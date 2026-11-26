@@ -145,7 +145,7 @@ struct WireBuffer {
                 let available = pending.endIndex - start
                 guard available >= 4 else { break }
                 let length = Int(Self.uint32(pending, start))
-                guard length >= 5, length <= 2 * 1024 * 1024 else { pending = Data(); return }
+                guard length >= 5, length <= 64 * 1024 * 1024 else { pending = Data(); return }
                 guard available >= 4 + length else { break }
                 frame(pending[start + 4], Int(Self.uint32(pending, start + 5)), Data(pending[(start + 9)..<(start + 4 + length)]))
                 start += 4 + length
