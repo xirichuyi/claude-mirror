@@ -79,7 +79,7 @@ fun MirrorApp(model: AppModel) {
                 onDismissRequest = { model.trust.value = null },
                 title = { Text("确认服务器密钥") },
                 text = {
-                    Text("${request.host.address}\n\n${request.fingerprint}", fontFamily = FontFamily.Default)
+                    Text("${request.host.address}\n\n${request.fingerprint}\n\nssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub", fontFamily = FontFamily.Default)
                 },
                 confirmButton = { TextButton(onClick = { model.acceptKey(request) }) { Text("指纹一致，连接") } },
                 dismissButton = { TextButton(onClick = { model.trust.value = null }) { Text("取消") } },
