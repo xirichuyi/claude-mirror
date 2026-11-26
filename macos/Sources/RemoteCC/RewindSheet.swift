@@ -13,7 +13,7 @@ struct RewindSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             SheetHeading(title: "回退本轮之前的文件") { dismiss() }.disabled(busy)
-            Text("聊天记录不变；Bash 和子代理的修改可能不会恢复。").font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
+            Text("本轮新建的文件会被删除；聊天记录不变，Bash 和子代理的修改可能不会恢复。").font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
             if busy { ProgressView("正在处理…") }
             if let preview {
                 ScrollView { VStack(alignment: .leading, spacing: 6) {
