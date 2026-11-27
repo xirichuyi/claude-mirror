@@ -9,6 +9,7 @@ import java.util.Base64
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import net.schmizz.keepalive.KeepAliveProvider
+import net.schmizz.keepalive.KeepAliveRunner
 import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.common.Buffer
@@ -106,6 +107,10 @@ class SshLauncher(
             override fun findExistingAlgorithms(hostname: String, port: Int): List<String> = emptyList()
         })
         client.connectTimeout = 15_000
+        // A dead network is noticed after about 20 seconds of unanswered keep-alives.
+        // Set before connecting: sshj starts the keep-alive thread only if it is enabled when the connection opens.
+        client.connection.keepAlive.keepAliveInterval = 5
+        (client.connection.keepAlive as? KeepAliveRunner)?.maxAliveCount = 4
         // Without this a server that accepts the connection and then says nothing is waited for forever.
         client.timeout = handshakeTimeoutMs
         try {
@@ -120,7 +125,6 @@ class SshLauncher(
                 }
                 throw RemoteException("无法连接 ${host.host}:${host.port}" + (why?.let { "：$it" } ?: ""), confirmed = false)
             }
-            client.connection.keepAlive.keepAliveInterval = 15
             val secret = secret(host)
             try {
                 if (host.auth == AuthMethod.Key) {

@@ -1466,6 +1466,8 @@ function serve() {
   const wire = { send, write, credits: new Map(), uploads: new Map() };
   const watcher = createDirectoryWatcher(data => send({ event: 'fs', ...data }));
   const operations = {
+    // Clients send this after a few quiet seconds; no reply means the network is gone.
+    ping: () => ({}),
     file: (request, token, id) => {
       if (framed && request.operation === 'read') return framedRead(id, request, token, wire);
       if (framed && request.operation === 'write') return framedWrite(id, request, token, wire);

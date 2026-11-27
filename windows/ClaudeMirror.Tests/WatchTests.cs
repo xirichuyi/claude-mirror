@@ -65,6 +65,39 @@ public class WatchTests
     }
 
     [Fact]
+    public async Task AServerThatAnswersPingsStaysConnected()
+    {
+        var server = new Server(); using var agent = await server.ConnectAsync();
+        var lost = false; agent.Disconnected += _ => lost = true;
+        agent.ProbeAfter = TimeSpan.FromMilliseconds(200); agent.DeadAfter = TimeSpan.FromMilliseconds(1000); agent.Probing = true;
+        await Task.Delay(3000);
+        Assert.False(lost); Assert.True(agent.Connected);
+    }
+
+    [Fact]
+    public async Task ASilentServerIsReportedSlowThenDisconnected()
+    {
+        var requests = new Pipe(); var replies = new Pipe();
+        var writer = new StreamWriter(replies.Writer.AsStream()) { AutoFlush = true };
+        _ = Task.Run(async () =>
+        {
+            using var reader = new StreamReader(requests.Reader.AsStream());
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new { rcc = "ready" }));
+            var hello = JsonNode.Parse((await reader.ReadLineAsync())!)!;
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new { id = hello["id"]!.GetValue<int>(), result = new { home = "/home/t" } }));
+            while (await reader.ReadLineAsync() is not null) { } // Hears pings, never answers.
+        });
+        using var agent = await RemoteAgent.AttachAsync(requests.Writer.AsStream(), replies.Reader.AsStream(), new HostProfile("t", "t", 22, "t"));
+        var slow = new ConcurrentQueue<bool>(); string? reason = null;
+        agent.Slow += value => slow.Enqueue(value); agent.Disconnected += error => reason = error;
+        agent.ProbeAfter = TimeSpan.FromMilliseconds(200); agent.DeadAfter = TimeSpan.FromMilliseconds(1000); agent.Probing = true;
+        await Until(() => reason is not null);
+        Assert.Equal([true], slow);
+        Assert.Contains("无响应", reason);
+        Assert.False(agent.Connected);
+    }
+
+    [Fact]
     public async Task WatchingATaskAgainReplacesItsWatchAndUnwatchingLeavesTheOthers()
     {
         var server = new Server(); using var agent = await server.ConnectAsync();
