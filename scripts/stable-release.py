@@ -11,9 +11,9 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 INSTALLER = "Claude-Mirror-Setup-x64.exe"
-PORTABLE = "claude-mirror-windows-x64.zip"
+PORTABLE = "tether-windows-x64.zip"
 SPARKLE = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
-REPO = "xirichuyi/claude-mirror"
+REPO = "xirichuyi/tether"
 
 
 def version(tag):
@@ -34,7 +34,7 @@ def manifest(tag, folder):
 
 
 def verify_assets(tag, folder):
-    dmg = f"claude-mirror-{tag[1:]}-macOS-arm64.dmg"
+    dmg = f"tether-{tag[1:]}-macOS-arm64.dmg"
     names = ["appcast.xml", "windows-update.json", "windows-update.sig", "setup-remote.sh", "install-claude-remote.sh"]
     for name in (INSTALLER, PORTABLE, dmg):
         expected = (folder / (name + ".sha256")).read_text().split()[0].lower()
@@ -100,7 +100,7 @@ def publish(tag, folder):
             shutil.copyfile(public / "appcast.xml", feed)
         return
     if not current:
-        gh("release", "create", tag, "--repo", REPO, "--verify-tag", "--draft", "--title", f"Claude Mirror {tag}",
+        gh("release", "create", tag, "--repo", REPO, "--verify-tag", "--draft", "--title", f"Tether {tag}",
            "--notes-file", f"docs/releases/{tag}.md")
     gh("release", "upload", tag, *(folder / name for name in expected), "--repo", REPO, "--clobber")
     verify_remote(release(tag), expected)

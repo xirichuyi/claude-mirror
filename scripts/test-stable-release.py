@@ -22,7 +22,7 @@ class ReleaseTests(unittest.TestCase):
         os.chdir(temp.name)
         self.folder = Path("staging")
         self.folder.mkdir()
-        dmg = "claude-mirror-1.2.3-macOS-arm64.dmg"
+        dmg = "tether-1.2.3-macOS-arm64.dmg"
         for name in (dmg, stable.INSTALLER, stable.PORTABLE):
             (self.folder / name).write_bytes(b"test")
             (self.folder / (name + ".sha256")).write_text(hashlib.sha256(b"test").hexdigest())

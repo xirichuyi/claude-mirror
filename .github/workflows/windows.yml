@@ -80,43 +80,43 @@ jobs:
           $version = $plist.SelectSingleNode('//key[text()="CFBundleShortVersionString"]/following-sibling::string[1]').InnerText
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid product version: $version" }
           "version=$version" >> $env:GITHUB_OUTPUT
-      - run: dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -p:Version=${{ steps.product.outputs.version }} -o windows/dist/claude-mirror
+      - run: dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -p:Version=${{ steps.product.outputs.version }} -o windows/dist/tether
       - name: Verify native window starts
         shell: pwsh
         run: |
-          $marker = Join-Path $env:TEMP 'claude-mirror-smoke.txt'
+          $marker = Join-Path $env:TEMP 'tether-smoke.txt'
           Remove-Item $marker -ErrorAction SilentlyContinue
-          $app = Start-Process windows/dist/claude-mirror/claude-mirror.exe -ArgumentList '--smoke-test' -PassThru
+          $app = Start-Process windows/dist/tether/Tether.exe -ArgumentList '--smoke-test' -PassThru
           if (-not $app.WaitForExit(90000)) { $app.Kill(); throw "WinUI startup timed out (window loaded: $(Test-Path $marker))" }
           if ($app.ExitCode -ne 0 -or -not (Test-Path $marker)) { throw "WinUI startup failed: $($app.ExitCode)" }
           Get-Content $marker
       - name: Verify SSH setup buttons in the published client
         shell: pwsh
-        run: ./windows/test-host-dialog.ps1 windows/dist/claude-mirror/claude-mirror.exe
+        run: ./windows/test-host-dialog.ps1 windows/dist/tether/Tether.exe
       - name: Render demo scenes
         shell: pwsh
-        run: ./windows/capture-screenshots.ps1 windows/dist/claude-mirror/claude-mirror.exe windows/dist/screenshots
+        run: ./windows/capture-screenshots.ps1 windows/dist/tether/Tether.exe windows/dist/screenshots
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: claude-mirror-windows-screenshots
+          name: tether-windows-screenshots
           path: windows/dist/screenshots
           if-no-files-found: warn
       - name: Package portable Windows client
         shell: pwsh
         run: |
-          Compress-Archive -Path windows/dist/claude-mirror/* -DestinationPath windows/dist/claude-mirror-windows-x64.zip
-          (Get-FileHash windows/dist/claude-mirror-windows-x64.zip -Algorithm SHA256).Hash | Set-Content windows/dist/claude-mirror-windows-x64.zip.sha256
+          Compress-Archive -Path windows/dist/tether/* -DestinationPath windows/dist/tether-windows-x64.zip
+          (Get-FileHash windows/dist/tether-windows-x64.zip -Algorithm SHA256).Hash | Set-Content windows/dist/tether-windows-x64.zip.sha256
       - name: Build Windows installer
         shell: pwsh
         run: ./windows/build-installer.ps1 -Version "${{ steps.product.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: claude-mirror-windows-installer
+          name: tether-windows-installer
           path: windows/dist/Claude-Mirror-Setup-x64.exe*
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: claude-mirror-windows-x64
+          name: tether-windows-x64
           path: windows/dist/*.zip*
           if-no-files-found: error

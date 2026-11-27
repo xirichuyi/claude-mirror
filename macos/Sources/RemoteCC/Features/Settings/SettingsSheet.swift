@@ -69,7 +69,7 @@
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 12) {
                     BrandIcon(size: 32)
-                    Text("Claude Mirror").font(.system(size: 20, weight: .semibold))
+                    Text("Tether").font(.system(size: 20, weight: .semibold))
                 }
                 Text("版本 " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"))
                     .foregroundStyle(WorkbenchTheme.inkMuted)

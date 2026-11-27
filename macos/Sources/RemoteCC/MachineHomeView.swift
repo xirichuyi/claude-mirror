@@ -83,7 +83,7 @@ struct MachineHomeView: View {
 /// First launch: a heading and the way to add a server.
 struct GettingStartedView: View {
     @EnvironmentObject private var model: AppModel
-    static let helpURL = URL(string: "https://github.com/xirichuyi/claude-mirror/blob/HEAD/docs/getting-started.md")!
+    static let helpURL = URL(string: "https://github.com/xirichuyi/tether/blob/HEAD/docs/getting-started.md")!
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {

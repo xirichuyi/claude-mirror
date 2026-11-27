@@ -11,7 +11,7 @@ public partial class App : Application
         {
             root.Loaded += (_, _) =>
             {
-                File.WriteAllText(Path.Combine(Path.GetTempPath(), "claude-mirror-smoke.txt"), "WinUI window loaded");
+                File.WriteAllText(Path.Combine(Path.GetTempPath(), "tether-smoke.txt"), "WinUI window loaded");
                 // Let WinUI finish loading the visual tree before closing the window.
                 window.DispatcherQueue.TryEnqueue(() => window.Close());
             };

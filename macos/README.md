@@ -1,4 +1,4 @@
-# 镜像 Claude · Claude Mirror（macOS 原生客户端）
+# Tether · macOS
 
 SwiftUI 客户端，通过系统 SSH 使用服务器上的 Claude Code。需要 macOS 14+ 和 Xcode 15.3+（或对应的命令行工具）。
 
@@ -7,9 +7,9 @@ SwiftUI 客户端，通过系统 SSH 使用服务器上的 Claude Code。需要 
 ```sh
 # 在仓库根目录安装打包服务端程序所需的 Claude Agent SDK
 npm ci --ignore-scripts
-# 生成 macos/dist/claude-mirror.app
+# 生成 macos/dist/Tether.app
 macos/scripts/build-app.sh
-open macos/dist/claude-mirror.app
+open macos/dist/Tether.app
 ```
 
 ## 结构
@@ -195,7 +195,7 @@ swift test --package-path macos
 
 ## SSH 认证更新
 
-新认证方式及限制见[项目 README](../README.md#ssh-连接与认证)。密码和加密私钥口令通过打包应用内的 `ClaudockAskpass` 辅助程序直接交给 OpenSSH，不写入 UserDefaults。请通过构建脚本运行完整 app；裸 `swift run` 不包含认证辅助程序。历史测试记录对应当时版本，不表示此次密码认证已通过所有真实服务器验收。
+新认证方式及限制见[项目 README](../docs/usage.md#ssh-连接与认证)。密码和加密私钥口令通过打包应用内的 `ClaudockAskpass` 辅助程序直接交给 OpenSSH，不写入 UserDefaults。请通过构建脚本运行完整 app；裸 `swift run` 不包含认证辅助程序。历史测试记录对应当时版本，不表示此次密码认证已通过所有真实服务器验收。
 
 
 ## 发布与文档截图

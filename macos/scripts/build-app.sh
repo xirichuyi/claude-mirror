@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds macos/dist/claude-mirror.app. Needs Xcode command line tools, Node.js, and `npm ci` at the repo root.
+# Builds macos/dist/Tether.app. Needs Xcode command line tools, Node.js, and `npm ci` at the repo root.
 set -eu
 cd "$(dirname "$0")/.."
 npm --prefix .. run prepare-server -- "$PWD/Resources/server"
@@ -7,7 +7,7 @@ cargo build --release --locked --manifest-path Helpers/WincPreview/Cargo.toml
 swift build -c "${BUILD_CONFIGURATION:-release}" --product RemoteCC
 STAGING=$(mktemp -d "${TMPDIR:-/tmp}/remotecc-build.XXXXXX")
 trap 'rm -rf "$STAGING"' EXIT HUP INT TERM
-APP="$STAGING/claude-mirror.app"
+APP="$STAGING/Tether.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c "${BUILD_CONFIGURATION:-release}" --show-bin-path)/RemoteCC" "$APP/Contents/MacOS/RemoteCC"
 cp Helpers/WincPreview/target/release/winc-preview-bridge "$APP/Contents/MacOS/WincPreview"
@@ -27,18 +27,18 @@ xattr -dr com.apple.ResourceFork "$APP" 2>/dev/null || true
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 mkdir -p dist
-rm -rf dist/claude-mirror.app
-ditto --noextattr "$APP" dist/claude-mirror.app
+rm -rf dist/Tether.app
+ditto --noextattr "$APP" dist/Tether.app
 # A synced destination may attach Finder metadata shortly after the copy.
 # Only remove the two attributes prohibited by codesign; never bypass verification.
 for attempt in 1 2 3; do
-  xattr -dr com.apple.FinderInfo dist/claude-mirror.app 2>/dev/null || true
-  xattr -dr com.apple.ResourceFork dist/claude-mirror.app 2>/dev/null || true
-  if codesign --verify --deep --strict dist/claude-mirror.app; then
-    echo "Built dist/claude-mirror.app"
+  xattr -dr com.apple.FinderInfo dist/Tether.app 2>/dev/null || true
+  xattr -dr com.apple.ResourceFork dist/Tether.app 2>/dev/null || true
+  if codesign --verify --deep --strict dist/Tether.app; then
+    echo "Built dist/Tether.app"
     exit 0
   fi
   sleep 1
 done
-codesign --verify --deep --strict dist/claude-mirror.app
-echo "Built dist/claude-mirror.app"
+codesign --verify --deep --strict dist/Tether.app
+echo "Built dist/Tether.app"

@@ -1,16 +1,16 @@
 #ifndef Payload
-  #define Payload "..\dist\claude-mirror"
+  #define Payload "..\dist\tether"
 #endif
 #ifndef AppVersion
   #error Pass AppVersion via windows/build-installer.ps1
 #endif
 [Setup]
 AppId={{7A069CA4-F0B5-4503-935E-48C6EF2CC5B7}
-AppName=Claude Mirror
+AppName=Tether
 AppVersion={#AppVersion}
-AppPublisher=Claude Mirror
-AppPublisherURL=https://github.com/xirichuyi/claude-mirror
-DefaultDirName={localappdata}\Programs\Claude Mirror
+AppPublisher=Tether
+AppPublisherURL=https://github.com/xirichuyi/tether
+DefaultDirName={localappdata}\Programs\Tether
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -19,7 +19,7 @@ DisableDirPage=yes
 DisableProgramGroupPage=yes
 WizardStyle=modern
 SetupIconFile=..\ClaudeMirror.App\Assets\AppIcon.ico
-UninstallDisplayIcon={app}\claude-mirror.exe
+UninstallDisplayIcon={app}\Tether.exe
 OutputDir=..\dist
 OutputBaseFilename=Claude-Mirror-Setup-x64
 Compression=lzma2/fast
@@ -35,12 +35,17 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "{#Payload}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "*.pdb"
 
+; Installs from before the rename used these names; upgrades keep the old directory.
+[InstallDelete]
+Type: files; Name: "{app}\claude-mirror.*"
+Type: files; Name: "{userprograms}\Claude Mirror.lnk"
+
 [Icons]
-Name: "{userprograms}\Claude Mirror"; Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"
+Name: "{userprograms}\Tether"; Filename: "{app}\Tether.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,Claude Mirror}"; Flags: postinstall nowait skipifsilent
-Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"; Flags: nowait; Check: IsUpdateRestart
+Filename: "{app}\Tether.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,Tether}"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\Tether.exe"; WorkingDir: "{app}"; Flags: nowait; Check: IsUpdateRestart
 
 [Code]
 function IsUpdateRestart: Boolean;

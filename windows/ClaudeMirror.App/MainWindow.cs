@@ -42,7 +42,7 @@ public sealed partial class MainWindow : Window
 
     public MainWindow()
     {
-        Title = "claude-mirror · Windows";
+        Title = "Tether";
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 820));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         BuildWorkbench();

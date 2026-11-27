@@ -11,7 +11,7 @@ struct RemoteCCApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        WindowGroup("claude-mirror") {
+        WindowGroup("Tether") {
             RootView()
                 .environmentObject(model)
                 .frame(minWidth: 1000, minHeight: 620)

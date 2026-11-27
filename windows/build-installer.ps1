@@ -1,5 +1,5 @@
 param(
-    [string]$PublishDir = (Join-Path $PSScriptRoot 'dist/claude-mirror'),
+    [string]$PublishDir = (Join-Path $PSScriptRoot 'dist/tether'),
     [string]$Version,
     [string]$OutputDir = (Join-Path $PSScriptRoot 'dist')
 )
@@ -10,7 +10,7 @@ if (!$Version) {
 }
 if ($Version -notmatch '^\d+(\.\d+){1,3}$') { throw "Invalid installer version: $Version" }
 $payload = (Resolve-Path -LiteralPath $PublishDir).Path
-foreach ($asset in 'claude-mirror.exe','claude-mirror.pri','App.xbf','server/manifest.json','server/remote-agent.cjs','server/install-claude-remote.sh') {
+foreach ($asset in 'Tether.exe','Tether.pri','App.xbf','server/manifest.json','server/remote-agent.cjs','server/install-claude-remote.sh') {
     if (!(Test-Path -LiteralPath (Join-Path $payload $asset) -PathType Leaf)) { throw "Incomplete publish directory: missing $asset" }
 }
 $iscc = @(
