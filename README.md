@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/claude-mirror.png" width="128" alt="镜像 Claude 标志"></p>
+<p align="center"><img src="docs/assets/claude-mirror-icon.png" width="128" alt="镜像 Claude 标志"></p>
 <h1 align="center">镜像 Claude · Claude Mirror</h1>
 <p align="center">把远端 Claude Code 工作区，接到你的桌面。</p>
 
