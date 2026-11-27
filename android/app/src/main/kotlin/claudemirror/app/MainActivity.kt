@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) {
             intent.session()?.let { model.target.value = it }
-            intent.shared()?.let { model.shared.value = it }
+            intent.shared(packageName)?.let { model.shared.value = it }
         }
         enableEdgeToEdge()
         setContent { MirrorApp(model) }
@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.session()?.let { model.target.value = it }
-        intent.shared()?.let { model.shared.value = it }
+        intent.shared(packageName)?.let { model.shared.value = it }
     }
 
     override fun onStart() {
@@ -56,12 +56,14 @@ class MainActivity : ComponentActivity() {
 }
 
 /** What another app handed over with its share sheet. */
-private fun Intent.shared(): Shared? {
+private fun Intent.shared(own: String): Shared? {
     val files = when (action) {
         Intent.ACTION_SEND -> listOfNotNull(IntentCompat.getParcelableExtra(this, Intent.EXTRA_STREAM, Uri::class.java))
         Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(this, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
         else -> return null
     }
-    val text = getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }
-    return Shared(files, text).takeIf { files.isNotEmpty() || text != null }
+    val text = getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() }
+    // Only what the sender granted: a file:// path or this app's own content would be read with Tether's rights.
+    val granted = files.filter { it.scheme == "content" && it.authority?.startsWith(own) != true }
+    return Shared(granted, text).takeIf { granted.isNotEmpty() || text != null }
 }

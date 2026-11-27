@@ -58,6 +58,8 @@ fun MirrorApp(model: AppModel) {
             val session = model.sessions.value.firstOrNull { it.id == target }
             model.target.value = null
             if (session == null) return@LaunchedEffect
+            // Already open: leaving it would lose what is typed in its composer.
+            if (navigation.currentBackStackEntry?.arguments?.getString("id") == session.id && navigation.currentDestination?.route == "chat/{id}") return@LaunchedEffect
             // The list of conversations, which otherwise connects, is passed over.
             val state = model.connections.value[session.hostId]
             if (state !is ConnectionState.Connected && state !is ConnectionState.Connecting) model.host(session.hostId)?.let(model::connect)
