@@ -627,16 +627,24 @@ final class AppModel: ObservableObject {
         do { try await connections.verifyLogin(invite) }
         catch { throw RemoteError("连接码已使用或已过期") }
         // Only the transport: the invitation is never saved as this machine's login.
+        // A machine already connected as this account keeps its connection (and its port forwards).
+        let existing = engine?.connectionState(invite).status == .connected ? savedMachines.first { $0.key == invite.key } : nil
+        var own = invite
+        own.identityFile = LoginKeySetup.defaultKeyPath
         let result: String
         do {
             try await connections.connect(invite)
             result = try await connections.runScript(invite, script: ConnectionCode.claimScript(publicKey: publicKey))
-        } catch { await connections.disconnect(invite); throw RemoteError("连接码已使用或已过期") }
-        await connections.disconnect(invite)
-        guard result.contains("__RCC_CLAIMED__") else { throw RemoteError("连接码已使用或已过期") }
+        } catch {
+            if let existing { connections.updateConfig(existing) } else { await connections.disconnect(invite) }
+            throw RemoteError("连接码已使用或已过期")
+        }
+        if existing == nil { await connections.disconnect(invite) } else { connections.updateConfig(own) }
+        guard result.contains("__RCC_CLAIMED__") else {
+            if let existing { connections.updateConfig(existing) }
+            throw RemoteError("连接码已使用或已过期")
+        }
         claimed = true
-        var own = invite
-        own.identityFile = LoginKeySetup.defaultKeyPath
         try await connections.verifyLogin(own)
         try await connect(own)
     }
