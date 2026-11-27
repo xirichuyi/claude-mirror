@@ -14,11 +14,19 @@ class Transcript {
   declare message: any;
   declare currentMessageId: any;
   declare streamBlocks: Map<any, any>;
+  declare wireSources: Map<string, any>;
 
   constructor(message) {
     this.message = message;
     this.currentMessageId = null;
     this.streamBlocks = new Map();
+    this.wireSources = new Map();
+  }
+
+  /** Drops the blocks of messages the CLI withdrew (by their wire uuids). */
+  retract(uuids) {
+    const sources = new Set((Array.isArray(uuids) ? uuids : []).map(uuid => this.wireSources.get(uuid)).filter(Boolean));
+    if (sources.size) this.message.blocks = this.message.blocks.filter(block => !sources.has(block.sourceId));
   }
 
   stream(event) {
@@ -153,8 +161,8 @@ class Transcript {
       };
     }
     if (event.parent_tool_use_id) { this.subagent(event); return; }
-    if (event.type === 'stream_event') { delete this.message.activity; this.stream(event.event); }
-    if (event.type === 'assistant') this.assistant(event);
+    if (event.type === 'stream_event') { delete this.message.activity; this.stream(event.event); if (event.uuid && this.currentMessageId) this.wireSources.set(event.uuid, this.currentMessageId); }
+    if (event.type === 'assistant') { if (event.uuid) this.wireSources.set(event.uuid, event.message.id); this.assistant(event); }
     if (event.type === 'user') this.toolResults(event);
     if (event.type === 'system') this.system(event);
     if (event.type === 'tool_progress') {

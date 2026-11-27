@@ -188,12 +188,14 @@ test('background membership replaces stale tasks; unsupported dialogs do not set
   assert.deepEqual(options.supportedDialogKinds, ['refusal_fallback_prompt']);
   const signal = new AbortController().signal;
   await assert.rejects(options.onUserDialog({ dialogKind: 'new_unknown_kind' }, { signal, requestId: 'x' }), /Unsupported dialog/);
-  const retry = options.onUserDialog({ dialogKind: 'refusal_fallback_prompt', payload: { originalModel: 'a', fallbackModel: 'b' } }, { signal, requestId: 'r1' });
+  service.consumeEvent(session, { type: 'assistant', uuid: 'w1', message: { id: 'm1', content: [{ type: 'text', text: 'withdrawn' }] } }, run);
+  const retry = options.onUserDialog({ dialogKind: 'refusal_fallback_prompt', payload: { originalModel: 'a', fallbackModel: 'b', retractedMessageUuids: ['w1'] } }, { signal, requestId: 'r1' });
   const asked = session.permissions.at(-1);
   assert.equal(asked.kind, 'elicitation');
-  assert.deepEqual(asked.request.requestedSchema.properties.choice.enum, ['retry_fallback', 'edit_prompt']);
+  assert.deepEqual(asked.request.requestedSchema.properties.choice.enum, ['retry_fallback']);
   service.respond(session.id, asked.id, { interaction: { action: 'accept', content: { choice: 'retry_fallback' } } });
   assert.deepEqual(await retry, { behavior: 'completed', result: 'retry_fallback' });
+  assert.ok(!message.blocks.some(block => block.text === 'withdrawn'));
   const declined = options.onUserDialog({ dialogKind: 'refusal_fallback_prompt', payload: {} }, { signal, requestId: 'r2' });
   service.respond(session.id, session.permissions.at(-1).id, { interaction: { action: 'decline' } });
   assert.deepEqual(await declined, { behavior: 'cancelled' });

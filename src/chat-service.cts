@@ -414,10 +414,11 @@ class ChatService extends EventEmitter {
       mode: 'form', title: '回复被拒绝',
       ...(typeof payload.guidanceText === 'string' && payload.guidanceText.trim() ? { message: payload.guidanceText.slice(0, 2000) } : {}),
       requestedSchema: { type: 'object', required: ['choice'], properties: {
-        choice: { type: 'string', title: '处理', enum: ['retry_fallback', 'edit_prompt'], enumNames: ['用 ' + model + ' 重试', '改提示词'], default: 'retry_fallback' },
+        choice: { type: 'string', title: '处理', enum: ['retry_fallback'], enumNames: ['用 ' + model + ' 重试'], default: 'retry_fallback' },
       } },
     }, context);
     const answer = (await asked) as { action?: string; content?: { choice?: string } };
+    run.transcript.retract(payload.retractedMessageUuids);
     return answer.action === 'accept' && answer.content?.choice ? { behavior: 'completed', result: answer.content.choice } : { behavior: 'cancelled' };
   }
 
