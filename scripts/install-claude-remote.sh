@@ -217,10 +217,12 @@ invite_member() {
   [ -n "$port" ] || port=$(awk 'tolower($1)=="port"{print $2; exit}' /etc/ssh/sshd_config 2>/dev/null)
   payload="claude-mirror 1"$'\n'"name $(hostname)"$'\n'"host $host"$'\n'"port ${port:-22}"$'\n'"user $member"
   # Every client checks Ed25519, which keeps the code short; other key types only stand in for it.
-  for file in /etc/ssh/ssh_host_ed25519_key.pub; do [ -f "$file" ] || file=/etc/ssh/ssh_host_*_key.pub; done
-  for file in $file; do
-    [ -f "$file" ] && payload+=$'\n'"hostkey $(awk '{print $1" "$2}' "$file")"
-  done
+  files=$(sshd -T 2>/dev/null | awk '$1=="hostkey"{print $2".pub"}')
+  [ -n "$files" ] || files=$(ls /etc/ssh/ssh_host_*_key.pub 2>/dev/null)
+  keys=$(for file in $files; do [ -f "$file" ] && awk '{print $1" "$2}' "$file"; done)
+  ! grep -q '^ssh-ed25519 ' <<<"$keys" || keys=$(grep '^ssh-ed25519 ' <<<"$keys")
+  [ -n "$keys" ] || { echo 'No SSH host key found to put in the code.' >&2; return 1; }
+  while read -r line; do payload+=$'\n'"hostkey $line"; done <<<"$keys"
   payload+=$'\n'"$(cat "$work/invite")"
   echo "Connection code for $member (one use, 24 hours):" >&2
   echo "invite cm1.$(printf '%s\n' "$payload" | base64 | tr -d '\n=' | tr '+/' '-_')"
