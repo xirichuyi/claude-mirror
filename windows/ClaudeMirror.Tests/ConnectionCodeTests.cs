@@ -17,8 +17,9 @@ public class ConnectionCodeTests
         var code = ConnectionCode.Parse("  " + Code(Valid) + "\r\n");
         Assert.Equal(("box", "203.0.113.5", 2222, "alice"), (code.Name, code.Host, code.Port, code.User));
         Assert.Equal(PrivateKey + "\n", code.PrivateKey);
-        Assert.StartsWith("SHA256:", code.HostKeyFingerprint);
-        Assert.Equal(50, code.HostKeyFingerprint.Length);
+        Assert.StartsWith("SHA256:", Assert.Single(code.HostKeyFingerprints));
+        Assert.Equal(50, code.HostKeyFingerprints[0].Length);
+        Assert.Contains("'ssh-ed25519 AAAA claude-mirror'", ConnectionCode.ClaimScript("ssh-ed25519 AAAA\n"));
     }
 
     [Fact] public void RejectsCodesThatCouldNotLogInSafely()

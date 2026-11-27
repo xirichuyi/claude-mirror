@@ -242,25 +242,32 @@ public sealed partial class MainWindow
     {
         var code = ConnectionCode.Parse(text);
         var (path, publicKey) = await EnsureLoginKeyAsync(FindKeygen() ?? throw new IOException("找不到 ssh-keygen"));
+        var profile = new HostProfile(code.Name, code.Host, code.Port, code.User);
+        // A server already trusted here keeps its pin: a code cannot vouch for a different key.
+        if (local.Fingerprints.TryGetValue(LocalState.HostKey(profile), out var pinned) && !code.HostKeyFingerprints.Contains(pinned)) throw new IOException("主机指纹已变化，已拒绝连接");
         var invite = Path.Combine(Path.GetTempPath(), "claude-mirror-invite-" + Guid.NewGuid().ToString("N"));
         await File.WriteAllTextAsync(invite, code.PrivateKey);
         try
         {
-            var profile = new HostProfile(code.Name, code.Host, code.Port, code.User, invite);
+            profile = profile with { KeyFile = invite };
             if (host is not null && LocalState.HostKey(host) != LocalState.HostKey(profile)) await ConfirmLeavingQueueAsync(true);
             agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
             reconnecting?.Cancel();
             next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
-            RemoteSetupException? setup = null;
-            try { await next.ConnectAsync(profile, "", "", ServerResources, fingerprint => Task.FromResult(fingerprint == code.HostKeyFingerprint)); }
+            RemoteSetupException? setup = null; string? seen = null;
+            try { await next.ConnectAsync(profile, "", "", ServerResources, fingerprint => Task.FromResult(code.HostKeyFingerprints.Contains(seen = fingerprint))); }
             catch (RemoteSetupException e) { setup = e; }
             catch (Renci.SshNet.Common.SshAuthenticationException e) { next.Dispose(); RefreshWorkbench(); throw new IOException("连接码已使用或已过期", e); }
             catch (Exception e) { next.Dispose(); RefreshWorkbench(); throw new IOException(ConnectionAdvice.Explain(e.Message), e); }
-            if (!(await next.RunScriptAsync(RemoteInstaller.AuthorizeScript(publicKey))).Contains("__RCC_KEY_OK__")) throw new IOException("服务器没有确认添加密钥");
             var updated = profile with { KeyFile = path };
-            await RemoteAgent.VerifyKeyLoginAsync(updated, code.HostKeyFingerprint);
-            if (!(await next.RunScriptAsync(ConnectionCode.DropInviteScript)).Contains("__RCC_CLAIMED__")) throw new IOException("服务器没有确认作废连接码");
-            local.Fingerprints[LocalState.HostKey(updated)] = code.HostKeyFingerprint;
+            try
+            {
+                if (!(await next.RunScriptAsync(ConnectionCode.ClaimScript(publicKey))).Contains("__RCC_CLAIMED__")) throw new IOException("连接码已使用或已过期");
+                await RemoteAgent.VerifyKeyLoginAsync(updated, seen!);
+            }
+            // The connection belongs to the code's server, not to the one still selected.
+            catch { next.Dispose(); RefreshWorkbench(); throw; }
+            local.Fingerprints[LocalState.HostKey(updated)] = seen!;
             host = updated; local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(updated)); local.Hosts.Add(updated); local.Save();
             hosts.ItemsSource = local.Hosts.ToList(); hosts.SelectedItem = updated;
             if (setup is not null) { health = MachineHealth.Issues(setup, null, null); status.Text = "SSH 已连接，服务器还需要设置"; RenderHealth(); return; }

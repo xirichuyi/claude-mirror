@@ -12,8 +12,8 @@ public sealed record ConnectionCode(string Name, string Host, int Port, string U
 
     public static bool LooksLike(string? text) => text?.Trim().StartsWith(Prefix, StringComparison.Ordinal) == true;
 
-    /// <summary>The fingerprint the SSH connection must see, as OpenSSH prints it.</summary>
-    public string HostKeyFingerprint => "SHA256:" + Convert.ToBase64String(SHA256.HashData(Convert.FromBase64String(HostKeys[0].Split(' ')[1]))).TrimEnd('=');
+    /// <summary>The fingerprints the SSH connection may see, as OpenSSH prints them.</summary>
+    public IReadOnlyList<string> HostKeyFingerprints => HostKeys.Select(key => "SHA256:" + Convert.ToBase64String(SHA256.HashData(Convert.FromBase64String(key.Split(' ')[1]))).TrimEnd('=')).ToList();
 
     public static ConnectionCode Parse(string text)
     {
@@ -49,11 +49,17 @@ public sealed record ConnectionCode(string Name, string Host, int Port, string U
         return new ConnectionCode(fields.GetValueOrDefault("name", host), host, port, user, hostKeys, privateKey);
     }
 
-    /// <summary>Run after this computer's own key is known to work: the invitation key stops working.</summary>
-    public static readonly string DropInviteScript = string.Join("\n",
-        "F=\"$HOME/.ssh/authorized_keys\"",
-        "[ -f \"$F\" ] || exit 1",
+    /// <summary>Swaps the invitation key for <paramref name="publicKey"/> in one step, and only while the invitation is still there,
+    /// so a code that two people try at once gives access to one of them.</summary>
+    public static string ClaimScript(string publicKey) => string.Join("\n",
         "umask 077",
-        "{ grep -v -- ' " + InviteComment + "$' \"$F\"; [ \"$?\" -le 1 ]; } > \"$F.new\" && mv -f \"$F.new\" \"$F\" && chmod 600 \"$F\" || exit 1",
+        "F=\"$HOME/.ssh/authorized_keys\"",
+        "K=" + Protocol.Quote(publicKey.Trim() + " claude-mirror"),
+        "mkdir \"$F.lock\" 2>/dev/null || exit 1",
+        "trap 'rmdir \"$F.lock\"' EXIT",
+        "grep -q -- ' " + InviteComment + "$' \"$F\" 2>/dev/null || { echo __RCC_USED__; exit 1; }",
+        "{ grep -v -- ' " + InviteComment + "$' \"$F\"; [ \"$?\" -le 1 ]; } > \"$F.new\" || exit 1",
+        "grep -qxF -- \"$K\" \"$F.new\" || printf '%s\\n' \"$K\" >> \"$F.new\" || exit 1",
+        "mv -f \"$F.new\" \"$F\" && chmod 600 \"$F\" || exit 1",
         "echo __RCC_CLAIMED__");
 }

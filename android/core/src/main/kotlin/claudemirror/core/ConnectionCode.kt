@@ -63,22 +63,17 @@ data class ConnectionCode(
         }
 
         /** Adds [publicKey] to the account's authorized_keys once, keeping every other line. */
-        fun authorizeScript(publicKey: String): String = listOf(
+        /** Swaps the invitation key for [publicKey] in one step, and only while the invitation is still there, so a code that two people try at once gives access to one of them. */
+        fun claimScript(publicKey: String): String = listOf(
             "umask 077",
             "F=\"\$HOME/.ssh/authorized_keys\"",
-            "mkdir -p \"\$HOME/.ssh\" && chmod 700 \"\$HOME/.ssh\" && touch \"\$F\" && chmod 600 \"\$F\" || exit 1",
             "K=" + shellQuote("$publicKey claude-mirror"),
-            "if [ -s \"\$F\" ] && [ -n \"\$(tail -c 1 \"\$F\")\" ]; then echo >> \"\$F\"; fi",
-            "grep -qxF \"\$K\" \"\$F\" || printf '%s\\n' \"\$K\" >> \"\$F\" || exit 1",
-            "echo __RCC_KEY_OK__",
-        ).joinToString("\n")
-
-        /** Run after the app's own key is known to work: the invitation key stops working. */
-        val DROP_INVITE = listOf(
-            "F=\"\$HOME/.ssh/authorized_keys\"",
-            "[ -f \"\$F\" ] || exit 1",
-            "umask 077",
-            "{ grep -v -- ' $INVITE_COMMENT\$' \"\$F\"; [ \"\$?\" -le 1 ]; } > \"\$F.new\" && mv -f \"\$F.new\" \"\$F\" && chmod 600 \"\$F\" || exit 1",
+            "mkdir \"\$F.lock\" 2>/dev/null || exit 1",
+            "trap 'rmdir \"\$F.lock\"' EXIT",
+            "grep -q -- ' $INVITE_COMMENT\$' \"\$F\" 2>/dev/null || { echo __RCC_USED__; exit 1; }",
+            "{ grep -v -- ' $INVITE_COMMENT\$' \"\$F\"; [ \"\$?\" -le 1 ]; } > \"\$F.new\" || exit 1",
+            "grep -qxF -- \"\$K\" \"\$F.new\" || printf '%s\\n' \"\$K\" >> \"\$F.new\" || exit 1",
+            "mv -f \"\$F.new\" \"\$F\" && chmod 600 \"\$F\" || exit 1",
             "echo __RCC_CLAIMED__",
         ).joinToString("\n")
     }

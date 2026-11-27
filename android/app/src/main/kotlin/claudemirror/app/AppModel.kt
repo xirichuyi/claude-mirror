@@ -225,14 +225,14 @@ class AppModel(private val application: Application) {
         val own = withContext(Dispatchers.Default) { LoginKey.generate() }
         try {
             secrets.write(host.id, HostSecret(privateKey = code.privateKey))
-            if ("__RCC_KEY_OK__" !in pool.script(host, ConnectionCode.authorizeScript(own.publicKey))) throw RemoteException("服务器没有确认添加密钥")
+            if ("__RCC_CLAIMED__" !in pool.script(host, ConnectionCode.claimScript(own.publicKey))) throw RemoteException("__RCC_USED__")
             pool.close(host)
             secrets.write(host.id, HostSecret(privateKey = own.privateKey))
-            if ("__RCC_CLAIMED__" !in pool.script(host, ConnectionCode.DROP_INVITE)) throw RemoteException("服务器没有确认作废连接码")
+            if ("__RCC_OK__" !in pool.script(host, "echo __RCC_OK__")) throw RemoteException("服务器不接受本机密钥")
         } catch (error: Exception) {
             pool.close(host)
             secrets.delete(host.id)
-            throw if (error is RemoteException && error.message == "服务器拒绝了这个私钥") RemoteException("连接码已使用或已过期") else error
+            throw if (error is RemoteException && error.message in setOf("服务器拒绝了这个私钥", "__RCC_USED__")) RemoteException("连接码已使用或已过期") else error
         }
         saveHost(host, HostSecret(privateKey = own.privateKey))
         connect(host)
