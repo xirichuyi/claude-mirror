@@ -135,6 +135,7 @@ add_member() {
 }
 remove_member() {
   usable_home || { echo "Account $member is not usable." >&2; return 1; }
+  local uid; uid=$(id -u -- "$member")
   loginctl terminate-user "$member" 2>/dev/null || true
   pkill -KILL -u "$member" 2>/dev/null || true
   loginctl disable-linger "$member" 2>/dev/null || true
@@ -143,6 +144,8 @@ remove_member() {
     tries=$((tries + 1)); [ "$tries" -lt 5 ] || { echo "Could not remove $member." >&2; return 1; }
     pkill -KILL -u "$member" 2>/dev/null || true; sleep 1
   done
+  # Outside the home; a later account reusing the uid would own it.
+  rm -rf -- "/tmp/claudock-attachments-$uid"
   rm -f -- "$MEMBERS/$member"
   echo "Removed $member and their files."
 }
