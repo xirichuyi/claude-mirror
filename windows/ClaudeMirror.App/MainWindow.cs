@@ -54,7 +54,7 @@ public sealed partial class MainWindow : Window
         prompt.Drop += async (_, e) => await RunAsync(async () => { foreach (var file in await e.DataView.GetStorageItemsAsync()) if (file is Windows.Storage.StorageFile) await AttachAsync(file.Path); });
         notifier = new Notifier(() => DispatcherQueue.TryEnqueue(() => Activate()));
         Activated += (_, e) => notifier.Foreground = e.WindowActivationState != WindowActivationState.Deactivated;
-        Closed += (_, _) => { agent?.Dispose(); notifier.Close(); };
+        Closed += (_, _) => { CloseTerminals(); agent?.Dispose(); notifier.Close(); };
         StartCheckingUpdates();
         RefreshWorkbench();
         PrepareDemo();

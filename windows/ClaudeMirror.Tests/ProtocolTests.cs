@@ -37,4 +37,28 @@ public class ProtocolTests
         }
         finally { Directory.Delete(folder, true); }
     }
+
+    [Fact]
+    public void TheLoginShellStartsInTheProjectOrAtHome()
+    {
+        Assert.Equal("sh -c 'cd -- \"$1\" 2>/dev/null || cd; exec \"${SHELL:-/bin/sh}\" -l' sh '/srv/my app'", LoginShell.Command("/srv/my app"));
+        Assert.Equal("\"$HOME\"'/it'\\''s'", LoginShell.Folder("~/it's"));
+        Assert.Equal("\"$HOME\"", LoginShell.Folder("~"));
+        Assert.StartsWith(" exec sh -c 'clear; cd -- ", LoginShell.Typed("/srv"));
+        if (OperatingSystem.IsWindows()) return;
+        var home = Directory.CreateTempSubdirectory("mirror-home-").FullName;
+        var project = Directory.CreateDirectory(Path.Combine(home, "it's a dir")).FullName;
+        string Pwd(string directory)
+        {
+            var info = new System.Diagnostics.ProcessStartInfo("/bin/sh") { RedirectStandardInput = true, RedirectStandardOutput = true };
+            info.ArgumentList.Add("-c"); info.ArgumentList.Add(LoginShell.Command(directory));
+            info.Environment["HOME"] = home; info.Environment["SHELL"] = "/bin/sh";
+            using var shell = System.Diagnostics.Process.Start(info)!;
+            shell.StandardInput.WriteLine("pwd"); shell.StandardInput.Close();
+            var output = shell.StandardOutput.ReadToEnd().Trim(); shell.WaitForExit(); return output;
+        }
+        Assert.Equal(project, Pwd("~/it's a dir"));
+        Assert.Equal(project, Pwd(project));
+        Assert.Equal(home, Pwd("/nonexistent/folder"));
+    }
 }

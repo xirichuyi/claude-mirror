@@ -25,7 +25,7 @@ public sealed partial class MainWindow
     }
     private void CloseToolTabs()
     {
-        foreach (var tab in editorTabs.TabItems.OfType<TabViewItem>().Where(item => item.Tag is string).ToList()) editorTabs.TabItems.Remove(tab);
+        foreach (var tab in editorTabs.TabItems.OfType<TabViewItem>().Where(item => item.Tag is string).ToList()) { CloseTerminal(tab.Tag); editorTabs.TabItems.Remove(tab); }
         LayoutSplit();
     }
 
