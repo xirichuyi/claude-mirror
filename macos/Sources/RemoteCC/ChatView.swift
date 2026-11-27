@@ -214,7 +214,8 @@ struct MessagesList: View {
                     // Reaching the end of an older page shows the next one in place, like reaching the bottom of any feed.
                     let anchor = session.messages[messageWindow.range(in: session.messages).upperBound - 1].id
                     messageWindow.later(in: session.messages)
-                    if messageWindow.range(in: session.messages).upperBound < session.messages.count { followsReply = false }
+                    // The view stays on the previous page's last message, so it is not at the bottom yet.
+                    followsReply = false
                     Task { @MainActor in
                         await Task.yield()
                         proxy.scrollTo(anchor, anchor: .bottom)
