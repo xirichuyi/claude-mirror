@@ -642,10 +642,13 @@ final class AppModel: ObservableObject {
             if existing == nil { await connections.disconnect(invite) } else { restore() }
             throw RemoteError("连接码已使用或已过期")
         }
-        if existing == nil { await connections.disconnect(invite) }
-        guard result.contains("__RCC_CLAIMED__") else { restore(); throw RemoteError("连接码已使用或已过期") }
+        // Reconnects go back to the saved login right away: the invitation file is about to go.
+        if existing == nil { await connections.disconnect(invite) } else { restore() }
+        guard result.contains("__RCC_CLAIMED__") else { throw RemoteError("连接码已使用或已过期") }
         claimed = true
-        do { try await connections.verifyLogin(own) } catch { restore(); throw error }
+        try await connections.verifyLogin(own)
+        // The server accepts only this key now: save it before connecting, so a failed connect can be retried.
+        rememberMachine(own)
         connections.updateConfig(own)
         try await connect(own)
     }
