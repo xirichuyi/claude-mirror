@@ -2,52 +2,57 @@
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
 --><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
-        <title>claude-mirror</title>
+        <title>Tether</title>
         <item>
-            <title>0.27.0</title>
-            <pubDate>Fri, 27 Nov 2026 03:45:54 +0000</pubDate>
-            <sparkle:version>21</sparkle:version>
-            <sparkle:shortVersionString>0.27.0</sparkle:shortVersionString>
+            <title>0.28.0</title>
+            <pubDate>Fri, 27 Nov 2026 17:30:23 +0000</pubDate>
+            <sparkle:version>22</sparkle:version>
+            <sparkle:shortVersionString>0.28.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Claude Mirror v0.27.0
+            <description sparkle:format="markdown"><![CDATA[# Tether v0.28.0
 
-本次更新：Windows 界面对齐 macOS，界面文字精简，root 可直接开 Full Access，文件传输改走现有连接并支持续传，服务器没有 Node.js 也能连，支持多人共用一台服务器。
-
-## macOS
-
-- 删除“对话用量与上下文”弹窗，上下文用量只留在输入框旁。
-- 图片预览先出缩略图，再自动补原图；目录预取缩略图。
-- 队列的“继续”“清空”改为图标。
-- 删除解释性小字，报错和确认只留一句。
-
-## Windows
-
-- 输入框：`Enter` 发送，`Shift+Enter` 换行，`Ctrl+Enter` 插队，`Esc` 停止；显示上下文 `已用 / 总量`。
-- 队列：立即发送、编辑、移除、继续、清空。
-- 侧栏：对话 / 文件 / Git / 搜索 放在服务器旁；目录与对话图标对齐。
-- 状态页去掉账号用量和对话用量。
+项目改名为 Tether。本次更新：服务器网页面板和一次性连接码，三端内置终端，断线约 20 秒内发现并自动重连。
 
 ## 三端
 
-- root 登录可直接开 Full Access：Claude 以 root 运行并带 `IS_SANDBOX=1`，不再要求执行账号。
-- 文件传输走 agent 现有连接（二进制帧、按窗口限流），大文件传输时停止和确认不再卡住；下载和附件上传断线后续传。
-- 服务器没有 Node.js 或版本过旧时，首次连接自动装到用户目录（校验 SHA-256），支持 Alpine 和较旧的 glibc。
-- 多人共用服务器：root 登录时出现“成员”入口，可添加 / 删除成员。每人独立 Linux 账号、SSH 密钥和 Claude 登录，主目录互相不可见。
+- 粘贴连接码添加服务器：不用填地址、账号和密钥，也不用确认指纹。首次连接时换成本机生成的密钥，连接码随即作废。
+- 内置终端：走已有的 SSH 连接，在当前项目目录打开登录 shell。
+- 断线约 20 秒内发现并自动重连；5 秒没回应先提示“网络响应较慢”。
+- 成员页报错改成简短中文。
+
+## 服务器
+
+- `install-claude-remote.sh --panel` 安装网页面板：随机端口、路径和密码，只走 HTTPS。面板里可以添加、删除成员，复制连接码。
+- `--invite NAME` 在终端生成连接码；连接码 24 小时内有效，只能用一次。
+
+## macOS
+
+- 回车后输入框立即清空，不再重复发送。
+- Markdown 预览直接用已读取的内容，切回标签马上显示。
+- 去掉“较新消息”按钮：滚到底自动接上新消息，箭头一次回到最新。
+
+## Windows
+
+- 下载断点续传；执行账号的附件走已有连接。
+- 系统通知：回复完成、中断、需要确认、断线、重连。
 
 ## Android
 
-- 按 Claude 手机 App 重做样式。
-- 多项目、目录选择、接着服务器上已有的对话、重命名、私钥文件导入。
-- 切换模型和思考强度；后台跟随回复，完成或需要确认时通知。
-- 照片和文件附件。
+- 浏览服务器文件，预览文本和图片；Git 改动和单文件差异。
+- 删除成员改为带“取消 / 删除”的确认框。
 
-验证：自动化测试通过；Android 主要流程在模拟器上测过；成员管理在 Linux 容器中实测。Windows 只通过编译、启动检查和截图；成员页面未在任何客户端上实际操作过；未用真实 Anthropic API 测试。
+## 其他
+
+- 更名 Tether，仓库地址改为 `xirichuyi/tether`，旧地址自动跳转。已有安装照常自动更新，保存的服务器和对话不变。
+- README 重写，细节文档移到 `docs/`。
+
+验证：自动化测试和三端 CI 通过；Android 文件、Git、成员页和终端在模拟器上测过。连接码导入还没有在三端上实际操作过；macOS 和 Windows 没有在真机上测过。
 ]]></description>
-            <enclosure url="https://github.com/xirichuyi/claude-mirror/releases/download/v0.27.0/claude-mirror-0.27.0-macOS-arm64.dmg" length="9074084" type="application/octet-stream" sparkle:edSignature="SZbXwh/PiFJp8aGaBj7nPUoVzcbcNLcFZ2bYFtg1Tv6VfxCN1bboATd/xJY9jmuXjGCwMKTRUz07rF3IwcgeBg=="></enclosure>
+            <enclosure url="https://github.com/xirichuyi/tether/releases/download/v0.28.0/tether-0.28.0-macOS-arm64.dmg" length="8509321" type="application/octet-stream" sparkle:edSignature="gKb27/2K9ufypYR+fK5ScEhmsGNBlechaY2yIMIrjisEkCNo4z5bvvomk/5wOn7SJp7K8kFPj3PP97Av+4G0CQ=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: ZMqBX7o9EngC1mhG+ue0BPb2M6K8JTdFymXXoP1xOnz2BYUKqgAyolOzBHWYapW22/r1rovBr5EsbGtZXh4WCQ==
-length: 3240
+edSignature: 7lU4iXSUWzR0Yi0RDNgJRW6DYkBFmDJ4tyfZwkuQ9YfU2wS5RarzhIUtJhVdPTaESsT5fERn8nsPGEMX9nXyAQ==
+length: 3019
 -->
