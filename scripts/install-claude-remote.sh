@@ -376,6 +376,7 @@ After=network-online.target
 [Service]
 ExecStart=$node $PANEL_LIB/claude-mirror-panel.cjs serve $PANEL_CONF
 Environment=CLAUDE_MIRROR_SCRIPT=$PANEL_LIB/install-claude-remote.sh
+Environment=HOME=/root
 Restart=on-failure
 UMask=0077
 
