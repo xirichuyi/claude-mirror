@@ -74,12 +74,16 @@ fun MirrorApp(model: AppModel) {
             composable("files/{id}/{path}") { entry ->
                 val id = entry.arguments?.getString("id").orEmpty()
                 FilesScreen(model, id, entry.arguments?.getString("path").orEmpty(), onBack = { navigation.popBackStack() },
-                    onGit = { navigation.navigate("git/$id/" + Uri.encode(it)) })
+                    onGit = { navigation.navigate("git/$id/" + Uri.encode(it)) },
+                    onTerminal = { navigation.navigate("terminal/$id/" + Uri.encode(it)) })
             }
             composable("git/{id}/{path}") { entry ->
                 val id = entry.arguments?.getString("id").orEmpty()
                 GitScreen(model, id, entry.arguments?.getString("path").orEmpty(), onBack = { navigation.popBackStack() },
                     onFolder = { navigation.navigate("files/$id/" + Uri.encode(it)) })
+            }
+            composable("terminal/{id}/{path}") { entry ->
+                TerminalScreen(model, entry.arguments?.getString("id").orEmpty(), entry.arguments?.getString("path").orEmpty(), onBack = { navigation.popBackStack() })
             }
             composable("chat/{id}") { entry ->
                 ChatScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() })

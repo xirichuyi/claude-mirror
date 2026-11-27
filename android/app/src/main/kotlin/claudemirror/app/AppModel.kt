@@ -64,8 +64,9 @@ class AppModel(private val application: Application) {
     private val files = application.filesDir
     private val hostStore = HostStore(File(files, "hosts.json"))
     private val secrets = SecretStore(File(files, "secrets"))
+    private val ssh = SshLauncher { host -> secrets.read(host.id).let { SshSecret(it.password, it.privateKey, it.passphrase) } }
     private val pool = AgentPool(
-        SshLauncher { host -> secrets.read(host.id).let { SshSecret(it.password, it.privateKey, it.passphrase) } },
+        ssh,
         ServerResources.read { application.assets.open("server/$it") },
     )
     private val _hosts = MutableStateFlow(hostStore.load())
@@ -266,6 +267,8 @@ class AppModel(private val application: Application) {
     suspend fun preview(host: HostConfig, path: String) = engine.preview(host, path)
     suspend fun gitStatus(host: HostConfig, directory: String) = engine.gitStatus(host, directory)
     suspend fun gitDiff(host: HostConfig, path: String) = engine.gitDiff(host, path)
+    suspend fun terminal(host: HostConfig, directory: String, columns: Int, rows: Int) =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ssh.terminal(host, directory, columns, rows) }
     suspend fun adopt(host: HostConfig, item: RemoteConversation): ChatSession = engine.adopt(host, item)
     fun loadEarlier(id: String) = act { engine.loadEarlier(id) }
     /** Quietly: an adopted conversation that cannot be refreshed still shows what it had. */

@@ -55,6 +55,14 @@ interface RemoteProcess {
     fun kill()
 }
 
+/** A login shell on the server with a pseudo-terminal; bytes in both directions, as a terminal sees them. */
+interface RemoteTerminal {
+    val output: InputStream
+    val input: OutputStream
+    fun resize(columns: Int, rows: Int)
+    fun close()
+}
+
 interface Launcher {
     /** Blocks until the command has started. */
     fun start(host: HostConfig, command: String): RemoteProcess

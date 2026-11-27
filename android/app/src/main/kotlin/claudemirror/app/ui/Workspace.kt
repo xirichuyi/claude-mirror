@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -57,7 +58,7 @@ import claudemirror.core.RemoteListing
 /** Walks the server's files from [start]; a file opens in place, Git shows what changed under the current folder. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FilesScreen(model: AppModel, hostId: String, start: String, onBack: () -> Unit, onGit: (String) -> Unit) {
+fun FilesScreen(model: AppModel, hostId: String, start: String, onBack: () -> Unit, onGit: (String) -> Unit, onTerminal: (String) -> Unit) {
     val host = model.hosts.collectAsStateWithLifecycle().value.firstOrNull { it.id == hostId }
     if (host == null) { LaunchedEffect(Unit) { onBack() }; return }
     var path by rememberSaveable { mutableStateOf(start) }
@@ -75,6 +76,7 @@ fun FilesScreen(model: AppModel, hostId: String, start: String, onBack: () -> Un
                 actions = {
                     IconButton(onClick = { listing?.let { path = it.parent } }, enabled = listing != null && listing.parent != listing.path) { Icon(Icons.Filled.ArrowUpward, "上一级") }
                     IconButton(onClick = { onGit(listing?.path ?: path) }) { Icon(Icons.Filled.AccountTree, "Git") }
+                    IconButton(onClick = { onTerminal(listing?.path ?: path) }) { Icon(Icons.Filled.Terminal, "终端") }
                     IconButton(onClick = { attempt++ }) { Icon(Icons.Filled.Refresh, "刷新") }
                 },
             )

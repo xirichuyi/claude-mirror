@@ -68,15 +68,40 @@ class SshLauncher(
         }
     }
 
-    override fun start(host: HostConfig, command: String): RemoteProcess {
+    /** A login shell in [directory], on the connection the agent already uses. */
+    fun terminal(host: HostConfig, directory: String, columns: Int, rows: Int): RemoteTerminal {
+        val session = session(host)
+        val shell = try {
+            session.allocatePTY("xterm-256color", columns, rows, 0, 0, emptyMap())
+            // A folder that is gone leaves the shell at home rather than failing.
+            val folder = if (directory == "~" || directory.startsWith("~/")) "\"\$HOME\"" + shellQuote(directory.drop(1)) else shellQuote(directory)
+            session.exec("cd -- $folder 2>/dev/null || cd; exec \"${'$'}{SHELL:-/bin/sh}\" -l")
+        } catch (error: Exception) {
+            runCatching { session.close() }
+            if (error !is IOException && error !is IllegalStateException) throw error
+            throw RemoteException("SSH 通道已断开", confirmed = false)
+        }
+        return object : RemoteTerminal {
+            override val output: InputStream = shell.inputStream
+            override val input: OutputStream = shell.outputStream
+            override fun resize(columns: Int, rows: Int) { runCatching { (shell as net.schmizz.sshj.connection.channel.direct.Session.Shell).changeWindowDimensions(columns, rows, 0, 0) } }
+            override fun close() { runCatching { shell.close() }; runCatching { session.close() } }
+        }
+    }
+
+    private fun session(host: HostConfig): net.schmizz.sshj.connection.channel.direct.Session {
         val client = client(host)
         // A connection that went away since it was looked up is refused by the library with an IllegalStateException.
-        val session = try { client.startSession() } catch (error: Exception) {
+        return try { client.startSession() } catch (error: Exception) {
             if (error !is IOException && error !is IllegalStateException) throw error
             val stale = synchronized(clients) { if (clients[host.id] === client) clients.remove(host.id) else null }
             runCatching { stale?.close() }
             throw RemoteException("SSH 通道已断开", confirmed = false)
         }
+    }
+
+    override fun start(host: HostConfig, command: String): RemoteProcess {
+        val session = session(host)
         val running = try { session.exec(command) } catch (error: Exception) {
             runCatching { session.close() }
             if (error !is IOException && error !is IllegalStateException) throw error
