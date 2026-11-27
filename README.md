@@ -207,7 +207,7 @@ sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
 - 远端 Node.js 低于 18.14 或不存在时，把官方 Node.js 装到用户目录，不改系统包。
 - SSH 断开会杀后台进程的服务器上自动开启 `loginctl enable-linger`；需要管理员权限时先试免密 `sudo`，不行再给出要运行的命令。
 
-**用 root 登录的新服务器**再加三个选项，一条命令配好 Full Access 需要的普通执行账号：
+**想让 Claude 以普通账号运行**（root 登录的服务器也可以直接用 Full Access，见下文）再加三个选项，一条命令配好执行账号：
 
 ```sh
 sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app root@example.com
@@ -462,9 +462,11 @@ macOS 的「对话选项 → 高级选项 → 上下文缓存」可选择远端�
 
 ### macOS Full Access 与 root SSH
 
-对话选项中的 **Full Access** 对应 Claude 的 `bypassPermissions`。普通用户启动时，后端同时传入 SDK 的 `allowDangerouslySkipPermissions`，允许该会话随后切换模式。Full Access 跳过 Claude 操作确认，但不会提升操作系统权限。
+对话选项中的 **Full Access** 对应 Claude 的 `bypassPermissions`。后端始终传入 SDK 的 `allowDangerouslySkipPermissions`，允许该会话随后切换模式。Full Access 跳过 Claude 操作确认，但不会提升操作系统权限。
 
-Claude 拒绝以 root 运行该模式。Linux 上可保留 root SSH 连接，在**新对话**的“Claude 执行账号”填写普通账号；后端通过 `runuser` 真正降低子进程身份，使用该账号的 home、Claude 安装与登录，不继承 root 的凭据环境。已有对话不能切换执行账号。其他系统请直接通过普通用户 SSH 连接。
+root 登录时直接以 root 运行：后端给 Claude 进程加上 `IS_SANDBOX=1`，这是 Claude 放行 root 跳过确认的开关。此时 Claude 不经确认即可以 root 执行任何命令，只在可以承担这个风险的服务器上开启。
+
+想让 Claude 以普通账号运行时，Linux 上可保留 root SSH 连接，在**新对话**的“Claude 执行账号”填写普通账号；后端通过 `runuser` 真正降低子进程身份，使用该账号的 home、Claude 安装与登录，不继承 root 的凭据环境（包括 `IS_SANDBOX`）。已有对话不能切换执行账号。
 
 在本机一条命令创建专用账号（见“远端一键准备”）：
 

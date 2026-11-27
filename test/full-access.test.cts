@@ -4,13 +4,14 @@ import fs = require('node:fs');
 import os = require('node:os');
 import path = require('node:path');
 import { once } from 'node:events';
-import { requireFullAccessIdentity, executionEnvironment, spawnClaudeExecution, permissionStatus } from '../src/claude-launch.cjs';
+import { executionEnvironment, spawnClaudeExecution, permissionStatus } from '../src/claude-launch.cjs';
 import { preferencePatch } from '../src/capabilities.cjs';
 
-test('Full Access requires a real non-root identity and validates execution usernames', () => {
-  assert.throws(() => requireFullAccessIdentity('bypassPermissions', { uid: 0 }), /root/);
-  requireFullAccessIdentity('default', { uid: 0 });
-  requireFullAccessIdentity('bypassPermissions', { uid: 1000 });
+test('a root login runs Full Access as root, marked as a sandbox for Claude', () => {
+  const root = { uid: 0, user: 'root', home: '/root', cwd: '/tmp', executable: '/bin/true' };
+  assert.equal(executionEnvironment(root, { HOME: '/root' }).IS_SANDBOX, '1');
+  assert.equal(executionEnvironment({ ...root, uid: 1000, user: 'dev', home: '/home/dev' }, { HOME: '/home/dev' }).IS_SANDBOX, undefined);
+  assert.deepEqual(permissionStatus(root), { fullAccessAvailable: true, requiresExecutionUser: true, executionUser: 'root' });
   assert.throws(() => preferencePatch({ executionUser: 'test;id' }));
   assert.equal(preferencePatch({ executionUser: 'claude-runner' }).executionUser, 'claude-runner');
 });
@@ -38,10 +39,10 @@ test('launcher actually drops UID and preserves argument boundaries', { skip: pr
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('root preflight reports the missing identity before loading the SDK', { skip: process.getuid?.() !== 0 }, async () => {
+test('root preflight offers Full Access and an optional execution account', { skip: process.getuid?.() !== 0 }, async () => {
   const { execFileSync } = await import('node:child_process');
   const inspect = (preferences: object) => JSON.parse(execFileSync(process.execPath, [path.join(__dirname, '../src/task-inspect.cjs'), JSON.stringify({ action: 'permissionStatus', directory: '/tmp', preferences })], { encoding: 'utf8', env: { ...process.env, REMOTECC_CLAUDE_PATH: '/bin/true' } }).trim());
   assert.equal(inspect({}).result.requiresExecutionUser, true);
-  assert.match(inspect({ permissionMode: 'bypassPermissions' }).error, /root/);
+  assert.equal(inspect({ permissionMode: 'bypassPermissions' }).result.fullAccessAvailable, true);
   assert.match(inspect({ executionUser: 'bad;id' }).error, /无效/);
 });

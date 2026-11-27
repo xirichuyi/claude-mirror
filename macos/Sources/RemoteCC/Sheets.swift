@@ -54,14 +54,12 @@ struct PreferencesSheet: View {
                 [WorkbenchOption("", "自动")] + ["low", "medium", "high", "xhigh", "max"].filter { currentModel == nil || currentModel?.supportedEffortLevels?.contains($0) == true }.map { WorkbenchOption($0, $0) })
             WorkbenchSelect(title: "权限", selection: $permissionMode, options: permissionOptions)
             if permissionMode == "bypassPermissions" {
-                Text("Full Access 会跳过 Claude 的操作确认，可修改文件和执行命令；仍受执行账号的系统权限限制。")
+                Text(capabilities.permissionStatus?.executionUser == "root" && executionUser.isEmpty ? "跳过所有确认 · root" : "跳过所有确认")
                     .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             }
             if capabilities.permissionStatus?.requiresExecutionUser == true || !executionUser.isEmpty {
-                TextField("Claude 执行账号（例如 claude-runner）", text: $executionUser)
+                TextField("Claude 执行账号（留空以 SSH 用户运行）", text: $executionUser)
                     .disabled(session?.messages.isEmpty == false || session?.remoteSessionId != nil || session?.remoteOwner != nil)
-                Text("root 不能启动 Full Access。请在新对话中填写已配置的普通账号；该账号使用独立的登录与历史记录。留空使用 SSH 用户。")
-                    .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
             }
             DisclosureGroup("高级选项", isExpanded: $advanced) {
                 WorkbenchSelect(title: "Agent", selection: $agent, options:

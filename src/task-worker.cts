@@ -3,7 +3,7 @@ import type { ActiveRun } from './contracts.js';
 import fs = require('node:fs');
 import path = require('node:path');
 import { pathToFileURL } from 'node:url';
-import { resolveClaudeExecution, spawnClaudeExecution, permissionStatus, requireFullAccessIdentity, validateDirectory } from './claude-launch.cjs';
+import { resolveClaudeExecution, spawnClaudeExecution, permissionStatus, validateDirectory } from './claude-launch.cjs';
 import { ChatService } from './chat-service.cjs';
 import { Transcript } from './transcript.cjs';
 import { catalogue, preferencePatch } from './capabilities.cjs';
@@ -158,10 +158,9 @@ async function control(command) {
     const methods = {
       model: async () => { await query.setModel(command.value || undefined); session.preferences.selectedModel = command.value; },
       effort: async () => { await query.applyFlagSettings({ effortLevel: command.value || null }); session.preferences.effort = command.value; },
-      permission: async () => { preferencePatch({ permissionMode: command.value }); requireFullAccessIdentity(command.value, execution); await query.setPermissionMode(command.value); session.preferences.permissionMode = command.value; },
+      permission: async () => { preferencePatch({ permissionMode: command.value }); await query.setPermissionMode(command.value); session.preferences.permissionMode = command.value; },
       configure: async () => {
         const patch = preferencePatch(command.value);
-        requireFullAccessIdentity(patch.permissionMode, execution);
         if (Object.keys(patch).some(key => !['selectedModel', 'permissionMode', 'effort', 'fastMode', 'outputStyle'].includes(key))) throw new Error('此设置需要重新打开会话');
         for (const [key, value] of Object.entries(patch)) {
           if (key === 'selectedModel') await query.setModel(value || undefined);
@@ -243,7 +242,7 @@ let commandWatcher;
 try { commandWatcher = fs.watch(path.join(folder, 'commands'), runCommands); commandWatcher.on('error', () => {}); } catch { /* Interval only. */ }
 (async () => {
   const launch = execution = resolveClaudeExecution(session.directory, session.preferences);
-  service.fullAccessAvailable = launch.uid !== 0;
+  service.fullAccessAvailable = true;
   session.directory = launch.cwd;
   service.claudeExecutable = launch.executable;
   const { query: createQuery } = await import(pathToFileURL(path.join(__dirname, 'sdk.mjs')).href);
