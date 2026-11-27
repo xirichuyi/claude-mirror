@@ -17,6 +17,12 @@ Tether 通过 SSH 连接你的服务器。代码、依赖和 Claude Code 都留�
 
 ![对话](docs/screenshots/chat.png)
 
+| Git 改动 | 添加服务器 | 深色模式 |
+| --- | --- | --- |
+| ![Git 改动](docs/screenshots/diff.png) | ![添加服务器](docs/screenshots/connect.png) | ![深色模式](docs/screenshots/chat-dark.png) |
+
+截图来自 macOS 客户端的示例模式，服务器和对话都是虚构的。
+
 ## 下载
 
 | 平台 | 安装包 | 要求 |
