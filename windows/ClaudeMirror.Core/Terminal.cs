@@ -55,6 +55,10 @@ internal sealed class PseudoConsoleTerminal : IRemoteTerminal
     private readonly IntPtr console;
     private readonly SafeProcessHandle process;
     private readonly FileStream output, input;
+    private readonly object gate = new();
+    private readonly ManualResetEvent exit = new(false);
+    private readonly RegisteredWaitHandle exitWatch;
+    private bool consoleOpen = true;
     private int disposed;
 
     public PseudoConsoleTerminal(string executable, IEnumerable<string> arguments, int columns, int rows)
@@ -84,6 +88,9 @@ internal sealed class PseudoConsoleTerminal : IRemoteTerminal
             }
             CloseHandle(info.Thread);
             process = new SafeProcessHandle(info.Process, true);
+            // The output pipe stays open while the console lives, so when ssh.exe ends the console goes too and the reader sees the end.
+            exit.SafeWaitHandle = new SafeWaitHandle(info.Process, false);
+            exitWatch = ThreadPool.RegisterWaitForSingleObject(exit, (_, _) => CloseConsole(), null, Timeout.Infinite, true);
         }
         finally { DeleteProcThreadAttributeList(attributes); Marshal.FreeHGlobal(attributes); }
         output = new FileStream(readSide, FileAccess.Read, 1);
@@ -92,14 +99,24 @@ internal sealed class PseudoConsoleTerminal : IRemoteTerminal
 
     public Stream Output => output;
     public Stream Input => input;
-    public void Resize(int columns, int rows) { if (Volatile.Read(ref disposed) == 0) ResizePseudoConsole(console, new Coord(columns, rows)); }
+    public void Resize(int columns, int rows) { lock (gate) if (consoleOpen) ResizePseudoConsole(console, new Coord(columns, rows)); }
+
+    private void CloseConsole()
+    {
+        lock (gate)
+        {
+            if (!consoleOpen) return;
+            consoleOpen = false;
+            ClosePseudoConsole(console);
+        }
+    }
 
     public void Dispose()
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         input.Dispose();
         // Closing the console ends ssh.exe; it can wait for its last output to be read, so the reader keeps going until then.
-        Task.Run(() => { ClosePseudoConsole(console); output.Dispose(); TerminateProcess(process, 1); process.Dispose(); });
+        Task.Run(() => { exitWatch.Unregister(null); CloseConsole(); output.Dispose(); TerminateProcess(process, 1); process.Dispose(); exit.Dispose(); });
     }
 
     /// <summary>Quotes each argument the way the C runtime splits a command line back into arguments.</summary>
