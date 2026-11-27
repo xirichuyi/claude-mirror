@@ -17,7 +17,7 @@ public sealed partial class MainWindow : Window
     private readonly StackPanel projects = new() { Spacing = 8 };
     private readonly StackPanel messages = new() { Spacing = 18, Padding = new Thickness(24) };
     private readonly ScrollViewer scroll = new();
-    private readonly TextBox prompt = new() { PlaceholderText = "发送消息，或输入 / 使用命令", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 90, MaxHeight = 220 };
+    private readonly TextBox prompt = new() { PlaceholderText = "发消息，/ 命令", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 90, MaxHeight = 220 };
     private readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     private readonly ComboBox hosts = new() { PlaceholderText = "选择主机", HorizontalAlignment = HorizontalAlignment.Stretch, DisplayMemberPath = "Name" };
     private List<ModelChoice> availableModels = [];
@@ -72,7 +72,7 @@ public sealed partial class MainWindow : Window
         var key = LocalState.HostKey(profile);
         if (local.Fingerprints.TryGetValue(key, out var previous))
         {
-            if (previous != fingerprint) throw new IOException("主机指纹发生变化，连接已拒绝。请核实服务器后更新本地信任记录。");
+            if (previous != fingerprint) throw new IOException("主机指纹已变化，已拒绝连接");
             return Task.FromResult(true);
         }
         var result = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -108,9 +108,9 @@ public sealed partial class MainWindow : Window
             jump.Visibility = mode.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
             note.Text = mode.SelectedIndex switch
             {
-                0 => "密码只用于这次连接，不会保存。连接成功后可以一键设置免密登录。首次连接会请你确认服务器指纹。",
-                1 => "使用所选私钥登录，私钥不会上传。首次连接会请你确认服务器指纹。",
-                _ => "用这台电脑自带的 OpenSSH 连接，和在终端里输入 ssh 一样：读取 ~/.ssh/config，使用 ssh-agent 里的密钥，经跳板机时不在本机开端口。地址可以填配置里的别名；用户名和端口留空时由配置决定。不能输入密码，带口令的私钥请先 ssh-add。"
+                0 => "密码不保存",
+                1 => "私钥不上传",
+                _ => "使用本机 OpenSSH：~/.ssh/config、ssh-agent、跳板机。不能输入密码。"
             };
         }
         mode.SelectionChanged += (_, _) => UpdateMode(); UpdateMode();
@@ -131,13 +131,13 @@ public sealed partial class MainWindow : Window
             key.Text = entry.KeyFile ?? ""; mode.SelectedIndex = entry.KeyFile is null ? 0 : 1;
             // A host behind a jump host is left to OpenSSH, which reads the whole config entry by its alias.
             if (entry.ProxyJump is not null) { address.Text = entry.Alias; port.Value = double.NaN; mode.SelectedIndex = 2; jump.Text = ""; }
-            jumpNote.Text = entry.ProxyJump is null ? "" : $"SSH 配置里这台主机经过跳板机 {entry.ProxyJump} 连接，已改用系统 SSH。";
+            jumpNote.Text = entry.ProxyJump is null ? "" : $"经跳板机 {entry.ProxyJump}，已改用系统 SSH";
             jumpNote.Foreground = muted;
             jumpNote.Visibility = entry.ProxyJump is null ? Visibility.Collapsed : Visibility.Visible;
             expander.IsExpanded = entry.Port != 22;
         };
         var panel = new StackPanel { Spacing = 14 };
-        panel.Children.Add(new TextBlock { Text = "填写服务器地址和登录方式。Claude Code 和项目都在服务器上运行，本机只负责显示和操作。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
+        panel.Children.Add(new TextBlock { Text = "Claude Code 和项目都在服务器上运行。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
         foreach (var element in new UIElement[] { import, jumpNote, address, mode, password, key, pick, phrase, jump, note, expander }) panel.Children.Add(element);
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = existing == null ? "添加服务器" : "连接服务器", Content = new ScrollViewer { Content = panel }, Background = canvas, PrimaryButtonText = "连接", CloseButtonText = "取消" };
         (string User, string Host) Target()
@@ -190,7 +190,7 @@ public sealed partial class MainWindow : Window
         await RefreshHealthAsync();
         if (usedPassword) await RunAsync(() => OfferKeyLoginAsync(profile, next));
     }
-    private RemoteAgent RequireAgent() => agent?.Connected == true ? agent : throw new IOException(agent?.SshConnected == true ? "服务器还需要设置，请先按首页提示完成" : "请先连接服务器");
+    private RemoteAgent RequireAgent() => agent?.Connected == true ? agent : throw new IOException(agent?.SshConnected == true ? "服务器需要设置" : "请先连接服务器");
     private async Task RefreshHistoryAsync()
     {
         var remote = RequireAgent(); var sessions = new List<Conversation>(); var unread = new List<string>();
@@ -212,9 +212,12 @@ public sealed partial class MainWindow : Window
         history = sessions; RenderHistory(); RefreshWorkbench();
         status.Text = $"已同步 {sessions.Count} 条会话" + (unread.Count > 0 ? "；读不到执行账号 " + string.Join("、", unread) + " 的历史" : "");
     }
-    private async Task NewConversationAsync()
+    private Task NewConversationAsync() => NewConversationAsync(null);
+    /// <param name="path">The project to start in. It is set once the open conversation has been left, which may be refused.</param>
+    private async Task NewConversationAsync(string? path)
     {
         await LeaveConversationAsync();
+        if (path is not null) directory.Text = path;
         UseAccount(null); RenderQueue(); RenderPermissions(null, null); RefreshWorkbench(); RenderHistory();
         if (agent?.Connected == true) await RefreshCapabilitiesAsync();
     }
@@ -226,7 +229,7 @@ public sealed partial class MainWindow : Window
         if (count == 0) return;
         var dialog = new ContentDialog
         {
-            XamlRoot = root.XamlRoot, Title = "还有未发送的消息", Content = everywhere ? $"有 {count} 条排队的消息还没有发送，换服务器会丢弃它们。正在进行的回复会在原服务器上继续。" : $"队列里有 {count} 条消息还没有发送，离开这个对话会丢弃它们。",
+            XamlRoot = root.XamlRoot, Title = "还有未发送的消息", Content = everywhere ? $"{count} 条排队消息将被丢弃" : $"{count} 条排队消息将被丢弃",
             PrimaryButtonText = "丢弃并离开", CloseButtonText = "留在这里", DefaultButton = ContentDialogButton.Close
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) throw new IOException("已保留当前对话和未发送的消息");
@@ -241,7 +244,7 @@ public sealed partial class MainWindow : Window
         else
         {
             var waiting = ParkedFor(selected);
-            if (waiting?.Sending == true) throw new IOException("这个对话正在发送排队的消息，请稍候再打开");
+            if (waiting?.Sending == true) throw new IOException("正在发送排队消息，请稍候");
             await LeaveConversationAsync();
             // Left running earlier: it comes back as it was, with whatever arrived since.
             if (waiting is not null && parked.ContainsKey(waiting.TaskId)) { await RestoreAsync(waiting); return; }
@@ -266,7 +269,8 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception e) { status.Text = "能力读取失败：" + e.Message; }
     }
-    private async Task SendAsync()
+    /// `now` hands the message to the running reply instead of waiting for it to end.
+    private async Task SendAsync(bool now = false)
     {
         if (string.IsNullOrWhiteSpace(prompt.Text)) return;
         if (conversation is not null && directory.Text != conversation.Directory)
@@ -274,13 +278,13 @@ public sealed partial class MainWindow : Window
         RequireAgent();
         var text = prompt.Text; prompt.Text = "";
         // The remote task refuses a second prompt while it is replying, so hold it here and send it when the reply ends.
-        if (busy) { queue.Add(text); RenderQueue(); return; }
+        if (busy) { var item = queue.Add(text); RenderQueue(); if (now) await SteerAsync(item.Id); return; }
         queue.Resume();
         await SendTextAsync(text);
     }
     private async Task SendTextAsync(string text)
     {
-        var remote = RequireAgent(); busy = true; sending = true; if (conversation is null && taskId is null) newTitle = Presentation.FirstLine(text, 40); AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
+        var remote = RequireAgent(); busy = true; sending = true; stopping = false; if (conversation is null && taskId is null) newTitle = Presentation.FirstLine(text, 40); AddMessage(text, true); reply = AddMessage("正在回复…"); RenderQueue(); RefreshWorkbench();
         var message = new { id = Guid.NewGuid().ToString(), role = "assistant", blocks = Array.Empty<object>() };
         try
         {
@@ -298,9 +302,34 @@ public sealed partial class MainWindow : Window
                 await remote.TaskCommandAsync(taskId, new { kind = "send", prompt = text, message });
             }
         }
-        catch { busy = false; queue.Pause(); RenderQueue(); RefreshWorkbench(); status.Text = "发送结果未确认，远端任务可能仍在运行。请重连查看，不要重复发送。"; throw; }
+        catch { busy = false; queue.Pause(); RenderQueue(); RefreshWorkbench(); status.Text = "未确认送达，请重连查看"; throw; }
         finally { sending = false; }
     }
+    /// Sends a queued message now. While Claude replies it joins that reply and Claude reads it at its next step;
+    /// otherwise it goes out as the next prompt.
+    private async Task SteerAsync(string id)
+    {
+        if (queue.Take(id) is not { } item) return;
+        RenderQueue();
+        if (!busy) { queue.Resume(); await SendTextAsync(item.Text); return; }
+        // The task is still starting or stopping: the message stays first in line.
+        if (taskId is null || sending || stopping) { queue.Restore(item); RenderQueue(); return; }
+        var owner = queue;
+        try { await RequireAgent().TaskCommandAsync(taskId, new { kind = "steer", id = item.Id, text = item.Text, prompt = item.Text }); }
+        catch
+        {
+            // Another conversation was opened meanwhile: the message goes back to its own queue, which went with its conversation.
+            if (!ReferenceEquals(queue, owner)) { owner.Restore(item); throw; }
+            // Only the acknowledgement was lost: the reply already shows the message.
+            if (Steered(item.Id)) return;
+            // The reply ended first or the link dropped. The message returns to the head of the queue, never lost.
+            queue.Restore(item); RenderQueue();
+            if (busy || queue.Paused) throw;
+            if (queue.Next(busy) is { } next) { RenderQueue(); await SendTextAsync(next.Text); }
+        }
+    }
+    private bool Steered(string id) => lastState?["message"]?["blocks"] is JsonArray blocks && blocks.Any(block =>
+        Presentation.Text(block?["type"]) == "user" && Presentation.Text(block?["id"]) == id && block?["cancelled"]?.GetValue<bool>() != true);
     private Task WatchCurrentAsync()
     {
         var watched = taskId!;
@@ -321,6 +350,7 @@ public sealed partial class MainWindow : Window
         if (state["tasks"] is JsonArray tasks) backgroundTasks = (JsonArray)tasks.DeepClone();
         // A reply that failed or was stopped keeps the queue until the user says to go on.
         if (wasBusy && !busy && Turn.Failed(state)) queue.Pause();
+        if (!busy) stopping = false;
         status.Text = busy ? "正在回复" : "就绪";
         if (state["remoteSessionId"] is JsonValue session && taskId is not null)
         {
@@ -338,7 +368,16 @@ public sealed partial class MainWindow : Window
         RenderQueue();
         RenderPermissions(watched, state["permissions"] as JsonArray);
     }
-    private async Task StopAsync() { queue.Pause(); RenderQueue(); if (taskId is not null) await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
+    /// True from the stop request until the reply ends.
+    private bool stopping;
+    private async Task StopAsync()
+    {
+        queue.Pause(); RenderQueue();
+        if (taskId is null) return;
+        stopping = true; UpdateActions();
+        try { await RequireAgent().TaskCommandAsync(taskId, new { kind = "stop" }); }
+        catch { stopping = false; UpdateActions(); throw; }
+    }
     private async Task<string?> PickAsync()
     {
         var picker = new FileOpenPicker(); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); picker.FileTypeFilter.Add("*");
@@ -416,7 +455,7 @@ public sealed partial class MainWindow : Window
         var delete = new MenuFlyoutSubItem { Text = "删除", Icon = new FontIcon { Glyph = "\uE74D" } };
         delete.Items.Add(MenuItem(folder ? $"确认删除文件夹“{name}”及其全部内容" : $"确认删除“{name}”", "\uE74D", () => guard(async () =>
         {
-            if (openFiles.Any(file => file.Dirty && (file.Path == path || file.Path.StartsWith(path + "/", StringComparison.Ordinal)))) throw new IOException("这个文件有未保存的更改，请先保存或关闭它的标签");
+            if (openFiles.Any(file => file.Dirty && (file.Path == path || file.Path.StartsWith(path + "/", StringComparison.Ordinal)))) throw new IOException("请先保存或关闭文件");
             await remote.CallAsync("file", new { operation = "remove", path, recursive = folder });
             await reload();
         })));

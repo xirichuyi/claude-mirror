@@ -41,7 +41,7 @@ public sealed partial class MainWindow
             openFiles.Remove(file);editorTabs.TabItems.Remove(file.Tab);LayoutSplit();
         });
         split.SizeChanged+=(_,_)=>LayoutSplit();
-        AppWindow.Closing+=(_,e)=>{ if(openFiles.Any(f=>f.Dirty || f.Saving)){e.Cancel=true;showEditor=true;LayoutSplit();status.Text="文件仍有更改或正在保存，请先保存或关闭标签。";} };
+        AppWindow.Closing+=(_,e)=>{ if(openFiles.Any(f=>f.Dirty || f.Saving)){e.Cancel=true;showEditor=true;LayoutSplit();status.Text="请先保存或关闭文件";} };
         LayoutSplit();
     }
     private void LayoutSplit()
@@ -76,7 +76,7 @@ public sealed partial class MainWindow
         var edit=ActionButton(f.Editing?"保存到远端":"编辑",f.Editing?"\uE74E":"\uE70F",async ()=>{
             if(f.Editing) await SaveEditorAsync(f);
             else { f.Draft=f.Original;f.Editing=true;RenderEditor(f); }
-        },true);
+        });
         edit.IsEnabled=writable && !f.Saving;buttons.Children.Add(edit);
         buttons.Children.Add(ActionButton("重新加载","\uE72C",async ()=>{
             if(f.Saving || (f.Dirty && !await ConfirmDiscardAsync(f)))return;

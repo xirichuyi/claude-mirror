@@ -85,7 +85,7 @@ public sealed partial class MainWindow
                     actions.Children.Add(Button("复制登录命令", () => { Copy(issue.Command!, "已复制，SSH 登录服务器后运行即可"); return Task.CompletedTask; }));
                     break;
                 case HealthAction.Copy:
-                    actions.Children.Add(Button("复制命令", () => { Copy(issue.Command!, "已复制，请在服务器上运行；如提示权限不足，请联系管理员"); return Task.CompletedTask; }));
+                    actions.Children.Add(Button("复制命令", () => { Copy(issue.Command!, "已复制，请在服务器上运行"); return Task.CompletedTask; }));
                     break;
             }
             actions.Children.Add(Button("重新检查", RecheckAsync));
@@ -115,8 +115,8 @@ public sealed partial class MainWindow
         if (host is null) return;
         var login = host.SystemSsh ? "ssh -t" + SystemSsh.TerminalCommand(host)[3..] : $"ssh -t -p {host.Port} {host.User}@{host.Host}";
         var target = $"{login} \"{remoteCommand.Replace("\"", "\\\"")}\"";
-        try { Process.Start(new ProcessStartInfo("cmd.exe", "/k " + target) { UseShellExecute = true }); status.Text = "已打开终端，按提示完成登录后点“重新检查”"; }
-        catch { Copy(target, "无法打开终端，已复制命令，请粘贴到 PowerShell 运行"); }
+        try { Process.Start(new ProcessStartInfo("cmd.exe", "/k " + target) { UseShellExecute = true }); status.Text = "登录后点“重新检查”"; }
+        catch { Copy(target, "已复制命令"); }
     }
 
     private async Task InstallDialogAsync()
@@ -126,7 +126,7 @@ public sealed partial class MainWindow
         ScrollViewer.SetVerticalScrollBarVisibility(log, ScrollBarVisibility.Auto);
         var summary = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = ink };
         var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(new TextBlock { Text = "会在服务器上安装缺少的 Claude Code 和 Node.js，全部装在你的用户目录，不需要管理员权限，也不会读取或修改 Claude 的登录信息。通常需要 1–3 分钟。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
+        panel.Children.Add(new TextBlock { Text = "安装到用户目录", TextWrapping = TextWrapping.Wrap, Foreground = muted });
         panel.Children.Add(log); panel.Children.Add(summary);
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = "设置 " + (host?.Name ?? "服务器"), Content = panel, PrimaryButtonText = "开始安装", CloseButtonText = "关闭", Background = canvas };
         using var cancel = new CancellationTokenSource();
@@ -162,7 +162,7 @@ public sealed partial class MainWindow
         var dialog = new ContentDialog
         {
             XamlRoot = root.XamlRoot, Title = "为 " + profile.Name + " 设置免密登录？", Background = canvas,
-            Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "以后连接不用再输入密码。\n\n• 在这台电脑上生成专用密钥 %USERPROFILE%\\.ssh\\claude_mirror_ed25519\n• 把公钥加入服务器的 ~/.ssh/authorized_keys，已有内容保持不变\n• 确认密钥能登录后才切换" },
+            Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "%USERPROFILE%\\.ssh\\claude_mirror_ed25519 → ~/.ssh/authorized_keys" },
             PrimaryButtonText = "设置免密登录", SecondaryButtonText = "不再询问", CloseButtonText = "以后再说",
         };
         var choice = await dialog.ShowAsync();
@@ -181,9 +181,9 @@ public sealed partial class MainWindow
         if (!(await remote.RunScriptAsync(RemoteInstaller.AuthorizeScript(publicKey))).Contains("__RCC_KEY_OK__")) throw new IOException("服务器没有确认添加密钥");
         var updated = profile with { KeyFile = path };
         try { await RemoteAgent.VerifyKeyLoginAsync(updated, local.Fingerprints[LocalState.HostKey(profile)]); }
-        catch (Exception e) { throw new IOException("密钥已添加，但服务器不接受密钥登录，仍可继续使用密码。" + e.Message); }
+        catch (Exception e) { throw new IOException("服务器不接受密钥登录，仍使用密码" + e.Message); }
         local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(profile)); local.Hosts.Add(updated); local.Save();
         host = updated; hosts.ItemsSource = local.Hosts.ToList(); hosts.SelectedItem = updated;
-        status.Text = "已设置免密登录，以后连接不用再输入密码";
+        status.Text = "已设置免密登录";
     }
 }

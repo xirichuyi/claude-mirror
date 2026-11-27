@@ -9,40 +9,68 @@ public sealed partial class MainWindow
 {
     private readonly StackPanel queuePanel = new() { Spacing = 4, Visibility = Visibility.Collapsed };
 
-    /// Messages waiting for the current reply to end, above the composer; each can be withdrawn.
+    /// Messages waiting for the current reply to end, above the composer, as on macOS:
+    /// each can be sent now, put back in the composer to edit, or removed.
     private void RenderQueue()
     {
         queuePanel.Children.Clear();
         queuePanel.Visibility = queue.Items.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (queue.Items.Count == 0) return;
-        var heading = new Grid();
-        heading.Children.Add(new TextBlock { Text = queue.Paused ? $"队列已暂停（{queue.Items.Count} 条）" : $"回复结束后发送（{queue.Items.Count} 条）", FontSize = 12, Foreground = muted, VerticalAlignment = VerticalAlignment.Center });
+        var rows = new StackPanel { Spacing = 2 };
+        var heading = new Grid { ColumnSpacing = 6 };
+        heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        // An icon and a count: a pause mark while the queue is held back, a list while it waits for the reply.
+        var count = Row(new FontIcon { Glyph = queue.Paused ? "\uE769" : "\uE8FD", FontSize = 12, Foreground = muted },
+            new TextBlock { Text = queue.Items.Count.ToString(), FontSize = 12, Foreground = muted, VerticalAlignment = VerticalAlignment.Center });
+        count.Spacing = 6; count.VerticalAlignment = VerticalAlignment.Center;
+        string state = queue.Paused ? "已暂停" : "排队";
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(count, $"{state} {queue.Items.Count}"); ToolTipService.SetToolTip(count, state);
+        heading.Children.Add(count);
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
         if (queue.Paused)
         {
             var resume = ActionButton("继续发送", "\uE768", async () =>
             {
                 queue.Resume();
-                if (queue.Next(busy) is { } next) { RenderQueue(); await SendTextAsync(next.Text); } else RenderQueue();
-            }, true);
-            resume.HorizontalAlignment = HorizontalAlignment.Right; heading.Children.Add(resume);
+                if (queue.Next(busy) is { } next) { RenderQueue(); await SendTextAsync(next.Text); }
+                else RenderQueue();
+            });
+            resume.IsEnabled = agent?.Connected == true && !busy;
+            controls.Children.Add(resume);
         }
-        queuePanel.Children.Add(heading);
+        controls.Children.Add(ActionButton("清空", "\uE74D", () => { queue.Clear(); RenderQueue(); return Task.CompletedTask; }));
+        Grid.SetColumn(controls, 1); heading.Children.Add(controls); rows.Children.Add(heading);
         foreach (var item in queue.Items)
         {
-            var row = new Grid { ColumnSpacing = 6 };
+            var row = new Grid { ColumnSpacing = 2 };
             row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = Presentation.FirstLine(item.Text, 120) ?? "", FontSize = 13, Foreground = ink, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center });
-            var cancel = ActionButton("取消这条消息", "\uE711", () => { queue.Cancel(item.Id); RenderQueue(); return Task.CompletedTask; });
-            Grid.SetColumn(cancel, 1); row.Children.Add(cancel);
-            queuePanel.Children.Add(new Border { Child = row, Background = surface, BorderBrush = edge, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 2, 4, 2) });
+            row.Children.Add(new TextBlock
+            {
+                Text = Presentation.FirstLine(item.Text, 120) ?? "", FontSize = 13, Foreground = ink,
+                TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center
+            });
+            var now = ActionButton("立即发送", "\uE724", () => SteerAsync(item.Id));
+            now.IsEnabled = agent?.Connected == true && !stopping;
+            var edit = ActionButton("编辑", "\uE70F", () =>
+            {
+                // The message goes back to the composer; a draft already there is kept after it.
+                if (queue.Take(item.Id) is not { } taken) return Task.CompletedTask;
+                prompt.Text = string.IsNullOrWhiteSpace(prompt.Text) ? taken.Text : taken.Text + "\n" + prompt.Text;
+                prompt.SelectionStart = prompt.Text.Length; prompt.Focus(FocusState.Programmatic);
+                RenderQueue(); return Task.CompletedTask;
+            });
+            var remove = ActionButton("移除", "\uE711", () => { queue.Cancel(item.Id); RenderQueue(); return Task.CompletedTask; });
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Children = { now, edit, remove } };
+            Grid.SetColumn(actions, 1); row.Children.Add(actions); rows.Children.Add(row);
         }
+        queuePanel.Children.Add(new Border { Child = rows, Background = surface, CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 6, 6, 6) });
     }
 
     /// Puts the files Claude changed since a message back the way they were: preview what would change, then confirm.
     private async Task RewindAsync(string checkpoint)
     {
         if (busy) throw new IOException("请先停止当前回复");
-        if (taskId is null) throw new IOException("这个对话的远端任务已结束，无法回退文件");
+        if (taskId is null) throw new IOException("远端任务已结束，无法回退");
         var remote = RequireAgent(); var task = taskId;
         // A control command answers { ok, value }; the preview is the value.
         var preview = (await remote.TaskCommandAsync(task, new { kind = "control", action = "rewind", value = new { checkpoint, preview = true } }))["value"] ?? new JsonObject();
@@ -51,7 +79,7 @@ public sealed partial class MainWindow
         var panel = new StackPanel { Spacing = 6 };
         panel.Children.Add(new TextBlock
         {
-            Text = !possible ? Presentation.Text(preview["error"]) ?? "这个检查点没有可回退的文件改动。" : $"将把 {changed.Count} 个文件恢复到这条回复之前的内容。对话记录不会改变。",
+            Text = !possible ? Presentation.Text(preview["error"]) ?? "这个检查点没有可回退的文件改动。" : $"恢复 {changed.Count} 个文件，对话记录不变。",
             TextWrapping = TextWrapping.Wrap
         });
         foreach (var file in changed.Take(50)) panel.Children.Add(new TextBlock { Text = file, FontFamily = Mono, FontSize = 12, Foreground = muted, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -127,7 +155,7 @@ public sealed partial class MainWindow
             if (Presentation.Text(request?["message"]) is { } message) panel.Children.Add(new TextBlock { Text = message, FontSize = 13, Foreground = ink, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
             bool link = Presentation.Text(request?["mode"]) == "url" && Uri.TryCreate(Presentation.Text(request?["url"]), UriKind.Absolute, out var url) && url.Scheme is "http" or "https";
             if (link) panel.Children.Add(new HyperlinkButton { Content = "打开 " + Presentation.Text(request?["url"]), NavigateUri = new Uri(Presentation.Text(request!["url"])!), Padding = new Thickness(0) });
-            else panel.Children.Add(new TextBlock { Text = "Windows 版暂不支持填写这种表单，可以取消或拒绝。", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
+            else panel.Children.Add(new TextBlock { Text = "不支持此表单", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
             Choice("取消", false, () => Answer(new { interaction = new { action = "cancel" } }));
             Choice("拒绝", false, () => Answer(new { interaction = new { action = "decline" } }));
             if (link) Choice("已完成，继续", true, () => Answer(new { interaction = new { action = "accept" } }));
@@ -291,6 +319,6 @@ public sealed partial class MainWindow
     private void UpdatePermissionTitle()
     {
         var label = PermissionModes.Label(permissionMode);
-        permissionMenu.Content = Row(new FontIcon { Glyph = "\uE72E", FontSize = 13 }, new TextBlock { Text = label }, new FontIcon { Glyph = "\uE70D", FontSize = 10 });
+        permissionMenu.Content = new TextBlock { Text = label, FontSize = 12 }; permissionMenu.Foreground = muted;
     }
 }

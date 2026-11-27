@@ -24,16 +24,16 @@ public static class MachineHealth
         if (startError is RemoteSetupException setup)
         {
             issues.Add(new("node", setup.Outdated ? $"服务器的 Node.js {setup.Version} 太旧" : "服务器缺少 Node.js",
-                "镜像 Claude 在服务器上运行一个小程序来管理对话，它需要 Node.js。一键安装会把官方 Node.js 装到你的用户目录，不需要管理员权限。",
+                "安装到用户目录，不需要管理员权限",
                 HealthAction.Install, null, true));
             return issues;
         }
         if (hello is null) return issues;
         var claude = status is not null ? status["claude"]?.GetValue<string>() : hello["claude"]?.GetValue<string>();
         if (claude is null)
-            issues.Add(new("claude", "服务器还没有安装 Claude Code", "一键安装会使用 Anthropic 官方安装程序，把 Claude Code 装到你的用户目录。", HealthAction.Install, null, true));
+            issues.Add(new("claude", "服务器还没有安装 Claude Code", "安装到用户目录", HealthAction.Install, null, true));
         else if (status?["auth"]?.GetValue<string>() == "loggedOut")
-            issues.Add(new("login", "服务器上的 Claude Code 还没有登录", "点“在终端登录”，按提示用浏览器完成授权；登录信息只保存在服务器上。完成后点“重新检查”。",
+            issues.Add(new("login", "服务器上的 Claude Code 还没有登录", "在终端登录后重新检查",
                 HealthAction.Login, status["loginCommand"]?.GetValue<string>() ?? "claude auth login", true));
         if (hello["persistenceWarning"]?.GetValue<string>() is { } warning)
             issues.Add(new("persistence", "断开连接后回复会中断", warning, HealthAction.Copy, "loginctl enable-linger", false));
@@ -46,14 +46,14 @@ public static class ConnectionAdvice
 {
     private static readonly (string[] Patterns, string Advice)[] Rules =
     [
-        (["permission denied", "authentication failed", "no suitable authentication"], "服务器拒绝了登录：用户名、密码或密钥不正确。"),
-        (["too many authentication failures"], "尝试了太多把密钥，被服务器拒绝。请改用密码或指定私钥文件。"),
-        (["no such host is known", "could not resolve hostname", "name or service not known"], "找不到这个服务器地址。请检查地址是否拼写正确，或确认网络、VPN 已连接。"),
-        (["actively refused", "connection refused"], "服务器拒绝连接：SSH 服务可能没有运行，或端口不对（通常是 22）。"),
-        (["timed out", "did not properly respond", "within the specified time", "established within"], "连接超时：服务器可能已关机，或被防火墙、网络拦截。"),
+        (["permission denied", "authentication failed", "no suitable authentication"], "服务器拒绝了登录：用户名、密码或密钥不正确"),
+        (["too many authentication failures"], "密钥尝试次数过多，请指定私钥或改用密码"),
+        (["no such host is known", "could not resolve hostname", "name or service not known"], "找不到这个服务器地址"),
+        (["actively refused", "connection refused"], "服务器拒绝连接，检查 SSH 端口"),
+        (["timed out", "did not properly respond", "within the specified time", "established within"], "连接超时"),
         (["network is unreachable", "no route to host"], "网络不通：请检查网络连接或 VPN。"),
-        (["主机指纹发生变化", "host key"], "服务器的身份指纹和上次不同。如果服务器刚重装过，请确认后清除本地信任记录；否则请先确认没有连到冒充的服务器。"),
-        (["connection reset", "forcibly closed", "connection closed by"], "服务器在登录前断开了连接：可能限制了来源 IP，或 SSH 服务异常。"),
+        (["主机指纹发生变化", "host key"], "服务器的身份指纹已变化"),
+        (["connection reset", "forcibly closed", "connection closed by"], "服务器在登录前断开"),
     ];
 
     public static string Explain(string message)
@@ -74,8 +74,8 @@ public static class RemoteInstaller
     public static string Summary(int code) => code switch
     {
         0 => "安装完成，正在重新检查服务器…",
-        3 => "Claude Code 已就绪，但 Node.js 没能自动安装。请按上面的提示用系统包管理器安装 Node.js 18.14 或更新版本。",
-        _ => $"安装没有完成（退出码 {code}）。请查看上面的输出；常见原因是服务器无法访问外网。",
+        3 => "Node.js 未能安装，请手动安装 18.14+",
+        _ => $"安装失败（退出码 {code}）",
     };
 
     /// <summary>Adds a public key to the server's authorized_keys once, keeping existing lines.</summary>

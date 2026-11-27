@@ -54,7 +54,7 @@ public sealed partial class MainWindow
         {
             try { await agent.UnwatchAsync(taskId); } catch (IOException) { } // The connection just dropped; there is nothing left to cancel.
         }
-        conversation = null; taskId = null; taskKey = null; reply = null; lastState = null; newTitle = null; busy = false;
+        conversation = null; taskId = null; taskKey = null; reply = null; lastState = null; newTitle = null; busy = false; stopping = false;
         queue = new SendQueue(); backgroundTasks = []; messages.Children.Clear();
     }
 
@@ -63,7 +63,7 @@ public sealed partial class MainWindow
     {
         parked.Remove(p.TaskId);
         conversation = p.Conversation; taskId = p.Done ? null : p.TaskId; taskKey = p.TaskKey; queue = p.Queue; reply = p.Reply;
-        lastState = p.State; backgroundTasks = p.Tasks; busy = p.Busy; newTitle = p.Conversation.Name;
+        lastState = p.State; backgroundTasks = p.Tasks; busy = p.Busy; stopping = false; newTitle = p.Conversation.Name;
         executionUser = p.ExecutionUser; permissionMode = p.PermissionMode; UpdatePermissionTitle();
         directory.Text = p.Conversation.Directory;
         messages.Children.Clear(); foreach (var view in p.Views) messages.Children.Add(view);
@@ -119,7 +119,7 @@ public sealed partial class MainWindow
         catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException)
         {
             p.Busy = false; p.Queue.Pause();
-            status.Text = $"“{p.Conversation.Name}”的排队消息发送结果未确认，请打开这个对话查看，不要重复发送";
+            status.Text = $"“{p.Conversation.Name}”的排队消息未确认送达";
         }
         finally { p.Sending = false; }
     }
@@ -154,7 +154,7 @@ public sealed partial class MainWindow
         var text = new StackPanel();
         text.Children.Add(new TextBlock { Text = p.Conversation.Name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
         text.Children.Add(new TextBlock { Text = (p.Label ?? "空闲") + " · " + (ShortDirectory(p.Conversation.Directory) ?? p.Conversation.Directory), FontSize = 11, Foreground = p.Busy && Turn.NeedsAnswer(p.State) ? amber : muted, TextTrimming = TextTrimming.CharacterEllipsis });
-        row.Content = Row(new FontIcon { Glyph = p.Busy ? "\uE895" : p.Queue.Paused ? "\uE769" : "\uE8BD", FontSize = 13, Foreground = muted }, text);
+        var content = Row(RowIcon(p.Busy ? "\uE895" : p.Queue.Paused ? "\uE769" : "\uE8BD"), text); content.Spacing = 6; row.Content = content;
         row.HorizontalAlignment = HorizontalAlignment.Stretch; row.HorizontalContentAlignment = HorizontalAlignment.Left;
         row.Padding = new Thickness(8, 5, 8, 5);
         ToolTipService.SetToolTip(row, p.Conversation.Name + "\n" + p.Conversation.Directory);

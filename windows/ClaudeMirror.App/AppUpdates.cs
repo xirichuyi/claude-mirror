@@ -49,9 +49,9 @@ public sealed partial class MainWindow
     private async Task InstallUpdateAsync()
     {
         if(pendingUpdate is not {} update || stagedInstaller is not {} installer)return;
-        if(!CanRestart()) {status.Text="请先保存文件、处理输入草稿，并等待当前回复结束。";return;}
+        if(!CanRestart()) {status.Text="请先保存文件、处理草稿并等待回复结束";return;}
         var answer=await new ContentDialog { XamlRoot=root.XamlRoot, Title=$"安装 {update.Tag}？",
-            Content="Claude Mirror 将关闭当前窗口，安装完成后重新打开。主机配置会保留。便携版将安装为当前用户的应用。",
+            Content="安装完成后会自动重新打开",
             PrimaryButtonText="安装并重启",CloseButtonText="稍后" }.ShowAsync();
         if(answer!=ContentDialogResult.Primary)return;
         await update.VerifyFileAsync(installer,updateLifetime.Token);

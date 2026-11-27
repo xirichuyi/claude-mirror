@@ -26,7 +26,12 @@ public sealed partial class MainWindow
     private readonly Border composer = new();
     private List<Conversation> history = [];
     private readonly Dictionary<string,bool> openGroups = [];
-    private Button send = null!, stop = null!, fresh = null!, sync = null!;
+    private Button send = null!, steer = null!, enqueue = null!, fresh = null!, sync = null!;
+    private readonly FontIcon sendIcon = new() { Glyph = "\uE74A", FontSize = 14 };
+    private readonly TextBlock contextMeter = new() { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4,0,4,0) };
+    /// True while an input method is composing: Enter then belongs to it, not to send.
+    private bool composing;
+    private static bool Held(VirtualKey key) => Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
     private Button files = null!, project = null!;
     private bool sidebarOpen = true;
     private readonly Border hostDot = new() { Width=7, Height=7, CornerRadius=new CornerRadius(3.5), VerticalAlignment=VerticalAlignment.Center };
@@ -54,14 +59,14 @@ public sealed partial class MainWindow
 
     private Button PickerAction(bool model)
     {
-        var trigger=ActionButton(model?"模型":"命令", model?"\uE70D":"\uE756",()=>Task.CompletedTask,true);
+        var trigger=ActionButton(model?"模型":"命令", model?"\uE70D":"\uE756",()=>Task.CompletedTask,model);
         var menu=new MenuFlyout();
         menu.Opening+=(_,_)=>{
             menu.Items.Clear();
             if(model){
                 foreach(var option in availableModels){
                     var choice=new MenuFlyoutItem {Text=option.Label};
-                    choice.Click+=(_,_)=>{selectedModel=option; UpdatePickerTitle(); if(permissionMode=="auto"&&!option.Auto){permissionMode="default"; UpdatePermissionTitle(); status.Text="这个模型不支持自动权限，已改回默认权限";}};menu.Items.Add(choice);
+                    choice.Click+=(_,_)=>{selectedModel=option; UpdatePickerTitle(); if(permissionMode=="auto"&&!option.Auto){permissionMode="default"; UpdatePermissionTitle(); status.Text="此模型不支持自动权限，已改回默认";}};menu.Items.Add(choice);
                 }
             }else{
                 foreach(var name in availableCommands){
@@ -187,8 +192,13 @@ public sealed partial class MainWindow
         hostDot.Margin=new Thickness(8,0,0,0);hostPicker.Children.Add(hostDot);Grid.SetColumn(hosts,1);hostPicker.Children.Add(hosts);switcher.Children.Add(hostPicker);
         connectHost=ActionButton("连接","\uE839",() => ConnectDialogAsync(hosts.SelectedItem as HostProfile));
         hosts.SelectionChanged+=(_,_)=>UpdateHostPicker();
-        var tools = Row(connectHost,
-            ActionButton("添加主机","\uE710",() => ConnectDialogAsync(null)));
+        // Beside the server, as on macOS: the conversation, the project's files, its git changes, and search in files.
+        var chatMode = ActionButton("对话","\uE8BD",() => { showEditor = false; LayoutSplit(); return Task.CompletedTask; });
+        chatMode.Background = hover;
+        files = ActionButton("文件","\uE8B7",BrowseAsync);
+        var changes = ActionButton("Git","\uE8F1",ChangesAsync);
+        var findInFiles = ActionButton("搜索文件 · Ctrl+Shift+F","\uE721",SearchFilesAsync);
+        var tools = Row(connectHost,chatMode,files,changes,findInFiles);
         tools.Spacing = 0; Grid.SetColumn(tools,1); switcher.Children.Add(tools); sidebar.Children.Add(switcher);
         fresh = ActionButton("新建对话","\uE70F",NewConversationAsync);
         fresh.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.N, Modifiers = VirtualKeyModifiers.Control });
@@ -198,17 +208,19 @@ public sealed partial class MainWindow
             if(search.Visibility == Visibility.Visible) search.Focus(FocusState.Programmatic); else search.Text = "";
             return Task.CompletedTask;
         });
-        var heading = new Grid { Margin = new Thickness(0,4,0,0) };
-        heading.Children.Add(new TextBlock { Text = "项目", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8,0,0,0) });
-        var listTools = Row(fresh,sync,find); listTools.Spacing = 0; listTools.HorizontalAlignment = HorizontalAlignment.Right; heading.Children.Add(listTools);
+        sidebar.Children.Add(new TextBlock { Text = "项目", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ink, Margin = new Thickness(8,6,0,0) });
+        var heading = new Grid();
+        var listTools = Row(fresh,sync); listTools.Spacing = 0; heading.Children.Add(listTools);
+        find.HorizontalAlignment = HorizontalAlignment.Right; heading.Children.Add(find);
         sidebar.Children.Add(heading); search.FontSize = 13; sidebar.Children.Add(search);
         search.TextChanged += (_,_) => RenderHistory();
         At(railPanel,sidebar,0); projects.Padding = new Thickness(8,2,8,8); projects.Spacing = 1;
         At(railPanel,new ScrollViewer { Content = projects },1);
         var footer = new Grid { Margin = new Thickness(8,0,8,0), Padding = new Thickness(0,4,0,4), BorderBrush = edge, BorderThickness = new Thickness(0,1,0,0) };
-        archiveToggle = ActionButton("归档","\uE7B8",() => { showArchived = !showArchived; RenderHistory(); return Task.CompletedTask; },true);
+        archiveToggle = ActionButton("归档","\uE7B8",() => { showArchived = !showArchived; RenderHistory(); return Task.CompletedTask; });
         archiveToggle.HorizontalAlignment = HorizontalAlignment.Left; footer.Children.Add(archiveToggle);
-        var gear = ActionButton("设置","\uE713",SettingsAsync); gear.HorizontalAlignment = HorizontalAlignment.Right; footer.Children.Add(gear);
+        var gear = Row(ActionButton("添加服务器","\uE710",() => ConnectDialogAsync(null)),ActionButton("设置","\uE713",SettingsAsync));
+        gear.Spacing = 0; gear.HorizontalAlignment = HorizontalAlignment.Right; footer.Children.Add(gear);
         At(railPanel,footer,2);
 
         // The strip under the cards: connection, working directory, and the latest notice.
@@ -266,11 +278,14 @@ public sealed partial class MainWindow
 
         commandMenu=PickerAction(false);modelMenu=PickerAction(true);UpdatePickerTitle();
         var left=Row(ActionButton("附件","\uE710",UploadAsync),commandMenu,PermissionPicker());left.Spacing=2;toolbar.Children.Add(left);
-        send = Primary(ActionButton("发送","\uE74A",SendAsync)); send.CornerRadius = new CornerRadius(15); send.Width = send.Height = 30; send.Padding = new Thickness(0);
-        stop = ActionButton("停止","\uE71A",StopAsync);
-        var actions = Row(modelMenu,stop,send); actions.Spacing = 4; Grid.SetColumn(actions,1); toolbar.Children.Add(actions); input.Children.Add(toolbar);
-        inputCard.Background=surface;inputCard.BorderBrush=edge;inputCard.BorderThickness=new Thickness(1);inputCard.CornerRadius=new CornerRadius(14);inputCard.Padding=new Thickness(10,8,8,6);inputCard.Child=input;composeArea.Children.Add(inputCard);
-        files = ActionButton("远端文件","\uE8B7",BrowseAsync);
+        // One button, as on macOS: it sends, and while Claude replies it stops. Typing during a reply adds "send now" and "queue".
+        send = Primary(ActionButton("发送","\uE74A",()=>busy ? StopAsync() : SendAsync())); send.Content = sendIcon;
+        send.CornerRadius = new CornerRadius(15); send.Width = send.Height = 30; send.Padding = new Thickness(0);
+        steer = ActionButton("立即发送 · Ctrl+Enter","\uE724",()=>SendAsync(true));
+        enqueue = ActionButton("加入队列 · Enter","\uE8FD",()=>SendAsync());
+        contextMeter.Foreground = muted; ToolTipService.SetToolTip(contextMeter,"上下文");
+        var actions = Row(modelMenu,contextMeter,steer,enqueue,send); actions.Spacing = 4; Grid.SetColumn(actions,1); toolbar.Children.Add(actions); input.Children.Add(toolbar);
+        inputCard.Background=surface;inputCard.BorderBrush=edge;inputCard.BorderThickness=new Thickness(1);inputCard.CornerRadius=new CornerRadius(12);inputCard.Padding=new Thickness(10,8,8,6);inputCard.Child=input;composeArea.Children.Add(inputCard);
         project = ActionButton("工作目录","\uE838",() => Task.CompletedTask);
         directory.Width = 230; directory.Header = "远端工作目录";
         project.Flyout = new Flyout { Content = directory };
@@ -278,10 +293,8 @@ public sealed partial class MainWindow
         var more=ActionButton("更多操作","\uE712",()=>Task.CompletedTask);
         var tunnels=ActionButton("端口转发","\uE968",()=>Task.CompletedTask,true);
         var tunnelFlyout=new Flyout { Content=TunnelPanel() }; tunnelFlyout.Opening+=(_,_)=>RenderTunnels(); tunnels.Flyout=tunnelFlyout;
-        var changes=ActionButton("Git 变更","\uE8F1",ChangesAsync,true);
-        var findInFiles=ActionButton("在文件中搜索","\uE721",SearchFilesAsync,true);
-        var quick=ActionButton("快速打开文件（Ctrl+P）","\uE8E5",QuickOpenAsync,true);
-        more.Flyout=new Flyout { Content=new StackPanel {Children={ActionButton("状态：用量、MCP、插件、Agent","\uE9D9",StatusAsync,true),ActionButton("对话文本：跨消息选择和复制","\uE8B3",TranscriptAsync,true),changes,findInFiles,quick,project,editors,tunnels,update}} };
+        var quick=ActionButton("快速打开 · Ctrl+P","\uE8E5",QuickOpenAsync,true);
+        more.Flyout=new Flyout { Content=new StackPanel {Children={ActionButton("状态","\uE9D9",StatusAsync,true),ActionButton("对话文本","\uE8B3",TranscriptAsync,true),quick,project,editors,tunnels,update}} };
         var quickKey=new KeyboardAccelerator { Key=VirtualKey.P, Modifiers=VirtualKeyModifiers.Control };
         quickKey.Invoked+=async (_,e)=>{ e.Handled=true; await RunAsync(QuickOpenAsync); };
         var findKey=new KeyboardAccelerator { Key=VirtualKey.F, Modifiers=VirtualKeyModifiers.Control|VirtualKeyModifiers.Shift };
@@ -289,12 +302,20 @@ public sealed partial class MainWindow
         root.KeyboardAccelerators.Add(quickKey); root.KeyboardAccelerators.Add(findKey);
         restartButton=ActionButton("重启更新","\uE895",InstallUpdateAsync,true);
         restartButton.Visibility=Visibility.Collapsed;
-        var headerActions = Row(restartButton,files,more);
+        var headerActions = Row(restartButton,more);
         headerActions.Spacing = 2; Grid.SetColumn(headerActions,1); bar.Children.Add(headerActions);
         directory.TextChanged += (_,_) => UpdateSubtitle();
         prompt.TextChanged += (_,_) => UpdateActions();
-        prompt.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.Enter, Modifiers = VirtualKeyModifiers.Control });
-        prompt.KeyboardAccelerators[0].Invoked += async (_,e) => { e.Handled = true; if(send.IsEnabled) await RunAsync(SendAsync); };
+        // Enter sends and Shift+Enter breaks the line, as on macOS; Ctrl+Enter hands the message to the running reply.
+        prompt.TextCompositionStarted += (_,_) => composing = true; prompt.TextCompositionEnded += (_,_) => composing = false;
+        prompt.PreviewKeyDown += async (_,e) =>
+        {
+            if(e.Key != VirtualKey.Enter || composing || Held(VirtualKey.Shift)) return;
+            e.Handled = true; bool now = Held(VirtualKey.Control);
+            if(agent?.Connected == true && !string.IsNullOrWhiteSpace(prompt.Text)) await RunAsync(()=>SendAsync(now));
+        };
+        // Esc stops the reply wherever the focus is. An open menu or dialog takes the key first and only closes.
+        root.KeyDown += async (_,e) => { if(e.Key != VirtualKey.Escape || !busy || stopping) return; e.Handled = true; await RunAsync(StopAsync); };
         root.SizeChanged += (_,e) => { if((e.PreviousSize.Width >= 720) != (e.NewSize.Width >= 720) || e.PreviousSize.Width == 0) { sidebarOpen = e.NewSize.Width >= 720; LayoutSidebar(); } };
         Content = root; RenderHistory();
     }
@@ -309,6 +330,8 @@ public sealed partial class MainWindow
     private bool IsCurrent(Conversation c) => conversation is not null && c.Directory == conversation.Directory &&
         ((c.SessionId ?? c.Reference) is { } id ? id == (conversation.SessionId ?? conversation.Reference) : ReferenceEquals(c, conversation));
 
+    /// The icon that leads a sidebar row. One width for folders and conversations, so their icons and names line up in two columns.
+    private FontIcon RowIcon(string glyph) => new() { Glyph = glyph, FontSize = 14, Width = 16, Foreground = muted };
     private TextBlock SectionLabel(string text) => new() { Text = text, Foreground = muted, FontSize = 12, Margin = new Thickness(8,8,0,2) };
     private void RenderHistory()
     {
@@ -317,9 +340,10 @@ public sealed partial class MainWindow
         var archive = Sessions.Visible(history,local,HostKeyOrEmpty,search.Text,true);
         if(parked.Count > 0)
         {
-            // Conversations left running, newest first: one click brings each back as it was.
-            projects.Children.Add(SectionLabel("后台对话"));
-            foreach(var waiting in parked.Values.Reverse()) projects.Children.Add(ParkedRow(waiting));
+            // A conversation left running shows its state on its own row in the tree, as on macOS.
+            // One the server has not listed yet gets a row above the tree, newest first.
+            var listed = list.Concat(archive).Select(entry => ParkedFor(entry.Conversation)).ToHashSet();
+            foreach(var waiting in parked.Values.Reverse()) if(!listed.Contains(waiting)) projects.Children.Add(ParkedRow(waiting));
         }
         var pinned = list.Where(entry => entry.Pinned).ToList();
         if(pinned.Count > 0)
@@ -341,15 +365,17 @@ public sealed partial class MainWindow
             var arrow = new FontIcon { FontSize=9, Foreground=muted, Width=12 };
             void SetExpanded(bool value) { expanded=value;arrow.Glyph=value?"\uE70D":"\uE76C";items.Visibility=value?Visibility.Visible:Visibility.Collapsed; }
             var section = Flat(Button(folder ?? path,()=> { SetExpanded(!expanded); openGroups[groupId]=expanded;return Task.CompletedTask; }));
-            var label = Row(arrow,new FontIcon {Glyph="\uE8B7",FontSize=14,Foreground=muted},new TextBlock {Text=string.IsNullOrEmpty(folder)?path:folder,FontSize=13,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,TextTrimming=TextTrimming.CharacterEllipsis});
+            var label = Row(arrow,RowIcon("\uE8B7"),new TextBlock {Text=string.IsNullOrEmpty(folder)?path:folder,FontSize=13,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,TextTrimming=TextTrimming.CharacterEllipsis,VerticalAlignment=VerticalAlignment.Center});
             label.Spacing = 6; section.Content = label; section.Padding = new Thickness(6,5,8,5);
             section.HorizontalContentAlignment=HorizontalAlignment.Left;section.HorizontalAlignment=HorizontalAlignment.Stretch;
-            AutomationProperties.SetName(section,path);ToolTipService.SetToolTip(section,path);items.Margin=new Thickness(14,0,0,0);
+            AutomationProperties.SetName(section,path);ToolTipService.SetToolTip(section,path);
+            // A conversation's icon sits under its folder's: the folder row's padding, arrow and gap, less the row's own padding.
+            items.Margin=new Thickness(16,0,0,0);
             var menu=new MenuFlyout();
-            menu.Items.Add(MenuItem("在此目录新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); }));
+            menu.Items.Add(MenuItem("在此目录新建对话","\uE710",() => NewConversationAsync(path)));
             menu.Items.Add(MenuItem("把此项目的历史移到废纸篓…","\uE74D",() => TrashProjectAsync(path)));
             section.ContextFlyout=menu;
-            var add = ActionButton("在此目录新建对话","\uE710",async () => { directory.Text = path; await NewConversationAsync(); });
+            var add = ActionButton("在此目录新建对话","\uE710",() => NewConversationAsync(path));
             var header = new Grid(); header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             header.Children.Add(section); Grid.SetColumn(add,1); header.Children.Add(add);
             SetExpanded(expanded);projects.Children.Add(header);projects.Children.Add(items);
@@ -401,8 +427,8 @@ public sealed partial class MainWindow
         if(empty) {
             homeTitle.Text = online ? "新对话" : host == null ? "开始使用" : agent?.SshConnected == true ? "设置服务器" : "连接服务器";
             homeHint.Text = online ? host!.Name : host == null
-                ? "在这台电脑上使用服务器里的 Claude Code：代码和 Claude 都在服务器上运行，这里负责对话和审批。\n\n1. 准备一台能用 SSH 登录的 Linux 或 macOS 服务器\n2. 添加服务器：填写地址和密码\n3. 自动检查环境：缺少 Claude Code 或 Node.js 时一键安装，然后登录 Claude"
-                : agent?.SshConnected == true ? "SSH 已连接，按下面的提示完成设置。" : "使用服务器上的 Claude Code。";
+                ? "添加一台能用 SSH 登录的服务器"
+                : agent?.SshConnected == true ? "按提示完成设置" : "";
             homeActions.Children.Clear();
             if(!online) {
                 var add = Primary(ActionButton(host == null ? "添加服务器" : "重新连接","\uE710",()=>ConnectDialogAsync(host),true));
@@ -421,8 +447,13 @@ public sealed partial class MainWindow
     }
     private void UpdateActions()
     {
-        send.IsEnabled = agent?.Connected == true && !string.IsNullOrWhiteSpace(prompt.Text);
-        ToolTipService.SetToolTip(send, busy ? "加入队列，当前回复结束后发送" : "发送");
-        stop.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        bool online = agent?.Connected == true, typed = !string.IsNullOrWhiteSpace(prompt.Text);
+        string name = busy ? (stopping ? "正在停止…" : "停止 · Esc") : "发送 · Enter";
+        sendIcon.Glyph = busy ? "\uE71A" : "\uE74A";
+        send.IsEnabled = online && (busy ? !stopping : typed);
+        AutomationProperties.SetName(send, name); ToolTipService.SetToolTip(send, name);
+        steer.Visibility = enqueue.Visibility = busy && typed && online ? Visibility.Visible : Visibility.Collapsed;
+        contextMeter.Text = Turn.Context(lastState) ?? "";
+        contextMeter.Visibility = contextMeter.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 }

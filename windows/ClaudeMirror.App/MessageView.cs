@@ -38,6 +38,9 @@ public sealed partial class MainWindow
         public bool User => user;
         /// The message's text without tool calls or thinking.
         public string Plain => plain;
+        /// The message as transcript entries: a reply splits where Claude read a message sent while it ran.
+        public IEnumerable<(bool User, string Text)> Entries => entries ?? [(user, plain)];
+        private List<(bool User, string Text)>? entries;
 
         public MessageView(MainWindow window,bool user,string text)
         {
@@ -69,7 +72,7 @@ public sealed partial class MainWindow
             var blocks=message?["blocks"] as JsonArray ?? message?["content"] as JsonArray;
             if(user || blocks is not { Count: > 0 })
             {
-                plain=Protocol.MessageText(message);
+                plain=Protocol.MessageText(message); entries=null;
                 body.Children.Clear(); parts.Clear();
                 if(user) body.Children.Add(Label(plain,14,window.ink));
                 else if(plain.Length>0) body.Children.Add(window.MarkdownView(plain,null,live));
@@ -79,6 +82,7 @@ public sealed partial class MainWindow
             {
                 if(parts.Count==0) body.Children.Clear();
                 plain=string.Join("\n\n",blocks.Where(b=>Presentation.Text(b?["type"])=="text").Select(b=>Presentation.Text(b?["text"])));
+                entries=Transcript.Reply(blocks);
                 for(int i=0;i<blocks.Count;i++)
                 {
                     var block=blocks[i]!; var type=Presentation.Text(block["type"]) ?? "";
@@ -113,6 +117,15 @@ public sealed partial class MainWindow
                 case "thinking":
                     var text=Presentation.Text(block["text"]) ?? Presentation.Text(block["thinking"]) ?? "";
                     return new("", "", window.Disclosure("\uE9CE","思考过程",Presentation.FirstLine(text,70),null,false,()=>Label(text,13,window.muted)), null);
+                case "user":
+                    // A message sent while this reply was running, shown where Claude read it.
+                    bool cancelled=block["cancelled"]?.GetValue<bool>()==true, pending=block["pending"]?.GetValue<bool>()==true;
+                    var said=Label(Presentation.Text(block["text"]) ?? "",14,window.ink);
+                    if(cancelled) said.TextDecorations=Windows.UI.Text.TextDecorations.Strikethrough;
+                    var steered=new StackPanel { Spacing=3, HorizontalAlignment=HorizontalAlignment.Right, MaxWidth=540 };
+                    steered.Children.Add(new Border { Child=said, Background=window.bubble, CornerRadius=new CornerRadius(12), Padding=new Thickness(12,8,12,8), Opacity=cancelled||pending?.6:1, HorizontalAlignment=HorizontalAlignment.Right });
+                    if(cancelled||pending) { var note=Label(cancelled?"未送达":"等待读取…",12,window.muted); note.HorizontalAlignment=HorizontalAlignment.Right; steered.Children.Add(note); }
+                    return new("", "", steered, null);
                 case "notice":
                     return new("", "", Label(Presentation.Text(block["text"]) ?? "",13,Presentation.Text(block["level"])=="error"?window.danger:window.muted), null);
                 default:

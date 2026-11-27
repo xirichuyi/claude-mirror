@@ -29,7 +29,7 @@ public sealed partial class MainWindow
         }
         Line("版本", typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "未知");
         Line("已保存的服务器", local.Hosts.Count == 0 ? "无" : string.Join("、", local.Hosts.Select(saved => saved.Name)));
-        Line("本机数据", "服务器列表、主机指纹、对话的名称和固定状态保存在 LocalAppData\\claude-mirror。密码和私钥口令不保存。");
+        Line("本机数据", "LocalAppData\\claude-mirror · 不保存密码");
         await new ContentDialog { XamlRoot = root.XamlRoot, Title = "设置", Content = panel, CloseButtonText = "完成", Background = canvas }.ShowAsync();
     }
 }

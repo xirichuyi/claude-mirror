@@ -65,6 +65,41 @@ public class PresentationTests
     }
 
     [Fact]
+    public void AQueuedMessageIsTakenOutOnceToSendNowOrToEdit()
+    {
+        var queue = new SendQueue();
+        var first = queue.Add("one"); var second = queue.Add("two");
+        queue.Pause();
+        Assert.Equal("two", queue.Take(second.Id)!.Text);
+        Assert.Null(queue.Take(second.Id));
+        Assert.True(queue.Paused);
+        Assert.Equal("one", queue.Take(first.Id)!.Text);
+        Assert.False(queue.Paused); // Nothing is left to hold back.
+    }
+
+    [Fact]
+    public void ATranscriptSplitsAReplyWhereClaudeReadASteeredMessage()
+    {
+        var blocks = (JsonArray)JsonNode.Parse("""
+            [{"type":"text","text":"先看测试。"},{"type":"tool","name":"Bash"},{"type":"text","text":"失败了一条。"},
+             {"type":"user","id":"u1","text":"过期的也测一下"},{"type":"user","id":"u2","text":"还没读到","pending":true},
+             {"type":"user","id":"u3","text":"没送达","cancelled":true},{"type":"text","text":"好，加上了。"}]
+            """)!;
+        Assert.Equal([(false, "先看测试。\n\n失败了一条。"), (true, "过期的也测一下"), (false, "好，加上了。")], Transcript.Reply(blocks));
+        Assert.Empty(Transcript.Reply([]));
+    }
+
+    [Fact]
+    public void ContextInUseReadsAsUsedOverTotal()
+    {
+        Assert.Equal("128k / 1M", Turn.Context(JsonNode.Parse("""{"context":{"usedTokens":128400,"maxTokens":1000000}}""")));
+        Assert.Equal("950 / 200k", Turn.Context(JsonNode.Parse("""{"context":{"usedTokens":950,"maxTokens":200000}}""")));
+        Assert.Equal("1.3M", Turn.Tokens(1_250_000));
+        Assert.Null(Turn.Context(JsonNode.Parse("""{"status":"idle"}""")));
+        Assert.Null(Turn.Context(JsonNode.Parse("""{"context":{"usedTokens":10,"maxTokens":0}}""")));
+    }
+
+    [Fact]
     public void QueueHoldsMessagesUntilTheReplyEndsAndPausesAfterAFailure()
     {
         var queue = new SendQueue();
