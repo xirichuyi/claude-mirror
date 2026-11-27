@@ -103,23 +103,35 @@ public sealed partial class MainWindow
         OpenToolTab("diff:" + path, "± " + Path.GetFileName(path), ToolArea(bar, SplitDiff(rows, path, () => UpdateReviewButton(send))));
     }
 
-    private readonly List<ReviewComment> reviewComments = [];
-    private void UpdateReviewButton(Button button)
+    /// Diff comments per project directory, waiting to be sent together.
+    private readonly Dictionary<string, List<ReviewComment>> reviewComments = [];
+    private List<ReviewComment> ReviewComments
     {
-        button.IsEnabled = reviewComments.Count > 0;
-        if (button.Content is StackPanel { Children: [_, TextBlock label] }) label.Text = reviewComments.Count > 0 ? $"发送评论 {reviewComments.Count}" : "发送评论";
+        get
+        {
+            if (!reviewComments.TryGetValue(directory.Text, out var list)) reviewComments[directory.Text] = list = [];
+            return list;
+        }
     }
 
-    /// <summary>Every diff comment goes to Claude as one message; while it replies the message waits in the queue.</summary>
+    private void UpdateReviewButton(Button button)
+    {
+        var count = ReviewComments.Count;
+        button.IsEnabled = count > 0;
+        if (button.Content is StackPanel { Children: [_, TextBlock label] }) label.Text = count > 0 ? $"发送评论 {count}" : "发送评论";
+    }
+
+    /// <summary>Every diff comment goes to Claude as one message; while it replies the message waits in the queue. On failure the comments stay.</summary>
     private async Task SendReviewAsync()
     {
-        if (reviewComments.Count == 0) return;
+        var comments = ReviewComments;
+        if (comments.Count == 0) return;
         if (conversation is not null && directory.Text != conversation.Directory) throw new IOException("切换工作目录请新建对话");
         RequireAgent();
-        var text = ReviewComment.Prompt(reviewComments, directory.Text);
-        reviewComments.Clear();
+        var text = ReviewComment.Prompt(comments, directory.Text);
         if (busy) { queue.Add(text); RenderQueue(); }
         else { queue.Resume(); await SendTextAsync(text); }
+        comments.Clear();
         showEditor = false; LayoutSplit();
     }
 
@@ -130,7 +142,7 @@ public sealed partial class MainWindow
         var add = new Button { Content = "添加" };
         add.Click += (_, _) =>
         {
-            if (ReviewComment.For(row, path, box.Text) is { } comment) { reviewComments.Add(comment); changed(); }
+            if (ReviewComment.For(row, path, box.Text) is { } comment) { ReviewComments.Add(comment); changed(); }
             flyout.Hide();
         };
         var location = row.RightLine is { } right ? $"{Path.GetFileName(path)}:{right}" : $"{Path.GetFileName(path)} 删除前第 {row.LeftLine} 行";
@@ -145,7 +157,7 @@ public sealed partial class MainWindow
     {
         if (rows.Count == 0) return new TextBlock { Text = "没有可显示的差异", Foreground = muted, FontSize = 13, Margin = new Thickness(14) };
         var left = new StackPanel(); var right = new StackPanel();
-        bool Commented(SplitRow row) => reviewComments.Any(c => c.Path == path && (c.Removed ? row.RightLine is null && row.LeftLine == c.Line : row.RightLine == c.Line));
+        bool Commented(SplitRow row) => ReviewComments.Any(c => c.Path == path && (c.Removed ? row.RightLine is null && row.LeftLine == c.Line : row.RightLine == c.Line));
         Border Line(SplitRow row, int? number, string? text, Brush? tint)
         {
             var line = new Border

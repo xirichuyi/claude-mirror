@@ -89,8 +89,9 @@ class AppModel(private val application: Application) {
 
     /** The conversation to show, asked for from a notification. */
     val target = MutableStateFlow<String?>(null)
-    /** Diff line comments waiting to be sent together. */
-    val reviewComments = MutableStateFlow<List<claudemirror.core.ReviewComment>>(emptyList())
+    /** Diff line comments per [reviewKey], waiting to be sent together. */
+    val reviewComments = MutableStateFlow<Map<String, List<claudemirror.core.ReviewComment>>>(emptyMap())
+    fun reviewKey(host: String, directory: String) = "$host\n$directory"
 
     internal val notices = Notices(application)
     private var foreground = false
@@ -330,11 +331,12 @@ class AppModel(private val application: Application) {
 
     /** Sends every diff comment as one message to the latest conversation in [directory], or a new one, and opens it. */
     fun sendReview(host: HostConfig, directory: String) {
-        val comments = reviewComments.value
+        val key = reviewKey(host.id, directory)
+        val comments = reviewComments.value[key].orEmpty()
         if (comments.isEmpty()) return
         val session = sessions.value.filter { it.hostId == host.id && it.directory == directory }.maxByOrNull { it.updatedAt } ?: createSession(host, directory)
         runCatching { engine.submit(session.id, claudemirror.core.ReviewComment.prompt(comments, directory), emptyList(), false) }
-            .onSuccess { reviewComments.value = emptyList(); target.value = session.id }
+            .onSuccess { reviewComments.update { it - key }; target.value = session.id }
             .onFailure { snackbar.tryEmit(it.message ?: "发送失败") }
     }
 

@@ -27,8 +27,8 @@ struct SplitDiffView: View {
                 Button { move(1, diff: diff) } label: { Image(systemName: "chevron.down") }
                     .help("下一处改动").accessibilityLabel("下一处改动").disabled(diff.changes.isEmpty)
                 Spacer(minLength: 4)
-                if !model.reviewComments.isEmpty {
-                    Button { showComments = true } label: { Label("\(model.reviewComments.count)", systemImage: "text.bubble") }
+                if !model.activeReviewComments.isEmpty {
+                    Button { showComments = true } label: { Label("\(model.activeReviewComments.count)", systemImage: "text.bubble") }
                         .help("评论").accessibilityLabel("评论")
                         .popover(isPresented: $showComments, arrowEdge: .bottom) { ReviewCommentList() }
                     Button { model.sendReviewComments() } label: { Image(systemName: "paperplane") }
@@ -43,8 +43,10 @@ struct SplitDiffView: View {
                     .frame(maxHeight: .infinity)
             } else {
                 PairedDiffPane(text: text, path: path, selectedChange: selectedChange,
-                               commented: Set(diff.rows.filter { row in model.reviewComments.contains { $0.path == path && $0.matches(row) } }.map(\.id))) { index in
-                    if diff.rows.indices.contains(index), diff.rows[index].kind != .hunk { commenting = diff.rows[index] }
+                               commented: Set(diff.rows.filter { row in model.activeReviewComments.contains { $0.path == path && $0.matches(row) } }.map(\.id))) { index in
+                    // Only source lines take a comment: Git's notes about a binary or a mode change sit before any hunk.
+                    guard let hunk = diff.rows.firstIndex(where: { $0.kind == .hunk }), index > hunk, diff.rows.indices.contains(index), diff.rows[index].kind != .hunk else { return }
+                    commenting = diff.rows[index]
                 }
             }
             WorkbenchStatusBar {
@@ -53,7 +55,7 @@ struct SplitDiffView: View {
             }
         }.onChange(of: text) { selectedChange = 0 }
         .sheet(item: $commenting) { row in
-            ReviewCommentSheet(row: row, path: path) { comment in model.reviewComments.append(comment) }
+            ReviewCommentSheet(row: row, path: path) { comment in model.addReviewComment(comment) }
         }
     }
     private func move(_ offset: Int, diff: SplitDiff) {
@@ -114,14 +116,14 @@ private struct ReviewCommentList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(model.reviewComments) { comment in
+            ForEach(model.activeReviewComments) { comment in
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(comment.location(root: model.active?.directory)).font(.system(.caption, design: .monospaced)).foregroundStyle(WorkbenchTheme.inkMuted)
                         Text(comment.text).font(.callout).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 8)
-                    Button { model.reviewComments.removeAll { $0.id == comment.id } } label: { Image(systemName: "xmark") }
+                    Button { model.removeReviewComment(comment.id) } label: { Image(systemName: "xmark") }
                         .buttonStyle(QuietButtonStyle()).help("删除").accessibilityLabel("删除评论")
                 }
             }

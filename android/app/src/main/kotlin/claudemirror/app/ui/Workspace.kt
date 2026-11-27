@@ -130,7 +130,8 @@ fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> 
     var opened by remember { mutableStateOf<claudemirror.core.GitChange?>(null) }
     LaunchedEffect(attempt) { state = Loaded.Waiting; state = load { model.gitStatus(host, directory) } }
     val status = (state as? Loaded.Ready)?.value
-    val comments by model.reviewComments.collectAsStateWithLifecycle()
+    val key = model.reviewKey(hostId, directory)
+    val comments = model.reviewComments.collectAsStateWithLifecycle().value[key].orEmpty()
 
     Scaffold(
         topBar = {
@@ -179,7 +180,7 @@ fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> 
             LaunchedEffect(again) { diff = Loaded.Waiting; diff = load { model.gitDiff(host, change.path) } }
             Loading(diff, Modifier.fillMaxSize(), onRetry = { again++ }) { text ->
                 if (text.isBlank()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("无差异", color = palette.muted) }
-                else ReviewableDiff(model, change.path, text, comments)
+                else ReviewableDiff(model, key, change.path, text, comments)
             }
         }
     }
@@ -246,8 +247,13 @@ private fun byteSize(bytes: Long): String = when {
 
 /** A diff whose lines take a comment on tap; commented lines carry a mark. */
 @Composable
-private fun ReviewableDiff(model: AppModel, path: String, text: String, comments: List<ReviewComment>) {
+private fun ReviewableDiff(model: AppModel, key: String, path: String, text: String, comments: List<ReviewComment>) {
     val lines = remember(text) { unifiedLines(text) }
+    // A binary or mode-only change has no source lines; Git's own words say what changed.
+    if (lines.none { it.sign != '@' }) {
+        Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) { CodeBox(text, "diff", title = null) }
+        return
+    }
     var commenting by remember { mutableStateOf<UnifiedLine?>(null) }
     LazyColumn(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
         items(lines.size) { index ->
@@ -273,7 +279,7 @@ private fun ReviewableDiff(model: AppModel, path: String, text: String, comments
             text = { OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), placeholder = { Text("评论") }, minLines = 3) },
             confirmButton = {
                 TextButton(enabled = note.isNotBlank(), onClick = {
-                    ReviewComment.of(line, path, note)?.let { comment -> model.reviewComments.update { it + comment } }
+                    ReviewComment.of(line, path, note)?.let { comment -> model.reviewComments.update { it + (key to it[key].orEmpty() + comment) } }
                     commenting = null
                 }) { Text("添加") }
             },

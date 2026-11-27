@@ -129,8 +129,9 @@ final class AppModel: ObservableObject {
     }
     @Published var drafts: [String: String] = [:]
     @Published var attachments: [String: [Attachment]] = [:]
-    /// Diff line comments waiting to be sent to the active conversation together.
-    @Published var reviewComments: [ReviewComment] = []
+    /// Diff line comments per conversation, waiting to be sent to it together.
+    @Published var reviewComments: [String: [ReviewComment]] = [:]
+    var activeReviewComments: [ReviewComment] { activeId.flatMap { reviewComments[$0] } ?? [] }
     @Published var deferredPermissionId: String?
     @Published var presentation: AppPresentation?
     @Published var fatalError: String?
@@ -893,13 +894,23 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Sends every diff comment as one message, queued behind a running reply. The composer is left alone.
+    func addReviewComment(_ comment: ReviewComment) {
+        guard let id = activeId else { return }
+        reviewComments[id, default: []].append(comment)
+    }
+
+    func removeReviewComment(_ comment: ReviewComment.ID) {
+        guard let id = activeId else { return }
+        reviewComments[id]?.removeAll { $0.id == comment }
+    }
+
+    /// Sends the active conversation's diff comments as one message, queued behind a running reply. The composer is left alone.
     func sendReviewComments() {
-        guard let engine, let id = activeId, !reviewComments.isEmpty else { return }
+        guard let engine, let id = activeId, let comments = reviewComments[id], !comments.isEmpty else { return }
         guard isConnected else { show("请先连接 SSH 服务器"); return }
         do {
-            try engine.submit(id, text: ReviewComment.prompt(reviewComments, root: active?.directory), attachments: [], steer: false)
-            reviewComments = []
+            try engine.submit(id, text: ReviewComment.prompt(comments, root: active?.directory), attachments: [], steer: false)
+            reviewComments[id] = nil
         } catch { show(error.localizedDescription) }
     }
 
