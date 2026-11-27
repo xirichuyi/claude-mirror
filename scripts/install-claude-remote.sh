@@ -51,15 +51,15 @@ if [ -n "$members" ]; then
   [ "$(uname -s)" = Linux ] && [ "$(id -u)" -eq 0 ] || usage 'Managing members needs a root SSH login on Linux.'
   command -v useradd >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1 || usage 'This server has no useradd or runuser.'
   if [ "$members" != list ]; then
-    [[ "$member" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$member" != root ] || usage "Invalid account name: $member"
+    [[ "$member" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$member" != root ] || usage "账号名无效：$member"
     if managed "$member"; then :
-    elif [ "$members" = remove ]; then usage "$member is not a member added by Claude Mirror."
-    elif getent passwd "$member" >/dev/null; then usage "Account $member already exists. Choose another name; existing accounts are never modified."
+    elif [ "$members" = remove ]; then usage "$member 不是成员"
+    elif getent passwd "$member" >/dev/null; then usage "账号 $member 已存在"
     fi
   fi
   if [ "$members" = add ]; then
-    [[ "$key" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\ [A-Za-z0-9+/]+=*(\ [^[:cntrl:]]*)?$ ]] || usage 'Not an SSH public key.'
-    ! command -v ssh-keygen >/dev/null 2>&1 || ssh-keygen -lf /dev/stdin <<<"$key" >/dev/null 2>&1 || usage 'Not an SSH public key.'
+    [[ "$key" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\ [A-Za-z0-9+/]+=*(\ [^[:cntrl:]]*)?$ ]] || usage '不是 SSH 公钥'
+    ! command -v ssh-keygen >/dev/null 2>&1 || ssh-keygen -lf /dev/stdin <<<"$key" >/dev/null 2>&1 || usage '不是 SSH 公钥'
   fi
 fi
 # Everything about the runner is checked before anything is installed.

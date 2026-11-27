@@ -247,11 +247,7 @@ private fun MembersDialog(model: AppModel, host: HostConfig, onDismiss: () -> Un
                         leadingContent = { Icon(Icons.Filled.Person, null) },
                         headlineContent = { Text(member.name) },
                         supportingContent = if (member.fingerprint.isEmpty()) null else { { Text(member.fingerprint, maxLines = 1, fontFamily = FontFamily.Monospace) } },
-                        trailingContent = {
-                            if (removing == member.name) TextButton(enabled = !busy, onClick = { removing = null; perform { model.removeMember(host, member.name) } }) {
-                                Text("删除账号和文件", color = MaterialTheme.colorScheme.error)
-                            } else IconButton(enabled = !busy, onClick = { removing = member.name }) { Icon(Icons.Filled.Delete, "删除 " + member.name) }
-                        },
+                        trailingContent = { IconButton(enabled = !busy, onClick = { removing = member.name }) { Icon(Icons.Filled.Delete, "删除 " + member.name) } },
                     )
                 }
                 OutlinedTextField(name, { name = it.trim() }, label = { Text("账号") }, singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
@@ -266,4 +262,13 @@ private fun MembersDialog(model: AppModel, host: HostConfig, onDismiss: () -> Un
         },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") } },
     )
+    removing?.let { member ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("删除 $member") },
+            text = { Text("账号和主目录一并删除") },
+            confirmButton = { TextButton(onClick = { removing = null; perform { model.removeMember(host, member) } }) { Text("删除", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("取消") } },
+        )
+    }
 }
