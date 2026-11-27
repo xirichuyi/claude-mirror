@@ -22,7 +22,7 @@ jobs:
       tag: ${{ steps.check.outputs.tag }}
       revision: ${{ steps.check.outputs.revision }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.rehearsal && github.sha || inputs.tag || github.ref }}
       - id: check
@@ -51,12 +51,12 @@ jobs:
     env:
       TAG: ${{ needs.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.revision }}
       - name: Select stable Xcode
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -64,7 +64,7 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: python3 macos/scripts/test-publish-appcast.py
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: python3 -m pip install Pillow==12.2.0
@@ -82,7 +82,7 @@ jobs:
         run: |
           test -n "$SPARKLE_PRIVATE_KEY"
           bash macos/scripts/generate-appcast.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-stable
           path: |
@@ -101,28 +101,28 @@ jobs:
     env:
       TAG: ${{ needs.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.revision }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts && npm run build
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: macos-stable
           path: staging
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: tether-windows-installer
           path: staging
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: tether-windows-x64
           path: staging
@@ -142,7 +142,7 @@ jobs:
           printf '%s' "$SPARKLE_PRIVATE_KEY" | macos/.build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file - -p staging/windows-update.json > staging/windows-update.sig
           swift scripts/check-update-signature.swift staging/windows-update.json staging/windows-update.sig
           python3 scripts/stable-release.py verify "$TAG" staging
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: inputs.rehearsal
         with:
           name: stable-release-rehearsal
