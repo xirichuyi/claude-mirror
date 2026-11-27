@@ -3,7 +3,8 @@ import Foundation
 /// A login shell started in `directory`; a folder that is gone leaves it at home.
 public func loginShellCommand(in directory: String) -> String {
     let folder = directory == "~" || directory.hasPrefix("~/") ? "\"$HOME\"" + shellQuote(String(directory.dropFirst())) : shellQuote(directory)
-    return "cd -- \(folder) 2>/dev/null || cd; exec \"${SHELL:-/bin/sh}\" -l"
+    // The login shell may be fish or csh, so the POSIX part runs under sh.
+    return "sh -c " + shellQuote("cd -- \(folder) 2>/dev/null || cd; exec \"${SHELL:-/bin/sh}\" -l")
 }
 
 public func shellQuote(_ value: String) -> String {
