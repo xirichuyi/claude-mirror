@@ -24,6 +24,7 @@
   "build": {
     "appId": "local.remotecc.desktop",
     "productName": "RemoteCC",
+    "icon": "assets/icon.png",
     "directories": {
       "output": "dist"
     },
