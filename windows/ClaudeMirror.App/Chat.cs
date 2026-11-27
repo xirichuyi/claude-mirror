@@ -155,10 +155,17 @@ public sealed partial class MainWindow
             if (Presentation.Text(request?["message"]) is { } message) panel.Children.Add(new TextBlock { Text = message, FontSize = 13, Foreground = ink, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
             bool link = Presentation.Text(request?["mode"]) == "url" && Uri.TryCreate(Presentation.Text(request?["url"]), UriKind.Absolute, out var url) && url.Scheme is "http" or "https";
             if (link) panel.Children.Add(new HyperlinkButton { Content = "打开 " + Presentation.Text(request?["url"]), NavigateUri = new Uri(Presentation.Text(request!["url"])!), Padding = new Thickness(0) });
-            else panel.Children.Add(new TextBlock { Text = "不支持此表单", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
+            var single = link ? null : PermissionText.SingleChoice(request);
+            if (!link && single is null) panel.Children.Add(new TextBlock { Text = "不支持此表单", FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
             Choice("取消", false, () => Answer(new { interaction = new { action = "cancel" } }));
             Choice("拒绝", false, () => Answer(new { interaction = new { action = "decline" } }));
             if (link) Choice("已完成，继续", true, () => Answer(new { interaction = new { action = "accept" } }));
+            if (single is { } form)
+                for (int i = form.Options.Count - 1; i >= 0; i--)
+                {
+                    var value = form.Options[i].Value;
+                    Choice(form.Options[i].Label, i == 0, () => Answer(new { interaction = new { action = "accept", content = new Dictionary<string, string> { [form.Name] = value } } }));
+                }
         }
         else
         {
