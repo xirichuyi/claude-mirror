@@ -145,10 +145,11 @@ install_node() {
 }
 if [ -x "$NODE_HOME/bin/node" ] && node_ok "$NODE_HOME/bin/node"; then
   echo "Node.js ready: $("$NODE_HOME/bin/node" --version) ($NODE_HOME)"
-elif command -v node >/dev/null 2>&1 && node_ok node; then
+# --node-only runs because the app's own search found no usable node; another one on PATH would not help.
+elif [ "$node_only" = no ] && command -v node >/dev/null 2>&1 && node_ok node; then
   echo "Node.js ready: $(node --version) ($(command -v node))"
 else
-  if command -v node >/dev/null 2>&1; then echo "Node.js $(node --version 2>/dev/null) is too old; Claude Mirror needs 18.14 or newer."; fi
+  if command -v node >/dev/null 2>&1 && ! node_ok node; then echo "Node.js $(node --version 2>/dev/null) is too old; Claude Mirror needs 18.14 or newer."; fi
   install_node || { echo 'Claude Mirror needs Node.js >=18.14 on the remote server.' >&2; exit 3; }
 fi
 [ "$node_only" = no ] || exit 0
