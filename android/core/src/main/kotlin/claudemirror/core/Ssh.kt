@@ -107,6 +107,10 @@ class SshLauncher(
             override fun findExistingAlgorithms(hostname: String, port: Int): List<String> = emptyList()
         })
         client.connectTimeout = 15_000
+        // A dead network is noticed after about 20 seconds of unanswered keep-alives.
+        // Set before connecting: sshj starts the keep-alive thread only if it is enabled when the connection opens.
+        client.connection.keepAlive.keepAliveInterval = 5
+        (client.connection.keepAlive as? KeepAliveRunner)?.maxAliveCount = 4
         // Without this a server that accepts the connection and then says nothing is waited for forever.
         client.timeout = handshakeTimeoutMs
         try {
@@ -121,9 +125,6 @@ class SshLauncher(
                 }
                 throw RemoteException("无法连接 ${host.host}:${host.port}" + (why?.let { "：$it" } ?: ""), confirmed = false)
             }
-            // A dead network is noticed after about 20 seconds of unanswered keep-alives.
-            client.connection.keepAlive.keepAliveInterval = 5
-            (client.connection.keepAlive as? KeepAliveRunner)?.maxAliveCount = 4
             val secret = secret(host)
             try {
                 if (host.auth == AuthMethod.Key) {
