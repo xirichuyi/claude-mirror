@@ -118,6 +118,9 @@ install_node() {
   command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo 'Install curl or wget on the remote server first.' >&2; return 1; }
   name="node-$NODE_VERSION-$platform.tar.gz"; expected=$(node_sum "$platform")
   if [ -n "${CLAUDE_MIRROR_NODE_DIST:-}" ]; then
+    # The checksum list comes from the same mirror, so only an HTTPS-only download can be trusted.
+    command -v curl >/dev/null 2>&1 || wget --help 2>&1 | grep -q -- --https-only ||
+      { echo 'CLAUDE_MIRROR_NODE_DIST needs curl or GNU wget.' >&2; return 1; }
     mirrors=$CLAUDE_MIRROR_NODE_DIST
     download "$mirrors/SHASUMS256.txt" "$work/SHASUMS256.txt"
     line=$(grep -E "  node-v[0-9.]+-$platform\.tar\.gz\$" "$work/SHASUMS256.txt" | head -1)
