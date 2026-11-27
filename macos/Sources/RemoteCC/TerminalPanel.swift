@@ -75,6 +75,8 @@ private struct TerminalHost: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ container: NSView, context: Context) {
+        // The container is reused across projects; only the current session's view stays in it.
+        for other in container.subviews where other !== view { other.removeFromSuperview() }
         guard view.superview !== container else { return }
         view.removeFromSuperview()
         view.translatesAutoresizingMaskIntoConstraints = false
