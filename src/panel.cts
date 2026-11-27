@@ -275,7 +275,7 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--bg);colo
 const SCRIPT = `'use strict';
 const $ = id => document.getElementById(id);
 const call = async (route, method = 'GET', data) => {
-  const response = await fetch('api/' + route, { method, headers: data ? { 'content-type': 'application/json' } : {}, body: data ? JSON.stringify(data) : undefined });
+  const response = await fetch('api/' + route, { method, headers: method === 'GET' ? {} : { 'content-type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(data ?? {}) });
   const result = await response.json().catch(() => ({}));
   if (response.status === 401 && route !== 'login') { show(false); throw new Error(''); }
   if (!response.ok) throw new Error(result.error || response.statusText);
