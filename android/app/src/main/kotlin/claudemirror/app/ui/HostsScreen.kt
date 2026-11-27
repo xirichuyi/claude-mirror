@@ -217,7 +217,7 @@ private fun MembersDialog(model: AppModel, host: HostConfig, onDismiss: () -> Un
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("成员 · " + host.displayName) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (!busy && members.isEmpty()) Text("无成员", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 members.forEach { member ->
