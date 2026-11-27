@@ -61,7 +61,7 @@ internal sealed class PseudoConsoleTerminal : IRemoteTerminal
     private bool consoleOpen = true;
     private int disposed;
 
-    public PseudoConsoleTerminal(string executable, IEnumerable<string> arguments, int columns, int rows)
+    public PseudoConsoleTerminal(string executable, IEnumerable<string> arguments, int columns, int rows, bool emptyStandardHandles = true)
     {
         if (!CreatePipe(out var consoleIn, out var writeSide, IntPtr.Zero, 0) || !CreatePipe(out var readSide, out var consoleOut, IntPtr.Zero, 0))
             throw new Win32Exception();
@@ -78,7 +78,7 @@ internal sealed class PseudoConsoleTerminal : IRemoteTerminal
                 || !UpdateProcThreadAttribute(attributes, 0, PseudoConsoleAttribute, console, IntPtr.Size, IntPtr.Zero, IntPtr.Zero))
                 throw new Win32Exception();
             // Without its own (empty) standard handles the child would inherit this process's and bypass the console.
-            var startup = new StartupInfoEx { Size = Marshal.SizeOf<StartupInfoEx>(), Flags = UseStandardHandles, Attributes = attributes };
+            var startup = new StartupInfoEx { Size = Marshal.SizeOf<StartupInfoEx>(), Flags = emptyStandardHandles ? UseStandardHandles : 0, Attributes = attributes };
             var line = new StringBuilder(CommandLine(executable, arguments));
             if (!CreateProcessW(null, line, IntPtr.Zero, IntPtr.Zero, false, ExtendedStartupInfo, IntPtr.Zero, null, ref startup, out var info))
             {

@@ -199,10 +199,10 @@ public class SystemSshTests
         Assert.Equal("ssh -J bastion -p 2200 -l me 10.0.0.5", SystemSsh.TerminalCommand(new HostProfile("x", "10.0.0.5", 2200, "me", null, true, "bastion")));
     }
 
-    private static async Task<string> ReadUntil(Stream output, string expected)
+    private static async Task<string> ReadUntil(Stream output, string expected, int seconds = 30)
     {
         var seen = new System.Text.StringBuilder(); var buffer = new byte[4096];
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
         try
         {
             while (!seen.ToString().Contains(expected))
@@ -243,25 +243,61 @@ public class SystemSshTests
 
     private static async Task<string> Collect(Stream output, string expected)
     {
-        try { return await ReadUntil(output, expected); }
+        try { return "ok " + await ReadUntil(output, expected, 15); }
         catch (Xunit.Sdk.XunitException e) { return e.Message; }
     }
 
-    /// Keys reach a local program in the pseudo console, and a remote command's output comes back through it.
+    private static async Task<string> Probe(Func<IRemoteTerminal> open, string typed, string expected)
+    {
+        try
+        {
+            using var shell = open();
+            if (typed.Length > 0) { await shell.Input.WriteAsync(System.Text.Encoding.UTF8.GetBytes(typed)); await shell.Input.FlushAsync(); }
+            return await Collect(shell.Output, expected);
+        }
+        catch (Exception e) { return "threw " + e; }
+    }
+
+    // Diagnostics: which part of a pseudo console session over system SSH carries data.
     [SystemSshFact]
     public async Task APseudoConsoleCarriesKeysAndOutput()
     {
         if (!OperatingSystem.IsWindows()) return;
-        string local, remote;
-        using (var cmd = new PseudoConsoleTerminal(Path.Combine(Environment.SystemDirectory, "cmd.exe"), ["/q", "/k"], 80, 24))
+        var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        var results = new List<string>();
+        foreach (var empty in new[] { true, false })
+            foreach (var enter in new[] { "\r", "\r\n" })
+                results.Add($"cmd empty={empty} enter={enter.Replace("\r", "CR").Replace("\n", "LF")}: " + await Probe(() => new PseudoConsoleTerminal(cmd, ["/q", "/k"], 80, 24, empty), "set /a 6*7" + enter, "42"));
+        results.Add("cmd /c echo: " + await Probe(() => new PseudoConsoleTerminal(cmd, ["/c", "echo", "local-%NUMBER_OF_PROCESSORS%x"], 80, 24), "", $"local-{Environment.ProcessorCount}x"));
+        List<string> Ssh(string command, bool debug)
         {
-            await cmd.Input.WriteAsync("set /a 6*7\r"u8.ToArray()); await cmd.Input.FlushAsync();
-            local = await Collect(cmd.Output, "42");
+            var arguments = SystemSsh.Arguments(Host("mirror-target"), command, null, Config);
+            arguments[arguments.IndexOf("-T")] = "-tt";
+            if (debug) arguments[arguments.IndexOf("LogLevel=ERROR")] = "LogLevel=DEBUG1";
+            return arguments;
         }
-        var arguments = SystemSsh.Arguments(Host("mirror-target"), "echo tty-$((6*7))", null, Config);
-        arguments[arguments.IndexOf("-T")] = "-tt";
-        using (var ssh = new PseudoConsoleTerminal(SystemSsh.Executable(), arguments, 80, 24)) remote = await Collect(ssh.Output, "tty-42");
-        Assert.True(local.Contains("42") && !local.StartsWith("Waited") && remote.Contains("tty-42") && !remote.StartsWith("Waited"), $"local: {local}\nremote: {remote}");
+        foreach (var empty in new[] { true, false })
+            results.Add($"ssh -tt empty={empty}: " + await Probe(() => new PseudoConsoleTerminal(SystemSsh.Executable(), Ssh("echo tty-$((6*7))", true), 80, 24, empty), "", "tty-42"));
+        results.Add("ssh -T in console: " + await Probe(() => new PseudoConsoleTerminal(SystemSsh.Executable(), Ssh("echo tty-$((6*7))", false).Select(a => a == "-tt" ? "-T" : a), 80, 24), "", "tty-42"));
+        var piped = new System.Diagnostics.ProcessStartInfo(SystemSsh.Executable()) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var argument in Ssh("echo tty-$((6*7))", true)) piped.ArgumentList.Add(argument);
+        using (var process = System.Diagnostics.Process.Start(piped)!)
+        {
+            var finished = process.WaitForExit(15000);
+            results.Add($"ssh -tt over pipes: exited={finished} out={await process.StandardOutput.ReadToEndAsync()} err={await process.StandardError.ReadToEndAsync()}");
+            if (!finished) process.Kill();
+        }
+        var folder = Path.GetDirectoryName(Config)!;
+        var user = File.ReadLines(Config).Select(line => line.Trim()).First(line => line.StartsWith("User ")).Split(' ', 2)[1];
+        using (var library = new Renci.SshNet.SshClient("127.0.0.1", ServerPort, user, new Renci.SshNet.PrivateKeyFile(Path.Combine(folder, "client_key"))))
+        {
+            library.Connect();
+            using var stream = library.CreateShellStream("xterm-256color", 80, 24, 0, 0, 4096);
+            stream.Write("echo tty-$((6*7))\r"); stream.Flush();
+            results.Add("SSH.NET shell on this sshd: " + await Collect(stream, "tty-42"));
+        }
+        var report = string.Join("\n", results);
+        Assert.True(results.All(line => line.Contains(": ok ")), report);
     }
 
     [SystemSshFact]
