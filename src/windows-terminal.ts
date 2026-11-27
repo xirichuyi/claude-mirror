@@ -25,7 +25,8 @@
     if (e.type !== 'keydown') return true;
     const key = e.key.toLowerCase();
     if (e.ctrlKey && e.shiftKey && key === 'c') { copy(); return false; }
-    if (e.ctrlKey && e.shiftKey && key === 'v') { send({ t: 'paste' }); return false; }
+    // The browser would paste too, so only the app's paste goes through.
+    if (e.ctrlKey && e.shiftKey && key === 'v') { e.preventDefault(); send({ t: 'paste' }); return false; }
     if (e.ctrlKey && !e.shiftKey && key === 'c' && copy()) return false;
     if (e.ctrlKey && e.code === 'Backquote') { send({ t: 'toggle' }); return false; }
     return true;
