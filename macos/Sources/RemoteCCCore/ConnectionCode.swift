@@ -57,31 +57,77 @@ public struct ConnectionCode: Equatable, Sendable {
         return hostKeys.map { pattern + " " + $0 }
     }
 
-    /// Lines of `known` plus any of `lines` it does not have yet.
-    public static func addingKnownHosts(_ known: String, lines: [String]) -> String {
-        let existing = Set(known.components(separatedBy: "\n"))
+    /// The bytes of `known` plus any of `lines` it does not have yet. Lines that are not UTF-8 are kept as they are.
+    public static func addingKnownHosts(_ known: Data, lines: [String]) -> Data {
+        let existing = Set(known.split(separator: 0x0A, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) })
         let missing = lines.filter { !existing.contains($0) }
         guard !missing.isEmpty else { return known }
-        let base = known.isEmpty || known.hasSuffix("\n") ? known : known + "\n"
-        return base + missing.joined(separator: "\n") + "\n"
+        var result = known
+        if let last = result.last, last != 0x0A { result.append(0x0A) }
+        result.append(Data((missing.joined(separator: "\n") + "\n").utf8))
+        return result
     }
 
-    public static func trust(_ code: ConnectionCode, knownHosts path: String = NSHomeDirectory() + "/.ssh/known_hosts") throws {
+    public static func removingKnownHosts(_ known: Data, lines: [String]) -> Data {
+        let drop = Set(lines)
+        return Data(known.split(separator: 0x0A, omittingEmptySubsequences: false)
+            .filter { !drop.contains(String(decoding: $0, as: UTF8.self)) }.joined(separator: [0x0A]))
+    }
+
+    /// Keys known_hosts already pins for this server, found the way OpenSSH looks them up (hashed entries included).
+    static func pinnedKeys(_ pattern: String, path: String, keygen: String) -> [String] {
+        guard FileManager.default.fileExists(atPath: path) else { return [] }
+        let process = Process(), pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: keygen)
+        process.arguments = ["-F", pattern, "-f", path]
+        process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return [] }
+        let output = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: output, as: UTF8.self).split(separator: "\n").compactMap { line in
+            var fields = line.split(separator: " ").map(String.init)
+            if fields.first?.hasPrefix("@") == true { fields.removeFirst() }
+            return line.hasPrefix("#") || fields.count < 3 ? nil : fields[1] + " " + fields[2]
+        }
+    }
+
+    /// Adds the code's host keys to known_hosts and returns the lines added, so a failed import can take them back.
+    /// A server known_hosts already pins to other keys is refused rather than given a second identity.
+    public static func trust(_ code: ConnectionCode, knownHosts path: String = NSHomeDirectory() + "/.ssh/known_hosts",
+                             keygen: String = "/usr/bin/ssh-keygen") throws -> [String] {
         let folder = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let known = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        let pinned = pinnedKeys(code.port == 22 ? code.host : "[\(code.host)]:\(code.port)", path: path, keygen: keygen)
+        guard pinned.isEmpty || pinned.contains(where: code.hostKeys.contains) else { throw RemoteError("主机指纹已变化，已拒绝连接") }
+        let known = (try? Data(contentsOf: URL(fileURLWithPath: path))) ?? Data()
         let updated = addingKnownHosts(known, lines: code.knownHostsLines)
-        guard updated != known else { return }
-        try updated.write(toFile: path, atomically: true, encoding: .utf8)
+        guard updated != known else { return [] }
+        try updated.write(to: URL(fileURLWithPath: path), options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+        let existing = Set(known.split(separator: 0x0A).map { String(decoding: $0, as: UTF8.self) })
+        return code.knownHostsLines.filter { !existing.contains($0) }
     }
 
-    /// Run after the app's own key is known to work: the invitation key stops working.
-    public static let dropInviteScript = [
-        "F=\"$HOME/.ssh/authorized_keys\"",
-        "[ -f \"$F\" ] || exit 1",
-        "umask 077",
-        "grep -v -- ' \(inviteComment)$' \"$F\" > \"$F.new\"; mv -f \"$F.new\" \"$F\" && chmod 600 \"$F\" || exit 1",
-        "echo __RCC_CLAIMED__",
-    ].joined(separator: "\n")
+    public static func untrust(_ lines: [String], knownHosts path: String = NSHomeDirectory() + "/.ssh/known_hosts") {
+        guard !lines.isEmpty, let known = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return }
+        let updated = removingKnownHosts(known, lines: lines)
+        if updated != known { try? updated.write(to: URL(fileURLWithPath: path), options: .atomic) }
+    }
+
+    /// Swaps the invitation key for `publicKey` in one step, and only while the invitation is still there,
+    /// so a code that two people try at once gives access to one of them.
+    public static func claimScript(publicKey: String) -> String {
+        [
+            "umask 077",
+            "F=\"$HOME/.ssh/authorized_keys\"",
+            "K=\(shellQuote(publicKey + " claude-mirror"))",
+            "mkdir \"$F.lock\" 2>/dev/null || exit 1",
+            "trap 'rmdir \"$F.lock\"' EXIT",
+            "grep -q -- ' \(inviteComment)$' \"$F\" 2>/dev/null || { echo __RCC_USED__; exit 1; }",
+            "{ grep -v -- ' \(inviteComment)$' \"$F\"; [ \"$?\" -le 1 ]; } > \"$F.new\" || exit 1",
+            "grep -qxF -- \"$K\" \"$F.new\" || printf '%s\\n' \"$K\" >> \"$F.new\" || exit 1",
+            "mv -f \"$F.new\" \"$F\" && chmod 600 \"$F\" || exit 1",
+            "echo __RCC_CLAIMED__",
+        ].joined(separator: "\n")
+    }
 }

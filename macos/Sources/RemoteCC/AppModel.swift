@@ -614,8 +614,10 @@ final class AppModel: ObservableObject {
     func connect(code text: String) async throws {
         guard let connections else { throw RemoteError("连接服务尚未就绪") }
         let code = try ConnectionCode.parse(text)
-        try ConnectionCode.trust(code)
         let publicKey = try LoginKeySetup.ensureKey()
+        let trusted = try ConnectionCode.trust(code)
+        var claimed = false
+        defer { if !claimed { ConnectionCode.untrust(trusted) } }
         let invitePath = NSHomeDirectory() + "/.ssh/claude_mirror_invite_" + String(UUID().uuidString.prefix(8))
         guard FileManager.default.createFile(atPath: invitePath, contents: Data(code.privateKey.utf8), attributes: [.posixPermissions: 0o600])
         else { throw RemoteError("无法保存连接码密钥") }
@@ -624,17 +626,19 @@ final class AppModel: ObservableObject {
                                       identityFile: invitePath, authentication: .keyFile)
         do { try await connections.verifyLogin(invite) }
         catch { throw RemoteError("连接码已使用或已过期") }
-        try await connect(invite)
-        let added = try await connections.runScript(invite, script: LoginKeySetup.authorizeScript(publicKey: publicKey))
-        guard added.contains("__RCC_KEY_OK__") else { throw RemoteError("服务器没有确认添加密钥") }
+        // Only the transport: the invitation is never saved as this machine's login.
+        let result: String
+        do {
+            try await connections.connect(invite)
+            result = try await connections.runScript(invite, script: ConnectionCode.claimScript(publicKey: publicKey))
+        } catch { await connections.disconnect(invite); throw RemoteError("连接码已使用或已过期") }
+        await connections.disconnect(invite)
+        guard result.contains("__RCC_CLAIMED__") else { throw RemoteError("连接码已使用或已过期") }
+        claimed = true
         var own = invite
         own.identityFile = LoginKeySetup.defaultKeyPath
         try await connections.verifyLogin(own)
-        let dropped = try await connections.runScript(invite, script: ConnectionCode.dropInviteScript)
-        guard dropped.contains("__RCC_CLAIMED__") else { throw RemoteError("服务器没有确认作废连接码") }
-        rememberMachine(own)
-        connections.updateConfig(own)
-        if selectedMachine?.key == own.key { selectedMachine = own; lastConnection = own }
+        try await connect(own)
     }
 
     func disconnect() {

@@ -32,7 +32,10 @@ final class ConnectionCodeTests: XCTestCase {
     }
 
     func testKnownHostsKeepsExistingLines() {
-        XCTAssertEqual(ConnectionCode.addingKnownHosts("a k", lines: ["b k"]), "a k\nb k\n")
-        XCTAssertEqual(ConnectionCode.addingKnownHosts("a k\nb k\n", lines: ["b k"]), "a k\nb k\n")
+        XCTAssertEqual(ConnectionCode.addingKnownHosts(Data("a k".utf8), lines: ["b k"]), Data("a k\nb k\n".utf8))
+        XCTAssertEqual(ConnectionCode.addingKnownHosts(Data("a k\nb k\n".utf8), lines: ["b k"]), Data("a k\nb k\n".utf8))
+        let latin = Data([0x23, 0xE9, 0x0A]) + Data("a k\n".utf8)
+        XCTAssertEqual(ConnectionCode.addingKnownHosts(latin, lines: ["b k"]), latin + Data("b k\n".utf8))
+        XCTAssertEqual(ConnectionCode.removingKnownHosts(latin + Data("b k\n".utf8), lines: ["b k"]), latin)
     }
 }
