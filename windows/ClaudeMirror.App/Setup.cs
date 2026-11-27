@@ -223,6 +223,53 @@ public sealed partial class MainWindow
     }
 
     /// Offered once after a password login: create a dedicated key, authorize it, prove it works, then switch.
+    private static async Task<(string Path, string PublicKey)> EnsureLoginKeyAsync(string keygen)
+    {
+        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "claude_mirror_ed25519");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        if (!File.Exists(path))
+        {
+            var start = new ProcessStartInfo(keygen) { UseShellExecute = false, CreateNoWindow = true };
+            foreach (var argument in new[] { "-q", "-t", "ed25519", "-N", "", "-C", "claude-mirror", "-f", path }) start.ArgumentList.Add(argument);
+            using var process = Process.Start(start)!; await process.WaitForExitAsync();
+            if (process.ExitCode != 0) throw new IOException("无法生成登录密钥");
+        }
+        return (path, RemoteInstaller.ValidPublicKey(await File.ReadAllTextAsync(path + ".pub")) ?? throw new IOException("登录密钥无法读取"));
+    }
+
+    /// <summary>Adds the server in a code from its panel, then swaps the code's one-use key for this computer's own key.</summary>
+    private async Task ConnectCodeAsync(string text)
+    {
+        var code = ConnectionCode.Parse(text);
+        var (path, publicKey) = await EnsureLoginKeyAsync(FindKeygen() ?? throw new IOException("找不到 ssh-keygen"));
+        var invite = Path.Combine(Path.GetTempPath(), "claude-mirror-invite-" + Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(invite, code.PrivateKey);
+        try
+        {
+            var profile = new HostProfile(code.Name, code.Host, code.Port, code.User, invite);
+            if (host is not null && LocalState.HostKey(host) != LocalState.HostKey(profile)) await ConfirmLeavingQueueAsync(true);
+            agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
+            reconnecting?.Cancel();
+            next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
+            RemoteSetupException? setup = null;
+            try { await next.ConnectAsync(profile, "", "", ServerResources, fingerprint => Task.FromResult(fingerprint == code.HostKeyFingerprint)); }
+            catch (RemoteSetupException e) { setup = e; }
+            catch (Renci.SshNet.Common.SshAuthenticationException e) { next.Dispose(); RefreshWorkbench(); throw new IOException("连接码已使用或已过期", e); }
+            catch (Exception e) { next.Dispose(); RefreshWorkbench(); throw new IOException(ConnectionAdvice.Explain(e.Message), e); }
+            if (!(await next.RunScriptAsync(RemoteInstaller.AuthorizeScript(publicKey))).Contains("__RCC_KEY_OK__")) throw new IOException("服务器没有确认添加密钥");
+            var updated = profile with { KeyFile = path };
+            await RemoteAgent.VerifyKeyLoginAsync(updated, code.HostKeyFingerprint);
+            if (!(await next.RunScriptAsync(ConnectionCode.DropInviteScript)).Contains("__RCC_CLAIMED__")) throw new IOException("服务器没有确认作废连接码");
+            local.Fingerprints[LocalState.HostKey(updated)] = code.HostKeyFingerprint;
+            host = updated; local.Hosts.RemoveAll(h => LocalState.HostKey(h) == LocalState.HostKey(updated)); local.Hosts.Add(updated); local.Save();
+            hosts.ItemsSource = local.Hosts.ToList(); hosts.SelectedItem = updated;
+            if (setup is not null) { health = MachineHealth.Issues(setup, null, null); status.Text = "SSH 已连接，服务器还需要设置"; RenderHealth(); return; }
+            await AfterAgentStartedAsync(next);
+            await RefreshHealthAsync();
+        }
+        finally { File.Delete(invite); }
+    }
+
     private async Task OfferKeyLoginAsync(HostProfile profile, RemoteAgent remote)
     {
         if (profile.SystemSsh || profile.KeyFile is not null || local.DeclinedKeyLogin.Contains(LocalState.HostKey(profile)) || FindKeygen() is not { } keygen) return;
@@ -235,16 +282,7 @@ public sealed partial class MainWindow
         var choice = await dialog.ShowAsync();
         if (choice == ContentDialogResult.Secondary) { local.DeclinedKeyLogin.Add(LocalState.HostKey(profile)); local.Save(); return; }
         if (choice != ContentDialogResult.Primary) return;
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "claude_mirror_ed25519");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        if (!File.Exists(path))
-        {
-            var start = new ProcessStartInfo(keygen) { UseShellExecute = false, CreateNoWindow = true };
-            foreach (var argument in new[] { "-q", "-t", "ed25519", "-N", "", "-C", "claude-mirror", "-f", path }) start.ArgumentList.Add(argument);
-            using var process = Process.Start(start)!; await process.WaitForExitAsync();
-            if (process.ExitCode != 0) throw new IOException("无法生成登录密钥");
-        }
-        var publicKey = RemoteInstaller.ValidPublicKey(await File.ReadAllTextAsync(path + ".pub")) ?? throw new IOException("登录密钥无法读取");
+        var (path, publicKey) = await EnsureLoginKeyAsync(keygen);
         if (!(await remote.RunScriptAsync(RemoteInstaller.AuthorizeScript(publicKey))).Contains("__RCC_KEY_OK__")) throw new IOException("服务器没有确认添加密钥");
         var updated = profile with { KeyFile = path };
         try { await RemoteAgent.VerifyKeyLoginAsync(updated, local.Fingerprints[LocalState.HostKey(profile)]); }

@@ -610,6 +610,33 @@ final class AppModel: ObservableObject {
         show("已设置免密登录，以后会自动连接 \(updated.displayName)")
     }
 
+    /// Connects with a code from the server panel, then swaps its one-use key for this Mac's own key.
+    func connect(code text: String) async throws {
+        guard let connections else { throw RemoteError("连接服务尚未就绪") }
+        let code = try ConnectionCode.parse(text)
+        try ConnectionCode.trust(code)
+        let publicKey = try LoginKeySetup.ensureKey()
+        let invitePath = NSHomeDirectory() + "/.ssh/claude_mirror_invite_" + String(UUID().uuidString.prefix(8))
+        guard FileManager.default.createFile(atPath: invitePath, contents: Data(code.privateKey.utf8), attributes: [.posixPermissions: 0o600])
+        else { throw RemoteError("无法保存连接码密钥") }
+        defer { try? FileManager.default.removeItem(atPath: invitePath) }
+        let invite = ConnectionConfig(host: code.destination, port: code.port == 22 ? nil : code.port, directory: "~", name: code.name,
+                                      identityFile: invitePath, authentication: .keyFile)
+        do { try await connections.verifyLogin(invite) }
+        catch { throw RemoteError("连接码已使用或已过期") }
+        try await connect(invite)
+        let added = try await connections.runScript(invite, script: LoginKeySetup.authorizeScript(publicKey: publicKey))
+        guard added.contains("__RCC_KEY_OK__") else { throw RemoteError("服务器没有确认添加密钥") }
+        var own = invite
+        own.identityFile = LoginKeySetup.defaultKeyPath
+        try await connections.verifyLogin(own)
+        let dropped = try await connections.runScript(invite, script: ConnectionCode.dropInviteScript)
+        guard dropped.contains("__RCC_CLAIMED__") else { throw RemoteError("服务器没有确认作废连接码") }
+        rememberMachine(own)
+        connections.updateConfig(own)
+        if selectedMachine?.key == own.key { selectedMachine = own; lastConnection = own }
+    }
+
     func disconnect() {
         guard let engine, let connections, let config = currentConfig else { return }
         engine.detach(config)

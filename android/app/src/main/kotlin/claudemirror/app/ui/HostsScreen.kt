@@ -1,5 +1,8 @@
 package claudemirror.app.ui
 
+import claudemirror.core.ConnectionCode
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.heightIn
@@ -91,7 +94,15 @@ fun HostsScreen(model: AppModel, snackbar: SnackbarHostState, onOpen: (String) -
     var managing by remember { mutableStateOf<HostConfig?>(null) }
     managing?.let { host -> MembersDialog(model, host) { managing = null } }
     Scaffold(
-        topBar = { TopAppBar(title = { Text("服务器") }) },
+        topBar = {
+            val clipboard = LocalClipboardManager.current
+            TopAppBar(title = { Text("服务器") }, actions = {
+                IconButton(onClick = {
+                    val text = clipboard.getText()?.text.orEmpty()
+                    if (ConnectionCode.looksLike(text)) model.connectCode(text) else model.snackbar.tryEmit("剪贴板里没有连接码")
+                }) { Icon(Icons.Filled.ContentPaste, "粘贴连接码") }
+            })
+        },
         snackbarHost = { Snackbar(snackbar) },
         floatingActionButton = {
             ExtendedFloatingActionButton(onClick = { onEdit(model.newHostId()) }, icon = { Icon(Icons.Filled.Add, null) }, text = { Text("添加") },

@@ -1,5 +1,9 @@
 package claudemirror.app
 
+import claudemirror.core.ConnectionCode
+import claudemirror.core.LoginKey
+import claudemirror.core.RemoteException
+import claudemirror.core.AuthMethod
 import android.app.Application
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -212,6 +216,26 @@ class AppModel(private val application: Application) {
         secrets.delete(host.id)
         _hosts.value = _hosts.value.filter { it.id != host.id }
         hostStore.save(_hosts.value)
+    }
+
+    /** Adds the server in a code from its panel, then swaps the code's one-use key for a key made on this phone. */
+    fun connectCode(text: String) = act {
+        val code = ConnectionCode.parse(text)
+        val host = HostConfig(newHostId(), code.name, code.user, code.host, code.port, "~", auth = AuthMethod.Key, hostKey = code.hostKeyFingerprint)
+        val own = withContext(Dispatchers.Default) { LoginKey.generate() }
+        try {
+            secrets.write(host.id, HostSecret(privateKey = code.privateKey))
+            if ("__RCC_KEY_OK__" !in pool.script(host, ConnectionCode.authorizeScript(own.publicKey))) throw RemoteException("服务器没有确认添加密钥")
+            pool.close(host)
+            secrets.write(host.id, HostSecret(privateKey = own.privateKey))
+            if ("__RCC_CLAIMED__" !in pool.script(host, ConnectionCode.DROP_INVITE)) throw RemoteException("服务器没有确认作废连接码")
+        } catch (error: Exception) {
+            pool.close(host)
+            secrets.delete(host.id)
+            throw if (error is RemoteException && error.message == "服务器拒绝了这个私钥") RemoteException("连接码已使用或已过期") else error
+        }
+        saveHost(host, HostSecret(privateKey = own.privateKey))
+        connect(host)
     }
 
     /** Opens the SSH connection and rejoins replies that kept running on the server. */

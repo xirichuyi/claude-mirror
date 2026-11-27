@@ -9,6 +9,7 @@ dependencies {
     api(libs.coroutines.core)
     api(libs.serialization.json)
     api(libs.sshj)
+    implementation(libs.bouncycastle)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
 }
