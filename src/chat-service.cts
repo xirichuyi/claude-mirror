@@ -418,8 +418,9 @@ class ChatService extends EventEmitter {
       } },
     }, context);
     const answer = (await asked) as { action?: string; content?: { choice?: string } };
+    if (answer.action !== 'accept' || !answer.content?.choice) return { behavior: 'cancelled' };
     run.transcript.retract(payload.retractedMessageUuids);
-    return answer.action === 'accept' && answer.content?.choice ? { behavior: 'completed', result: answer.content.choice } : { behavior: 'cancelled' };
+    return { behavior: 'completed', result: answer.content.choice };
   }
 
   requestPermission(session, tool, context) {
