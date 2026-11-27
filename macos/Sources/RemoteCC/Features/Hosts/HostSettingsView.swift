@@ -34,7 +34,7 @@ struct HostSettingsView: View {
         guard let engine = model.engine else { return }
         var found: Set<String> = []
         for machine in model.savedMachines where engine.connectionState(machine).status == .connected {
-            if (try? await engine.agents.info(machine))?.uid == 0 { found.insert(machine.key) }
+            if (try? await engine.agents.info(machine))?.managesMembers == true { found.insert(machine.key) }
         }
         rootMachines = found
     }

@@ -43,7 +43,7 @@ public sealed partial class MainWindow
     {
         bool current=agent?.Connected==true && host!=null && Equals(hosts.SelectedItem,host);
         connectHost.Visibility=current?Visibility.Collapsed:Visibility.Visible;
-        membersButton.Visibility=current && agent?.Hello?["uid"]?.GetValue<int>()==0?Visibility.Visible:Visibility.Collapsed;
+        membersButton.Visibility=current && agent?.Hello?["uid"]?.GetValue<int>()==0 && agent.Hello["platform"]?.GetValue<string>()=="linux"?Visibility.Visible:Visibility.Collapsed;
         ToolTipService.SetToolTip(hosts,(hosts.SelectedItem as HostProfile)?.Name ?? "选择主机");
     }
 

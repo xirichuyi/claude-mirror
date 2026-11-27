@@ -55,7 +55,11 @@ data class ServerInfo(
     val persistenceWarning: String? = null,
     /** The SSH account's uid; 0 can manage members (older agents omit it). */
     val uid: Int? = null,
-)
+    val platform: String? = null,
+) {
+    /** Member management needs root on a Linux server. */
+    val managesMembers: Boolean get() = uid == 0 && platform == "linux"
+}
 
 @Serializable
 data class ChildTool(

@@ -103,7 +103,7 @@ fun HostsScreen(model: AppModel, snackbar: SnackbarHostState, onOpen: (String) -
                     },
                     trailingContent = {
                         Row {
-                            if ((state as? ConnectionState.Connected)?.info?.uid == 0) {
+                            if ((state as? ConnectionState.Connected)?.info?.managesMembers == true) {
                                 IconButton(onClick = { managing = host }) { Icon(Icons.Filled.Group, "成员") }
                             }
                             IconButton(onClick = { onEdit(host.id) }) { Icon(Icons.Filled.Edit, "编辑") }

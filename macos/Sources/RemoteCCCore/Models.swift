@@ -397,4 +397,7 @@ public struct ServerInfo: Codable, Hashable, Sendable {
     public var persistenceWarning: String?
     /// The SSH account's uid; 0 can manage members (older agents omit it).
     public var uid: Int?
+    public var platform: String?
+    /// Member management needs root on a Linux server.
+    public var managesMembers: Bool { uid == 0 && platform == "linux" }
 }
