@@ -74,10 +74,6 @@ struct AccountUsageSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             SheetHeading(title: "订阅用量", subtitle: "五小时与本周 · 已用额度") { dismiss() }
             QuotaOverview(store: model.accountStore)
-            if model.active != nil {
-                Button("对话用量与上下文") { model.showUsage = true }
-                    .buttonStyle(WorkbenchButtonStyle())
-            }
         }.padding(24).frame(width: 380)
             .task { await model.accountStore.refresh() }
     }

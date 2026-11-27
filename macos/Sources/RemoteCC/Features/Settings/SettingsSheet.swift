@@ -151,10 +151,6 @@
                         dismiss()
                         model.showPreferences = true
                     }
-                    Button("上下文与用量") {
-                        dismiss()
-                        model.showUsage = true
-                    }
                     Button("扩展与配置") {
                         dismiss()
                         model.openTools("config")

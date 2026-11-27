@@ -50,7 +50,6 @@ struct ClaudeToolsView: View {
                             if let id = session.remoteSessionId { LabeledContent("会话 ID", value: id).textSelection(.enabled) }
                             HStack {
                                 Button("模型与权限") { dismiss(); model.showPreferences = true }
-                                Button("上下文与用量") { dismiss(); model.showUsage = true }
                                 Button("隔离工作树") { dismiss(); model.showWorktree = true }
                             }
                         }

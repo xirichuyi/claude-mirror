@@ -186,16 +186,15 @@ struct ComposerArea: View {
     @ViewBuilder private func contextMeter(_ session: ChatSession?) -> some View {
         if let context = session?.context {
             let tint = context.fraction >= 0.9 ? WorkbenchTheme.error : context.fraction >= 0.75 ? WorkbenchTheme.warning : WorkbenchTheme.inkMuted
-            Button { model.showUsage = true } label: {
-                HStack(spacing: 5) {
-                    ZStack {
-                        Circle().stroke(WorkbenchTheme.border, lineWidth: 2)
-                        Circle().trim(from: 0, to: context.fraction).stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
-                    }.frame(width: 12, height: 12)
-                    Text(context.label).font(.system(size: 11)).monospacedDigit().lineLimit(1).fixedSize()
-                }.foregroundStyle(tint)
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle().stroke(WorkbenchTheme.border, lineWidth: 2)
+                    Circle().trim(from: 0, to: context.fraction).stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
+                }.frame(width: 12, height: 12)
+                Text(context.label).font(.system(size: 11)).monospacedDigit().lineLimit(1).fixedSize()
             }
-            .buttonStyle(QuietButtonStyle())
+            .foregroundStyle(tint)
+            .accessibilityElement(children: .ignore)
             .help("上下文已用 \(Int((context.fraction * 100).rounded()))% · \(Int(context.usedTokens)) / \(Int(context.maxTokens)) tokens")
             .accessibilityLabel("上下文用量 \(context.label)")
         }
