@@ -118,7 +118,7 @@ fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> 
         topBar = {
             TopAppBar(
                 title = {
-                    Text(status?.branch?.substringBefore("...")?.ifEmpty { null } ?: folderName(directory), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(status?.branch?.removePrefix("No commits yet on ")?.substringBefore("...")?.ifEmpty { null } ?: folderName(directory), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = { IconButton(onClick = { attempt++ }) { Icon(Icons.Filled.Refresh, "刷新") } },
