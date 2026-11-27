@@ -40,6 +40,9 @@ public sealed partial class MainWindow : Window
     private sealed record ModelChoice(string Value, string Label, bool Auto = false);
     private static SolidColorBrush Brush(byte r, byte g, byte b) => new(Windows.UI.Color.FromArgb(255, r, g, b));
 
+    private readonly Notifier notifier;
+    private bool askedForeground;
+
     public MainWindow()
     {
         Title = "claude-mirror · Windows";
@@ -49,7 +52,9 @@ public sealed partial class MainWindow : Window
         prompt.AllowDrop = true;
         prompt.DragOver += (_, e) => { if (e.DataView.Contains(StandardDataFormats.StorageItems)) e.AcceptedOperation = DataPackageOperation.Copy; };
         prompt.Drop += async (_, e) => await RunAsync(async () => { foreach (var file in await e.DataView.GetStorageItemsAsync()) if (file is Windows.Storage.StorageFile) await AttachAsync(file.Path); });
-        Closed += (_, _) => agent?.Dispose();
+        notifier = new Notifier(() => DispatcherQueue.TryEnqueue(() => Activate()));
+        Activated += (_, e) => notifier.Foreground = e.WindowActivationState != WindowActivationState.Deactivated;
+        Closed += (_, _) => { agent?.Dispose(); notifier.Close(); };
         StartCheckingUpdates();
         RefreshWorkbench();
         PrepareDemo();
@@ -351,6 +356,11 @@ public sealed partial class MainWindow : Window
         if (state["tasks"] is JsonArray tasks) backgroundTasks = (JsonArray)tasks.DeepClone();
         // A reply that failed or was stopped keeps the queue until the user says to go on.
         if (wasBusy && !busy && Turn.Failed(state)) queue.Pause();
+        var title = conversation?.Name ?? newTitle ?? "Claude";
+        if (wasBusy && !busy && !stopping) notifier.Tell(title, Turn.Failed(state) ? "已中断" : "已回复");
+        var asked = busy && Turn.NeedsAnswer(state);
+        if (asked && !askedForeground) notifier.Tell(title, "需要确认");
+        askedForeground = asked;
         if (!busy) stopping = false;
         status.Text = busy ? "正在回复" : "就绪";
         if (state["remoteSessionId"] is JsonValue session && taskId is not null)

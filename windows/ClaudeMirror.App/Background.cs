@@ -22,7 +22,7 @@ public sealed partial class MainWindow
         public MessageView? Reply;
         public JsonObject? State;
         public JsonArray Tasks = [];
-        public bool Busy, Sending, Unread, Done;
+        public bool Busy, Sending, Unread, Done, Asked;
         public bool Active => Busy || Sending || Queue.Items.Count > 0;
         public string? Label => Turn.Label(Busy, Busy && Turn.NeedsAnswer(State), Queue.Paused, Queue.Items.Count, Unread);
     }
@@ -84,7 +84,11 @@ public sealed partial class MainWindow
             // A reply that failed or was stopped keeps the queue until the user opens the conversation and says to go on.
             if (Turn.Failed(state)) p.Queue.Pause();
             p.Unread = true;
+            notifier.Tell(p.Conversation.Name, Turn.Failed(state) ? "已中断" : "已回复");
         }
+        var asked = p.Busy && Turn.NeedsAnswer(state);
+        if (asked && !p.Asked) notifier.Tell(p.Conversation.Name, "需要确认");
+        p.Asked = asked;
         if (state["remoteSessionId"] is JsonValue session && session.GetValue<string>() is var sessionId && p.Conversation.SessionId != sessionId && host is not null)
         {
             p.Conversation = p.Conversation with { SessionId = sessionId };

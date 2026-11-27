@@ -15,6 +15,7 @@ public sealed partial class MainWindow
     {
         if (agent != lost) return;
         busy = false; status.Text = ConnectionAdvice.Explain(error);
+        if (host is { } lostHost) notifier.Tell(lostHost.Name, "连接已断开");
         // What happened to the reply is unknown from here on, so queued prompts wait for the user.
         if (queue.Items.Count > 0) { queue.Pause(); RenderQueue(); }
         PauseParked(); RenderHistory();
@@ -72,6 +73,7 @@ public sealed partial class MainWindow
             foreach (var tunnel in tunnels) try { await next.ForwardAsync(tunnel); } catch (IOException) { } // A port taken meanwhile is simply not restored.
             next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
             next.Slow += slow => DispatcherQueue.TryEnqueue(() => OnSlow(next, slow));
+            notifier.Tell(profile.Name, "已重新连接");
             await RunAsync(async () =>
             {
                 // Keep the open conversation; a remote task that kept running is watched again.

@@ -15,8 +15,8 @@ function frame(type: number, id: number, payload = Buffer.alloc(0)) {
 }
 const credit = (id: number, bytes: number) => { const value = Buffer.alloc(4); value.writeUInt32BE(bytes); return frame(5, id, value); };
 
-function framedAgent() {
-  const child = spawn(process.execPath, [AGENT], { stdio: ['pipe', 'pipe', 'inherit'] });
+function framedAgent(env: Record<string, string> = {}) {
+  const child = spawn(process.execPath, [AGENT], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, ...env } });
   const frames: { type: number; id: number; payload: Buffer }[] = [];
   let waiters: (() => void)[] = [];
   let buffered = Buffer.alloc(0), framed = false;
@@ -206,4 +206,27 @@ test('a workspace upload cut off by a disconnect leaves no file behind', async (
   agent.child.stdin.end();
   await new Promise(wake => agent.child.once('exit', wake));
   try { assert.deepEqual(fs.readdirSync(folder), []); } finally { fs.rmSync(folder, { recursive: true, force: true }); }
+});
+
+test('an attachment for an execution account is handed over into that account home', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-account-'));
+  const content = crypto.randomBytes(300 * 1024);
+  const digest = crypto.createHash('sha256').update(content).digest('hex');
+  const agent = framedAgent({ HOME: home });
+  try {
+    // A login that is not root cannot switch accounts, so it keeps the copy in its own home.
+    agent.request(2, 'file', { operation: 'write', attachment: true, digest, name: 'shot.png', size: content.length, account: 'claude-runner' });
+    await agent.json(message => message.stream === 2);
+    agent.child.stdin.write(frame(3, 2, content));
+    agent.child.stdin.write(frame(4, 2));
+    const reply = await agent.json(message => message.id === 2);
+    assert.equal(reply.error, undefined);
+    assert.equal(reply.result.path, path.join(home, '.cache/claude-mirror/attachments', digest, 'shot.png'));
+    assert.ok(fs.readFileSync(reply.result.path).equals(content));
+    assert.equal(fs.statSync(reply.result.path).mode & 0o777, 0o600);
+    fs.rmSync(path.dirname(reply.result.path), { recursive: true });
+    agent.request(3, 'file', { operation: 'attachmentLookup', digest, name: 'shot.png', account: 'claude-runner' });
+    const lookup = await agent.json(message => message.id === 3);
+    assert.ok(fs.readFileSync(lookup.result.file.path).equals(content));
+  } finally { agent.close(); fs.rmSync(home, { recursive: true, force: true }); }
 });
