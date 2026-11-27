@@ -182,7 +182,8 @@ function serve(folder: string) {
     cert: fs.readFileSync(path.join(folder, 'cert.pem')),
     minVersion: 'TLSv1.2'
   }, (request, response) => {
-    const url = new URL(request.url ?? '/', 'https://panel');
+    let url: URL;
+    try { url = new URL(request.url ?? '/', 'https://panel'); } catch { response.writeHead(404); return response.end(); }
     // Everything outside the random path looks like nothing is here.
     if (url.pathname === base) { response.writeHead(302, { location: base + '/' }); return response.end(); }
     if (!url.pathname.startsWith(base + '/')) { response.writeHead(404); return response.end(); }
