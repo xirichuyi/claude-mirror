@@ -30,7 +30,13 @@ public sealed partial class MainWindow
         {
             RequireShell();
             var folder = directory.Text;
-            pane = new TerminalPane(this, folder, (columns, rows) => RequireShell().OpenTerminal(folder, columns, rows));
+            var server = host is { } profile ? LocalState.HostKey(profile) : "";
+            // A tab left from another server must not open its shell on the current connection.
+            pane = new TerminalPane(this, folder, () =>
+            {
+                var shell = host is { } current && LocalState.HostKey(current) == server ? RequireShell() : throw new IOException("请先连接服务器");
+                return (columns, rows) => shell.OpenTerminal(folder, columns, rows);
+            });
             terminals[key] = pane;
         }
         var name = directory.Text.TrimEnd('/'); name = name.Length == 0 ? "/" : name[(name.LastIndexOf('/') + 1)..];
@@ -53,7 +59,7 @@ public sealed partial class MainWindow
     {
         private const int Kept = 256 * 1024;
         private readonly MainWindow window;
-        private readonly Func<int, int, IRemoteTerminal> open;
+        private readonly Func<Func<int, int, IRemoteTerminal>> open;
         private readonly WebView2 view = new();
         private readonly Button reopen;
         private readonly LinkedList<byte[]> recent = new();
@@ -64,7 +70,7 @@ public sealed partial class MainWindow
         private Channel<Action<IRemoteTerminal>>? outgoing;
         public Grid Area { get; }
 
-        public TerminalPane(MainWindow window, string folder, Func<int, int, IRemoteTerminal> open)
+        public TerminalPane(MainWindow window, string folder, Func<Func<int, int, IRemoteTerminal>> open)
         {
             this.window = window; this.open = open;
             reopen = window.ActionButton("重新打开", "\uE72C", () => { Start(); return Task.CompletedTask; });
@@ -147,6 +153,9 @@ public sealed partial class MainWindow
         private void Start()
         {
             if (closed) return;
+            Func<int, int, IRemoteTerminal> connect;
+            try { connect = open(); }
+            catch (IOException e) { window.status.Text = e.Message; reopen.Visibility = Visibility.Visible; return; }
             reopen.Visibility = Visibility.Collapsed;
             if (ready) Post(new JsonObject { ["reset"] = true });
             recent.Clear(); recentSize = 0;
@@ -157,7 +166,7 @@ public sealed partial class MainWindow
             _ = Task.Run(async () =>
             {
                 IRemoteTerminal started;
-                try { started = open(width, height); }
+                try { started = connect(width, height); }
                 catch (Exception e) when (e is IOException or InvalidOperationException or Renci.SshNet.Common.SshException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
                 {
                     dispatcher.TryEnqueue(() => { window.status.Text = e.Message; Ended(queue); });
