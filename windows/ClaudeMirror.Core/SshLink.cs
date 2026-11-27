@@ -125,7 +125,7 @@ public static class SystemSsh
     {
         if (command is not null && (command.Length == 0 || command.StartsWith('-'))) throw new ArgumentException("无效的远端命令");
         var arguments = new List<string> { "-T", "-a", "-x" };
-        foreach (var option in new[] { "BatchMode=yes", "ConnectTimeout=20", "ServerAliveInterval=15", "ServerAliveCountMax=3", "ControlMaster=no", "ControlPath=none", "PermitLocalCommand=no", "LogLevel=ERROR" })
+        foreach (var option in new[] { "BatchMode=yes", "ConnectTimeout=20", "ServerAliveInterval=5", "ServerAliveCountMax=4", "ControlMaster=no", "ControlPath=none", "PermitLocalCommand=no", "LogLevel=ERROR" })
         { arguments.Add("-o"); arguments.Add(option); }
         if (forward is null) { arguments.Add("-o"); arguments.Add("ClearAllForwardings=yes"); }
         else

@@ -41,6 +41,16 @@ public sealed class RemoteAgent : IDisposable
     /// <summary>SSH is up even when the agent could not start (for example Node.js is missing).</summary>
     public bool SshConnected => (attached || ssh?.Connected == true) && !lifetime.IsCancellationRequested;
     public event Action<string>? Disconnected;
+    /// <summary>True when the server has been silent for a while, false once it answers again.</summary>
+    public event Action<bool>? Slow;
+    /// <summary>Whether silence is checked: on for SSH connections, off for the demo.</summary>
+    public bool Probing { get => probing; set { Interlocked.Exchange(ref heard, Environment.TickCount64); probing = value; } }
+    private volatile bool probing;
+    /// <summary>Silence before a ping is sent, and before the connection is given up.</summary>
+    public TimeSpan ProbeAfter { get; set; } = TimeSpan.FromSeconds(5);
+    public TimeSpan DeadAfter { get; set; } = TimeSpan.FromSeconds(20);
+    private long heard = Environment.TickCount64;
+    private int lost;
     public bool Connected => (attached || ssh?.Connected == true) && writer is not null && !lifetime.IsCancellationRequested && !channelClosed;
 
     public async Task ConnectAsync(HostProfile profile, string password, string keyPassphrase,
@@ -56,7 +66,7 @@ public sealed class RemoteAgent : IDisposable
         static string Fingerprint(byte[] key) => "SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(key)).TrimEnd('=');
         var client = new SshClient(new ConnectionInfo(profile.Host, profile.Port, profile.User, auth) { Timeout = TimeSpan.FromSeconds(20) });
         ssh = new LibraryLink(client);
-        client.KeepAliveInterval = TimeSpan.FromSeconds(15);
+        client.KeepAliveInterval = TimeSpan.FromSeconds(5);
         client.HostKeyReceived += (_, e) => e.CanTrust = verifyHost(Fingerprint(e.HostKey)).GetAwaiter().GetResult();
         await Task.Run(() => client.Connect());
         Profile = profile;
@@ -120,6 +130,7 @@ public sealed class RemoteAgent : IDisposable
         upgradeId = Interlocked.Increment(ref sequence);
         await CallAsync(upgradeId, "frames", new { version = 1 }, TimeSpan.FromSeconds(60));
         var hello = await CallAsync("file", new { operation = "hello" });
+        Probing = true;
         Home = hello["home"]!.GetValue<string>();
         if (hello["nodeSupported"]?.GetValue<bool>() != true) { channelClosed = true; throw new RemoteSetupException(true, hello["node"]?.GetValue<string>()); }
         Hello = hello;
@@ -130,6 +141,8 @@ public sealed class RemoteAgent : IDisposable
     {
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         RemoteSetupException? setupFailure = null;
+        heard = Environment.TickCount64; lost = 0;
+        _ = WatchSilenceAsync(current);
         _ = Task.Run(async () =>
         {
             try
@@ -139,6 +152,7 @@ public sealed class RemoteAgent : IDisposable
                 int length = 0, read;
                 while ((read = await output.ReadAsync(chunk, lifetime.Token)) > 0)
                 {
+                    Heard();
                     if (length + read > buffer.Length) Array.Resize(ref buffer, Math.Max(buffer.Length * 2, length + read));
                     Buffer.BlockCopy(chunk, 0, buffer, length, read); length += read;
                     var position = 0;
@@ -177,17 +191,62 @@ public sealed class RemoteAgent : IDisposable
             }
             catch (Exception e)
             {
-                channelClosed = true;
                 ready.TrySetException(e);
-                foreach (var request in requests.Values) request.TrySetException(e);
-                requests.Clear();
-                foreach (var stream in reads.Values) _ = stream(null, e.Message);
-                foreach (var upload in uploads.Values) { upload.Offset.TrySetException(e); upload.Grant(0); }
                 // A missing Node.js is reported by ConnectAsync as a setup step, not as a lost connection.
-                if (!lifetime.IsCancellationRequested && setupFailure is null && current()) Disconnected?.Invoke(e.Message);
+                Lose(e, setupFailure is null && current());
             }
         });
         return ready.Task;
+    }
+
+    private void Heard()
+    {
+        Interlocked.Exchange(ref heard, Environment.TickCount64);
+        if (Interlocked.Exchange(ref slow, 0) == 1) Slow?.Invoke(false);
+    }
+    private int slow;
+
+    /// <summary>Fails everything waiting on the channel, once, whether the stream ended or the network went silent.</summary>
+    private void Lose(Exception e, bool report)
+    {
+        if (Interlocked.Exchange(ref lost, 1) == 1) return;
+        channelClosed = true;
+        foreach (var request in requests.Values) request.TrySetException(e);
+        requests.Clear();
+        foreach (var stream in reads.Values) _ = stream(null, e.Message);
+        foreach (var upload in uploads.Values) { upload.Offset.TrySetException(e); upload.Grant(0); }
+        if (!lifetime.IsCancellationRequested && report) Disconnected?.Invoke(e.Message);
+    }
+
+    /// <summary>
+    /// TCP alone can take minutes to notice a dead network. After a few quiet seconds the agent is pinged; any
+    /// byte counts as an answer. Long silence ends the channel so the app can reconnect.
+    /// </summary>
+    private async Task WatchSilenceAsync(Func<bool> current)
+    {
+        var pinged = 0L;
+        try
+        {
+            while (!lifetime.IsCancellationRequested && Volatile.Read(ref lost) == 0)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), lifetime.Token);
+                if (!Probing || writer is null) continue;
+                var quiet = TimeSpan.FromMilliseconds(Environment.TickCount64 - Interlocked.Read(ref heard));
+                if (quiet >= DeadAfter)
+                {
+                    Lose(new IOException("网络无响应，连接已断开"), current());
+                    command?.Dispose();
+                    return;
+                }
+                if (quiet >= ProbeAfter * 2 && Interlocked.Exchange(ref slow, 1) == 0) Slow?.Invoke(true);
+                if (quiet >= ProbeAfter && Interlocked.Read(ref heard) != pinged)
+                {
+                    pinged = Interlocked.Read(ref heard);
+                    _ = CallAsync(Interlocked.Increment(ref sequence), "ping", new { }, DeadAfter).ContinueWith(_ => { }, TaskScheduler.Default);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     private void Dispatch(JsonObject message)

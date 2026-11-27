@@ -170,6 +170,7 @@ public sealed partial class MainWindow : Window
         agent?.Dispose(); var next = new RemoteAgent(); agent = next; status.Text = "正在连接…"; health = [];
         reconnecting?.Cancel();
         next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
+        next.Slow += slow => DispatcherQueue.TryEnqueue(() => OnSlow(next, slow));
         RemoteSetupException? setup = null;
         var usedPassword = mode.SelectedIndex == 0;
         try { await next.ConnectAsync(profile, password.Password, phrase.Password, ServerResources, fingerprint => ConfirmHostAsync(profile, fingerprint)); }

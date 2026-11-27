@@ -22,6 +22,14 @@ public sealed partial class MainWindow
         if (host is { } profile && (profile.SystemSsh || profile.KeyFile is { Length: > 0 })) _ = ReconnectAsync(profile);
     }
 
+    private const string SlowText = "网络响应较慢";
+    private void OnSlow(RemoteAgent current, bool slow)
+    {
+        if (agent != current) return;
+        if (slow) status.Text = SlowText;
+        else if (status.Text == SlowText) status.Text = "已连接";
+    }
+
     /// Hosts from the user's OpenSSH config, offered when adding a server. An unreadable config offers nothing.
     private static List<SshConfig.Entry> ConfiguredHosts()
     {
@@ -63,6 +71,7 @@ public sealed partial class MainWindow
             agent?.Dispose(); agent = next;
             foreach (var tunnel in tunnels) try { await next.ForwardAsync(tunnel); } catch (IOException) { } // A port taken meanwhile is simply not restored.
             next.Disconnected += error => DispatcherQueue.TryEnqueue(() => OnDisconnected(next, error));
+            next.Slow += slow => DispatcherQueue.TryEnqueue(() => OnSlow(next, slow));
             await RunAsync(async () =>
             {
                 // Keep the open conversation; a remote task that kept running is watched again.

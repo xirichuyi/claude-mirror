@@ -226,7 +226,7 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         monitor = Task.detached { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
                 await self?.checkConnections()
             }
         }
@@ -352,7 +352,7 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
             let interactive = !requiringDesired && askpassPath != nil
             try await runSSH(["-M", "-N", "-f", "-S", socket, "-o", "ControlPersist=no",
                               "-o", "BatchMode=\(interactive ? "no" : "yes")", "-o", "StrictHostKeyChecking=ask", "-o", "ConnectTimeout=15",
-                              "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "Compression=yes"]
+                              "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=4", "-o", "Compression=yes"]
                              + Self.authenticationArguments(config) + portArguments(config) + [config.host],
                              timeout: interactive ? 180 : 20, interactive: interactive,
                              password: config.authentication == .password ? password : nil)
@@ -440,7 +440,7 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
                 group.addTask { [self] in
                     defer { _ = withLock { checking.remove(entry.config.key) } }
                     do {
-                        try await runSSH(["-T", "-S", entry.socket, "-o", "BatchMode=yes", "-o", "ProxyCommand=false"] + portArguments(entry.config) + [entry.config.host, "true"], timeout: 8)
+                        try await runSSH(["-T", "-S", entry.socket, "-o", "BatchMode=yes", "-o", "ProxyCommand=false"] + portArguments(entry.config) + [entry.config.host, "true"], timeout: 5)
                         if !state(entry.config).error.isEmpty {
                             _ = setState(entry.config, ConnectionState(status: .connected), socket: entry.socket)
                         }
@@ -450,7 +450,7 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
                         // OpenSSH's server-alive checks handle an actually unreachable peer.
                         if error is SSHCommandTimeout,
                            (try? await runSSH(["-S", entry.socket, "-O", "check"] + portArguments(entry.config) + [entry.config.host], timeout: 2)) != nil {
-                            _ = setState(entry.config, ConnectionState(status: .connected, error: "网络响应较慢，正在检查连接"), socket: entry.socket)
+                            _ = setState(entry.config, ConnectionState(status: .connected, error: "网络响应较慢"), socket: entry.socket)
                             return
                         }
                         guard setState(entry.config, ConnectionState(status: .error, error: "SSH 连接已断开"), socket: entry.socket) else { return }
