@@ -1,514 +1,114 @@
-<p align="center"><img src="docs/assets/claude-mirror-icon.png" width="128" alt="镜像 Claude 标志"></p>
-<h1 align="center">镜像 Claude · Claude Mirror</h1>
-<p align="center">把远端 Claude Code 工作区，接到你的桌面。</p>
+<p align="center"><img src="docs/assets/tether-icon.png" width="128" alt="Tether"></p>
+<h1 align="center">Tether</h1>
+<p align="center">在 macOS、Windows 和 Android 上使用服务器里的 Claude Code。</p>
+<p align="center">
+  <a href="https://github.com/xirichuyi/tether/releases/latest">下载</a> ·
+  <a href="docs/getting-started.md">入门指南</a> ·
+  <a href="docs/usage.md">使用说明</a> ·
+  <a href="docs/server.md">服务器准备</a> ·
+  <a href="docs/development.md">开发</a>
+</p>
 
-镜像 Claude 是一个通过 SSH 使用远端 Claude Code 的桌面聊天项目。代码、依赖、运行环境和 Claude 都留在服务器上，你在本地管理机器与项目、继续历史对话、审批工具操作、上传附件，以及预览和编辑远端生成的文件。
+Tether 通过 SSH 连接你的服务器。代码、依赖和 Claude Code 都留在服务器上，客户端负责对话、审批、文件和终端。关掉客户端，服务器上的任务照常运行，回来时接上输出。
 
-**让远端 Claude Code 像本地客户端一样使用。** 这里的“镜像”指把远端工作区呈现在本地，并非模型镜像、容器镜像或 API 转发服务。
+不经过任何中转服务，服务器不需要对外开放额外端口。
 
-这是独立开发的非官方客户端，与 Anthropic 没有隶属关系。项目目标是尽量复用 Claude Code 的原生能力；当前适配范围和限制见下文。
+> 独立开发的非官方客户端，与 Anthropic 没有隶属关系。
 
-## 下载与平台
+![对话](docs/screenshots/chat.png)
 
-**[下载最新版 · GitHub Releases](https://github.com/xirichuyi/claude-mirror/releases/latest)** · [全部版本](https://github.com/xirichuyi/claude-mirror/releases)
+## 下载
 
-| 客户端 / 环境 | 当前状态 |
-| --- | --- |
-| macOS 原生客户端 | SwiftUI / AppKit；macOS 14+，本次提供 Apple Silicon（arm64）DMG |
-| Intel Mac | 可尝试使用对应 Mac 从源码构建；本次不提供已验证的 Intel 安装包 |
-| Electron 客户端 | 仓库保留跨平台实现，可从源码启动；与原生版功能尚未完全一致 |
-| Windows 原生客户端（预览） | C# / WinUI 3，Windows 10 1809+ / Windows 11 x64；从[统一稳定发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载 `Claude-Mirror-Setup-x64.exe`；首次统一发布之前使用 [Windows 首发安装包](https://github.com/xirichuyi/claude-mirror/releases/download/v0.21.1-windows.1/Claude-Mirror-Setup-x64.exe)；[使用与构建说明](windows/README.md)，[下载 CI 工件](https://github.com/xirichuyi/claude-mirror/actions/workflows/windows.yml) |
-| Android 客户端（预览） | Kotlin / Jetpack Compose，Android 8.0+；目前从源码构建，见“[Android 客户端](#android-客户端)” |
-| Linux 本地客户端 | 可尝试 Electron 源码版本；未完成发行验收 |
-| 远端服务器 | 通过 SSH 访问；主要验证 Linux。安装脚本支持 Linux、macOS、WSL 的 Linux 环境 |
+| 平台 | 安装包 | 要求 |
+| --- | --- | --- |
+| macOS | `tether-<版本>-macOS-arm64.dmg` | macOS 14+，Apple Silicon |
+| Windows | `Claude-Mirror-Setup-x64.exe` | Windows 10 1809+ / 11，x64 |
+| Android | `.apk` | Android 8.0+ |
 
-项目不限定本地操作系统；**当前可以直接下载的正式构建产物是 macOS arm64 版**，不代表其他平台已经完成打包与测试。
+全部在 [Releases](https://github.com/xirichuyi/tether/releases/latest)。macOS 和 Windows 支持应用内更新。
 
-### 安装 DMG
+macOS 版还没有经过 Apple 公证，第一次打开会被拦截，处理方法见[入门指南](docs/getting-started.md#macos)。
 
-1. 从[发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载最新的 `claude-mirror-<版本号>-macOS-arm64.dmg`。
-2. 打开 DMG，将 **claude-mirror.app** 拖入 **Applications**。
-3. 从应用程序启动 claude-mirror，首次使用时添加服务器；已有记录时恢复上次打开的聊天及其主机。
+## 快速开始
 
-第一次使用请看 **[入门指南](docs/getting-started.md)**：从准备服务器、首次打开被 macOS 拦截，到登录 Claude，每一步都有说明。
+1. **准备服务器**：一台能 SSH 登录的 Linux 或 macOS 机器即可。缺 Node.js 或 Claude Code 时，客户端连接后提示一键安装。
+2. **添加服务器**：填 `用户名@地址`，用密码、私钥或本机 SSH 配置登录；或者直接粘贴管理员发来的连接码。
+3. **登录 Claude**：首次连接按提示在服务器上登录 Claude。
+4. **开始对话**：选一个项目目录，开始对话。
 
-本机使用 DMG 无需安装 Node.js、Swift 或 Xcode。服务器只需要能用 SSH 登录：连接后应用会检查环境，缺少 Node.js 时连接会自动装到用户目录（不需要管理员权限，服务器只需 curl 或 wget），缺少 Claude Code 时可以一键安装，Claude 未登录时会引导你在终端完成登录。发布页附 SHA-256 校验文件。
+多人共用一台服务器时，管理员装好[网页面板](docs/server.md#连接码与网页面板)，给每个人复制一个连接码：
 
-**应用内更新**：从 v0.21.0 起接入 Sparkle，每次启动检查新版，也可在“账号 → 设置 → 关于”检查更新。确认后在应用内下载、验证签名、安装并重启，不用手动替换 DMG。退出前保存输入草稿和已上传附件，远端任务继续运行；未保存的文件编辑会先提示。v0.20.0 及更早版本需要最后手动安装一次 v0.21.0。更新包及更新源使用 Ed25519 签名；当前应用仍未经过 Apple 公证。
-
-**首次打开被拦截**：当前构建为 ad-hoc 签名，尚未通过 Apple Developer ID 签名和公证，macOS 会在第一次打开时阻止。核对下载来源后：在提示框点“完成” → 打开「系统设置 → 隐私与安全性」→ 在底部“已阻止 claude-mirror”旁点“仍要打开”并输入密码 → 再次打开应用并点“打开”。只需一次，不要关闭全局 Gatekeeper。
-
-## 界面预览
-
-以下截图来自实际原生客户端的隔离文档示例，使用虚构主机与对话，不包含个人服务器信息。
-
-![项目与聊天](docs/screenshots/chat.png)
-
-![SSH 连接设置](docs/screenshots/connect.png)
-
-## 适合什么场景
-
-- Claude Code 和开发环境安装在 Linux 服务器上，希望在本地以聊天界面工作。
-- 同时使用开发机、测试机等多台服务器，需要清楚区分机器和项目。
-- 希望关掉客户端后远端任务继续运行，回来时恢复输出和待确认请求。
-- Claude 生成了代码、图片、PDF 或视频，希望直接查看或下载到本机。
-
-不需要额外开放公网 Web 服务端口。连接、控制和文件传输通过 SSH 完成；远端 Claude 自身仍需访问模型服务。
+```bash
+curl -fsSL https://github.com/xirichuyi/tether/releases/latest/download/install-claude-remote.sh | sudo bash -s -- --panel
+```
 
 ## 功能
 
-| 范围 | 当前实现 |
+| 功能 | macOS | Windows | Android |
+| --- | :-: | :-: | :-: |
+| 多服务器、多项目，接着服务器上已有的对话 | ✓ | ✓ | ✓ |
+| 流式回复、工具卡片、权限确认、Claude 提问 | ✓ | ✓ | ✓ |
+| 排队、插队、停止、暂停 | ✓ | ✓ | ✓ |
+| 切换模型和思考强度，上下文用量 | ✓ | ✓ | ✓ |
+| 附件上传，断点续传 | ✓ | ✓ | ✓ |
+| 远端文件浏览、预览、编辑 | ✓ | ✓ | 浏览、预览 |
+| Git 改动和差异 | ✓ | ✓ | ✓ |
+| 内置终端 | ✓ | ✓ | ✓ |
+| 粘贴连接码添加服务器 | ✓ | ✓ | ✓ |
+| 成员管理（root 登录） | ✓ | ✓ | ✓ |
+| 断线约 20 秒内发现并自动重连 | ✓ | ✓ | ✓ |
+| 回复完成、需要确认时通知 | ✓ | ✓ | ✓ |
+| 端口转发 | ✓ | ✓ | |
+| 服务器反向连接本机 | ✓ | | |
+
+服务器端：
+
+- **零依赖**：没有 Node.js 时，自动把校验过的 Node.js 装到用户目录。
+- **root Full Access**：root 登录可以直接开 Full Access（`IS_SANDBOX=1`）。
+- **多人隔离**：每人一个 Linux 账号、自己的 SSH 密钥和 Claude 登录，互相看不到。
+- **任务常驻**：客户端断开后任务继续运行，重连后接上输出和待确认请求。
+
+## 文档
+
+| 文档 | 内容 |
 | --- | --- |
-| 多主机 | 保存、编辑、切换与移除连接，按机器区分历史和任务状态；移除连接保留聊天与远端文件 |
-| SSH | 系统配置与 Agent、密码、指定私钥文件；用户名与端口；首次连接确认主机指纹 |
-| 项目与历史 | 按服务器和工作目录组织会话，先读取索引，按需加载正文和更早消息 |
-| 聊天 | 流式回复、Markdown、代码块、思考与工具记录、停止、排队、审批和结构化提问 |
-| Claude 能力 | 从远端获取命令与模型；`/` 补全、模型与思考强度选择、会话参数设置 |
-| 文件 | 目录树、搜索、附件、拖放上传、截图粘贴、下载、本地打开、文本编辑和冲突检查 |
-| 预览 | 文本/代码、图片、PDF；其他格式可下载或交给本机应用 |
-| 开发工作流 | Git 变更、隔离 worktree、文件检查点预览与回退、跨机器任务视图 |
-| 连接恢复 | SSH ControlMaster 复用、keepalive、退避重连、唤醒检测、远端任务重新订阅 |
-
-macOS 文件预览优先显示本地缓存，再校验远端版本；同时打开同一文件会合并请求。图片可先显示缩略图，再点“查看原图”。缩略图由远端已有的 Pillow、ImageMagick 或 ffmpeg 生成，PNG 不需要任何工具；JPEG/WebP 在三者都没有时回退为下载原图。打开目录会预取前几张图片的缩略图，对话里的图片附件自动显示缩略图。缩略图缓存与原文件分开，下载和本地打开始终使用原文件。文本先读取 64 KB，点“加载更多”继续读取，面板最多预览 1 MB；完整内容可下载查看。
-
-命令列表可发现不等于每条命令的后续交互都已适配。新的 Claude 协议、第三方 MCP 或插件的特殊表单需要单独验证。模型可用性、额度和费用由远端账户决定。
-
-## SSH 连接与认证
-
-打开左上角机器菜单，选择「添加服务器…」。已有连接可在「管理主机…」中编辑或删除。
-
-1. **主机名称**：例如“开发服务器”，仅用于显示；可留空，留空显示地址。
-2. **SSH 主机**：IP、域名、SSH config 别名，或 `user@host`。也兼容 `ssh my-server` 的别名输入方式。
-3. **用户名**：地址中未包含用户名时可单独填写；留空由系统 SSH 配置决定。
-4. **端口**：1–65535，留空使用 SSH 配置或 OpenSSH 默认端口。
-5. **认证方式**：按下表选择，再点击「连接机器」。
-
-| 方式 | 用法 |
-| --- | --- |
-| SSH 配置 / Agent | 复用 `~/.ssh/config`、默认密钥和已加载的 SSH Agent；支持系统配置的跳板机 |
-| 密码 | SSH 请求密码时弹出安全输入窗口；支持密码及常规 keyboard-interactive 提示 |
-| 私钥文件 | 在文件选择器中选择私钥，传给 OpenSSH 的 `-i`；支持带空格的本地路径；加密私钥按需询问口令 |
-
-首次连接由 OpenSSH 提供指纹，在弹窗中核对后才能信任。已知主机指纹发生变化时连接会失败，应用不会关闭主机校验或自动删除 `known_hosts`。
-
-**密码与口令不写入设置、日志或项目文件，也不存进 Keychain。** 它们通过辅助程序的标准输出直接传给 SSH。连接期间复用已经认证的主连接，不反复询问。密码认证断线或重启客户端后需手动重连并重新输入；后台自动重试不弹出认证窗口。需要无人值守重连时，使用已配置好的密钥/SSH Agent。
-
-当前没有内置私钥生成、密钥上传、SSH config 编辑或复杂企业 SSO 流程。没有启用密码认证的服务器，不能仅靠客户端选项开启密码登录。同一个地址、用户和端口视为同一台机器，显示名称不改变历史归属；更换认证方式前先断开该机器。
-
-## 服务器反向连接本机
-
-在机器菜单中右键服务器，勾选“允许此服务器反向连接本机”，该服务器就能通过本应用已有的 SSH 连接登录这台 Mac。这项功能不用另开隧道，也不需要公网 IP 或端口映射；默认关闭，需要每台服务器单独开启，目前只有 macOS 原生客户端支持。
-
-开启后，应用在每次连接或重连时会做以下几件事：
-
-1. 在服务器的 `~/.claude-mirror/reverse/`（权限 700）里绑定一个仅本用户可访问的 Unix socket，转发到本机的 22 端口。这里不监听 TCP 端口；断线留下的旧 socket 会先删除再重新绑定。
-2. 在服务器上生成一把专用密钥，加入本机的 `~/.ssh/authorized_keys`，并加上 `from="127.0.0.1,::1"` 限制：这把密钥只能经由该通道使用，其他已有的行保持原样。
-3. 把本机的 ed25519 主机公钥写到服务器上，服务器首次连接时不用手动核对指纹。
-4. 生成一份 ssh_config 并开启连接复用。菜单中的“复制反向连接命令”会得到 `ssh -F ~/.claude-mirror/reverse/<名称>.config <名称>`；`scp`、`rsync -e` 加上同样的 `-F` 参数即可使用。
-5. 连接期间阻止 Mac 因闲置自动休眠，合盖或手动睡眠不受影响。
-
-取消勾选后，应用会立即从 `authorized_keys` 删除这一行，即使当前离线也会删除；如果服务器在线，还会关闭它已打开的会话并删除 socket。
-
-需要满足的条件：本机已开启“系统设置 → 通用 → 共享 → 远程登录”；服务器安装了 `socat`；应用正在运行并已连接该服务器。退出应用、Mac 进入睡眠或网络断开时，反向连接也会中断。
-
-**开启期间，服务器上任何能读取该专用密钥的程序或用户，都能以你的身份登录这台 Mac。** 只对你信任的服务器开启，不用时关闭。
-
-反向流量和聊天流量共用同一条 SSH 连接。实测在约 300ms 延迟的跨境线路上，反向连接的速度与单独开隧道相当；但通过它传输大文件时，应用里的操作会变慢 50%–100%，传完即恢复。
-
-## 从源码运行
-
-### 环境要求
-
-- 本机：macOS 14+，Xcode 15.3+ 或兼容 Swift 5.10 的工具链，Node.js 和 npm。
-- 远端：可用的 SSH 服务、已安装并配置好认证的 Claude Code。没有 Node.js 18.14+ 时连接会自动装到用户目录。
-- 远端用户必须有权限访问对应项目及 Claude 历史。客户端不能绕过服务器权限。
-
-```sh
-git clone https://github.com/xirichuyi/claude-mirror.git
-cd claude-mirror
-npm ci --ignore-scripts
-sh macos/scripts/build-app.sh
-open macos/dist/claude-mirror.app
-```
-
-源码构建后的界面显示名为“镜像 Claude”。为兼容旧版安装、存储和构建脚本，目前内部 Swift 模块、bundle ID 和构建输出仍保留 RemoteCC 名称。构建脚本会打包远端代理、SSH 认证辅助程序和应用图标；不要用裸 `swift run` 验收密码弹窗。
-
-### Electron 客户端
-
-```sh
-git clone https://github.com/xirichuyi/claude-mirror.git
-cd claude-mirror
-npm ci
-npm start
-```
-
-此入口启动跨平台 Electron 界面，不会启动 SwiftUI 客户端。需要本机 Node.js、npm 和系统 OpenSSH；Linux 还需要图形桌面及 Electron 运行依赖。Windows/Linux 尚需平台验证，旧界面也不包含所有原生版新功能。
-
-### Android 客户端
-
-```sh
-cd android
-./gradlew assembleDebug        # 产物：app/build/outputs/apk/debug/app-debug.apk
-./gradlew test                 # 引擎与协议测试，会在本机运行真实的远端代理
-```
-
-需要 JDK 17、Android SDK（`compileSdk 37`）和 Node.js：构建时会用仓库里的 TypeScript 源码生成随 App 携带的服务端程序。
-
-手机端和 macOS 版走同一套 SSH 协议，不经过任何中转服务：
-
-- 添加服务器（地址、端口、用户名、项目目录），用密码或粘贴的私钥登录。密码和私钥用 Android Keystore 加密保存在本机。
-- 第一次连接要核对并确认服务器的密钥指纹；之后指纹变了会拒绝连接。
-- 对话、流式回复、工具调用、权限确认和 Claude 的提问。
-- 回复过程中可以排队或插队，队列可编辑、移除、清空；停止后队列暂停。
-- 输入框上方显示上下文已用 / 总量（需要服务端支持）。
-- 切到后台或断网不影响服务器上的回复，回到前台自动接回。
-
-目前没有的：导入服务器上已有的 Claude 历史、附件上传、模型切换、MCP 表单填写。
-
-`SshEndToEndTest` 默认跳过；设置 `CLAUDE_MIRROR_E2E_HOST` 等环境变量后，会通过真实 SSH 对一台准备好的服务器跑完整对话（说明见该文件开头）。
-
-### 自行打包 DMG
-
-```sh
-sh macos/scripts/build-dmg.sh
-```
-
-脚本在当前 Mac 架构上构建、验证签名并生成压缩磁盘映像与 SHA-256 文件，产物位于 `macos/dist/`。
-
-### GitHub Actions 构建与发布
-
-- **CI**（`.github/workflows/ci.yml`）：推送到 main 或提交 PR 时，在 Linux 上运行 Node 测试，在 macOS 26（Apple Silicon，Xcode 26）上运行 Swift 测试并打包 DMG。DMG 作为构建产物保留 14 天，可在对应运行记录中下载。
-- **Release**（`.github/workflows/release.yml`）：推送 `v*` 标签时，先核对标签与 `Info.plist` 中的版本号一致，再测试、打包，并把 DMG、校验文件和远端脚本上传到同名 Release。Release 不存在时自动创建，说明取自 `docs/releases/<标签>.md`。也可以在 Actions 页面手动运行，为已有标签重新构建并上传。
-
-发布新版本：
-
-```sh
-# 1. 修改 macos/Resources/Info.plist 中的 CFBundleShortVersionString 和 CFBundleVersion
-# 2. 编写 docs/releases/v0.20.0.md
-git commit -am "Release v0.20.0" && git push origin main
-git tag -a v0.20.0 -m "claude-mirror v0.20.0" && git push origin v0.20.0
-```
-
-CI 构建同样只做 ad-hoc 签名，不经过 Apple 公证。
-
-## 远端一键准备
-
-在本地仓库目录运行，脚本先通过 SSH 连接远端，再检测和安装 Claude：
-
-```sh
-sh scripts/setup-remote.sh my-server
-# 或指定端口、私钥和用户
-sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
-```
-
-- 使用系统 OpenSSH，支持 SSH config 别名、密码和密钥；保留主机指纹检查。
-- **已有 Claude：** 只验证能否运行，不覆盖、不升级、不改认证配置。
-- **没有 Claude：** 下载 [Claude 官方安装器](https://github.com/anthropics/claude-code#installation)并安装 stable 版本，由官方安装器选择平台和架构。
-- 远端 Node.js 低于 18.14 或不存在时，把固定版本、校验过 SHA-256 的 Node.js 装到用户目录，不改系统包（nodejs.org 不通时换 npmmirror；Alpine、CentOS 7 用非官方构建）。唯一例外：Alpine 上以 root 连接时会 `apk add libstdc++`，Node.js 的 musl 构建依赖它。
-- SSH 断开会杀后台进程的服务器上自动开启 `loginctl enable-linger`；需要管理员权限时先试免密 `sudo`，不行再给出要运行的命令。
-
-**想让 Claude 以普通账号运行**（root 登录的服务器也可以直接用 Full Access，见下文）再加三个选项，一条命令配好执行账号：
-
-```sh
-sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app root@example.com
-```
-
-| 选项 | 作用 |
-| --- | --- |
-| `--runner 账号` | 新建普通账号并为它安装 Claude Code。同名账号已存在且不是本脚本创建的，直接拒绝，不修改已有账号 |
-| `--project 目录` | 目录不存在则创建；只给该账号这个目录的读写权限（ACL），父目录仅可穿越。缺少 `setfacl` 时用系统包管理器安装 `acl`。拒绝 `/root`、`/etc` 等系统目录 |
-| `--copy-login` | 把 root 的 `~/.claude/.credentials.json` 复制给该账号（仅此一个文件，权限 600）。不加则按脚本最后打印的命令登录一次 |
-
-选项在安装任何东西之前检查，重复运行不会重复创建。完成后在新对话选择 Full Access，执行账号填 `claude-runner`。
-
-### 多人共用一台服务器
-
-每人一个 Linux 账号、自己的 SSH 密钥和 Claude 登录；家目录为 `700`，对话、文件、附件、任务和用量互相看不到。以 root 连接时，服务器旁出现「成员」，可添加（账号 + 公钥）和删除。也可以在终端运行：
-
-```bash
-sudo bash scripts/install-claude-remote.sh --add-user alice --key 'ssh-ed25519 AAAA… alice@laptop'
-sudo bash scripts/install-claude-remote.sh --list-users
-sudo bash scripts/install-claude-remote.sh --remove-user alice   # 删除账号和家目录
-```
-
-只管理本脚本创建的账号（记录在 `/etc/claude-mirror/members`），已有账号不会被修改或删除。成员用 `alice@服务器` 添加服务器，首次连接后自己登录 Claude。
-
-#### 连接码与网页面板
-
-不想让成员自己生成密钥、填地址时，用连接码：
-
-```bash
-sudo bash scripts/install-claude-remote.sh --invite alice            # 打印 cm1. 开头的连接码
-```
-
-连接码里有服务器地址、SSH 端口、账号、服务器指纹和一把新密钥。成员在 App 添加服务器时粘贴即可连上，不用确认指纹。连接码 24 小时内有效（需要 OpenSSH 8.2+），只能用一次：首次连接时 App 换成本机生成的密钥，邀请密钥随即作废。再次 `--invite` 会作废旧的连接码。
-
-也可以像 3X-UI 那样装一个网页面板，在浏览器里添加、删除成员和复制连接码（需要 systemd）：
-
-```bash
-curl -fsSL https://github.com/xirichuyi/claude-mirror/releases/latest/download/install-claude-remote.sh | sudo bash -s -- --panel
-```
-
-- 端口、网页路径、账号和密码随机生成，只在首次安装时显示；`--panel-reset` 重新生成账号和密码，`--remove-panel` 卸载（成员保留）。
-- 只走 HTTPS，用服务器自签证书；浏览器首次会提示不受信任，可对照安装时打印的证书指纹确认。
-- 安装时会在 ufw / firewalld 放行端口；云服务商的安全组需要自己放行。
-- 登录连续失败 5 次锁定 10 分钟。
-- 不会自动登录、索取 API Key，也不会把本机 Claude 凭据传到服务器。
-
-如需登录，请在服务器交互式终端运行 `claude auth login`；新安装通常位于 `~/.local/bin/claude`。完成后回到客户端连接同一主机。安装器要求远端能访问官方站点；发行地区、网络或系统依赖问题会按实际错误显示。
-
-**该步骤由你运行脚本触发，不是每次客户端连接都静默安装。** DMG 内也附带这两个脚本；一起复制到本地后即可使用。
-
-## 复制给 Agent 的使用指引
-
-把下面整段交给你的编程 Agent，并补充本机平台及 SSH 主机；不要在提示词中填密码或 API Key。
-
-```text
-请帮我部署和使用「镜像 Claude / Claude Mirror」。
-项目：https://github.com/xirichuyi/claude-mirror
-我的本机系统：[填写系统与 CPU 架构]
-目标 SSH 主机：[填写 SSH config 别名或 user@host]
-远端项目目录：[填写绝对路径]
-
-请先阅读仓库 README，再按实际平台操作：
-1. 确认本机平台与架构。Apple Silicon macOS 14+ 优先使用 GitHub Releases
-   的 DMG；Windows x64 查看 windows/README.md 的原生预览版和 CI ZIP；
-   Linux 检查 Electron 源码入口，不要假设存在正式安装包。
-2. 验证 SSH 连通性和主机身份。沿用我的 SSH 配置，不关闭主机指纹验证。
-3. 检查远端 Node.js 和 Claude Code。若 Claude 缺失，运行仓库的
-   scripts/setup-remote.sh 连接目标主机并安装；保留已有安装及认证配置。
-4. 需要账户登录时让我在远端交互式终端完成，不读取或复制 auth.json、
-   API Key、私钥内容，也不要把凭据写进仓库。
-5. 启动客户端，添加有名称的主机，选择远端项目并加载历史。
-6. 用无敏感内容的临时样例确认：聊天附件进入远端临时目录；同名同内容
-   复用路径，同名不同内容产生新路径；文件面板上传则写入当前目录。
-7. 验证文件预览、模型选择和连接恢复，说明已验证内容及平台限制。
-   不删除我的项目文件，不运行与任务无关的命令，不自动发送真实工作内容。
-```
-
-## 跨机器同步记忆和会话
-
-`scripts/agent-sync.cts` 让 VPS 和本地的 Agent 共用记忆，并能接手对方的会话。账号只在 VPS 上登录，同步范围不包含凭据。机器之间只需要能用 SSH 互连：本地直连 VPS 公网，或使用 WireGuard、Tailscale 等内网地址都可以。同步不经过第三方服务，也不转发模型流量。
-
-| 内容 | 同步方式 |
-| --- | --- |
-| Claude 项目记忆 | 双向同步；同一文件冲突时两个版本都保留（`*.conflict-*`），`MEMORY.md` 按行合并 |
-| 会话交接记录 | 每个会话生成脱敏 Markdown，只含对话和工具摘要，不含工具输出和思考内容 |
-| 原始会话 | 默认本地的上传到 VPS；在本地 `config.json` 设 `"uploadRaw": false` 后留在本地，VPS 运行 `resume` 时通过 `--peer` 配置的 SSH 连接读取 |
-| 凭据、设置、历史 | 从不读取或同步 |
-
-Claude Code 的 `SessionStart`、`Stop`、`SessionEnd` hook 和 Codex 的 `notify` 触发同步，每 5 分钟的定时任务兜底。其他 Agent 可以在任务结束时调用 `agent-sync sync --quiet` 接入。需要 macOS、Linux 或 WSL，以及 Node.js、git、rsync。
-
-```sh
-# 首次运行或更新源码后，在仓库根目录编译
-npm ci --ignore-scripts
-npm run build
-
-# VPS
-node build/scripts/agent-sync.cjs install --role hub --host vps
-
-# 本地：确认能免密 ssh 到 VPS 后运行
-node build/scripts/agent-sync.cjs install --role spoke --host laptop --hub root@<VPS 地址> --hub-host vps
-
-# VPS：可选，任务完成后立刻通知本地。需要 VPS 能 SSH 到本地，
-# 例如开启下文的“服务器反向连接本机”，再在 VPS 的 ~/.ssh/config 中为本机配置别名
-~/.agent-sync/bin/agent-sync install --peer <本机的 SSH 别名>
-```
-
-不同机器上路径不同的项目，如果 `origin` 相同会自动对应；否则在两边各运行一次 `agent-sync link <共享名> <路径>`。
-
-```sh
-agent-sync sessions --project   # 查看当前项目在各机器上的会话
-agent-sync show <会话ID>        # 读取交接记录
-agent-sync resume <会话ID>      # 把原始会话下载到本机，并给出恢复命令
-agent-sync doctor               # 检查 hub、对端连通性和记忆冲突
-```
-
-同一个会话不要同时在两台机器上继续，否则会分叉成两条历史。原始会话没有脱敏，只保存在你自己的机器上。
-
-## 日常使用
-
-1. **连接服务器**：添加一个有名称的 SSH 主机，连接后自动发现该用户的 Claude 历史。
-2. **选择项目**：在左侧展开项目继续对话，或选择远端目录开始新对话。正文按需加载，不一次下载全部聊天。
-3. **发送任务**：输入消息；输入 `/` 搜索远端命令，使用模型菜单切换远端提供的模型。回复中按 `Esc` 停止；`Enter` 把下一条消息加入队列，`⌘ Enter` 或队列里的“立即发送”让 Claude 在下一步就读到它，不中断当前回复。输入框右下角显示上下文已用 / 总量。
-4. **附加文件**：把本机文件拖入输入框，或点击 `＋`。上传完成后显示附件，发送时将远端绝对路径交给 Claude。
-5. **管理文件**：打开文件面板浏览服务器；每行 `…` 菜单提供重命名、下载、删除等操作。删除需确认，直接作用于服务器。
-6. **查看产物**：点击聊天中的文件链接预览；可编辑文本、下载副本或使用本机软件打开。
-
-### 附件与目录上传有什么区别？
-
-| 操作 | 存放位置 | 重复文件行为 |
-| --- | --- | --- |
-| 输入框拖放、`＋`、粘贴截图 | 远端当前用户专用临时目录 | 同名同内容复用已校验的路径，不再传输文件内容 |
-| 同名文件修改后再次作为附件上传 | 新的内容摘要目录 | 保留旧版，新消息引用新版路径 |
-| 文件面板的上传按钮 | 当前浏览的远端目录 | 不覆盖已有同名文件，冲突时提示 |
-
-附件通过 SHA-256 校验内容，文件名保留。远端临时副本被清理或修改后，再次附加会重新上传。临时目录不是长期存储；需要保存的产物请下载或放入项目目录。已经上传的旧项目文件不会因升级自动移动或删除。
-
-### 断开连接后会怎样？
-
-远端任务由独立 Worker 执行，关闭窗口或断开 SSH 不会主动停止它。重新连接后恢复订阅输出与待确认请求。服务器重启、远端进程被杀死或模型服务失败不属于可保证继续执行的情况。需要审批的任务仍会等待确认。
-
-新版本的 Worker 在没有回复、授权请求或后台任务时，连续空闲 15 分钟会释放 Claude 与 Worker 进程，保留历史和远端会话 ID，下次发送时恢复会话。旧版本已经启动的 Worker 需要正常关闭后重新建立，才能使用新的回收逻辑。
+| [入门指南](docs/getting-started.md) | 第一次使用，从准备服务器到开始对话 |
+| [使用说明](docs/usage.md) | 日常操作、SSH 认证、Full Access、额度保护、工具面板 |
+| [服务器准备](docs/server.md) | 一键准备、执行账号、多人共用、连接码与网页面板 |
+| [高级功能](docs/advanced.md) | 反向连接本机、跨机器同步记忆和会话 |
+| [开发指南](docs/development.md) | 从源码构建、架构、测试 |
+| [发布流程](docs/release.md) | 打包、签名、稳定版发布与自动更新 |
+| [安全说明](SECURITY.md) | 数据存放位置、凭据处理、漏洞报告 |
+| 各端说明 | [macOS](macos/README.md) · [Windows](windows/README.md) · [Android](android/README.md) |
 
 ## 架构
 
 ```mermaid
 flowchart LR
-    UI[macOS SwiftUI 界面] --> Core[RemoteCCCore 本地核心]
-    Core --> SSH[系统 OpenSSH]
-    SSH --> Agent[服务器 Node Agent]
+    Mac[macOS · SwiftUI] --> SSH
+    Win[Windows · WinUI 3] --> SSH
+    And[Android · Compose] --> SSH
+    SSH[SSH] --> Agent[远端代理 remote-agent]
     Agent --> Worker[常驻任务 Worker]
     Worker --> Claude[Claude Code / Agent SDK]
 ```
 
-- **界面层**处理输入、导航、审批展示和 macOS 文件选择器。
-- **本地核心**管理连接、状态、缓存、历史、文件传输和恢复。
-- **远端代理**提供目录、历史、文件和任务接口，通过 SSH 自动部署并按版本复用。
-- **任务 Worker**承载远端会话；客户端断开并不主动终止任务。服务器重启或远端进程退出并不能自动保留正在执行的进程。
+| 目录 | 内容 |
+| --- | --- |
+| `macos/` | macOS 客户端（Swift） |
+| `windows/` | Windows 客户端（C# / WinUI 3） |
+| `android/` | Android 客户端（Kotlin / Jetpack Compose） |
+| `src/` | 远端代理、任务 Worker 和网页面板（TypeScript），以及旧版 Electron 客户端 |
+| `scripts/` | 服务器安装脚本、构建和端到端测试工具 |
+| `test/` | Node 测试 |
+| `docs/` | 文档、发布说明、品牌素材 |
 
-目录说明：
+## 参与开发
 
-```text
-macos/Sources/RemoteCC/       原生界面及应用状态桥接
-macos/Sources/RemoteCCCore/   SSH、协议、会话、历史、文件核心
-macos/Helpers/               OpenSSH 认证窗口辅助程序
-macos/Tests/                 核心、恢复和远端测试
-src/remote-agent.cts         远端代理
-src/task-worker.cts          Claude SDK 任务进程
-src/                        TypeScript 源码，同时保留早期 Electron 客户端
-build/src/                  编译后的运行文件与界面资源，不提交到 Git
-scripts/                    TypeScript 构建、命令行工具与端到端验证脚本
-test/                       TypeScript 测试
-build/scripts/              编译后的工具入口
-build/test/                 编译后的测试
-docs/assets/                项目标识
-```
+见 [CONTRIBUTING.md](CONTRIBUTING.md)。问题和建议请提交到 [Issues](https://github.com/xirichuyi/tether/issues)，也欢迎在 [Linux DO](https://linux.do/) 交流。
 
-密码、私钥选择和主机名称已在 macOS 与 Windows 原生客户端接入。Windows 目前为基础功能预览版；旧 Electron 界面尚未同步这些功能。
+## 许可
 
-连接、刷新历史及重连时会批量检查项目目录。已删除目录不再列为可用项目，其对话保留在“目录已移除 · 历史对话”；发送前再次检查。目录重新创建后刷新即可恢复。离线或权限不足不会直接判定为删除。
+[MIT](LICENSE)。第三方依赖遵循各自许可；界面配色、卡片尺寸和动效时长改编自 [winc](https://github.com/DEEIX-AI/Winc)（Apache-2.0），许可证随应用打包。
 
-## 数据和安全边界
-
-聊天和缓存保存在本机；兼容路径为 `~/Library/Application Support/RemoteCC Native`，机器配置保存在应用 UserDefaults。机器配置包含地址、名称、认证方式与私钥路径，不包含密码和私钥内容。
-
-聊天附件上传到远端专用临时目录，按 SHA-256 摘要隔离；重复附件验证远端副本后复用路径，副本丢失或内容变化时重新上传。文件面板的上传仍写入当前浏览目录。临时目录可能被系统清理，不用作长期文件存储；发起聊天会将请求及所附内容交给远端 Claude。权限请求仍需按配置确认，断线不会自动批准。编辑远端文件可能改变服务器项目，检查点回退只覆盖 SDK 跟踪的文件，不等于整个项目快照。
-
-请勿向仓库提交认证文件、私钥、聊天数据库或生产环境配置。
-
-## TypeScript 开发
-
-全部自有 JavaScript（应用、测试、构建、命令行工具及原生资源准备脚本）已迁移到 TypeScript。Node/Electron 源码和工具使用 `.cts`（TypeScript 的 CommonJS 扩展名），浏览器经典脚本使用 `.ts`。`npm run build` 将两者分别编译为 `build/src/*.cjs` 和 `build/src/*.js`，并将工具和测试编译到 `build/scripts`、`build/test`，原生资源准备程序编译到 `build/macos/scripts`。请编辑对应源码目录中的 `.ts`/`.cts`，不要编辑 `build` 中的产物。远端机器接收普通 JavaScript，不需要安装 TypeScript。
-
-```sh
-npm ci --ignore-scripts
-npm run typecheck  # 检查源码与编译期接口测试，不生成文件
-npm run build      # 编译代码并准备运行资源
-npm test           # 自动进行类型检查、编译，再运行 Node 测试
-```
-
-`npm start` 和 `npm run pack` 会自动编译。`npm run prepare-server -- <输出目录>` 会先编译，再由 `macos/scripts/prepare-server.cts` 的产物计算 Agent/Worker 摘要并打包，macOS/Windows 共用此入口。直接运行 `node build/scripts/*smoke.cjs` 或 `node --test build/test/*.test.cjs` 前，请先执行 `npm run build`。构建脚本本身由 `tsconfig.bootstrap.json` 先编译，然后执行，因此干净检出也能构建，不依赖预先生成的 JavaScript 或 Node 的 TypeScript 直接执行功能。
-
-会话、偏好、文件传输和 RPC 的共享类型在 `src/contracts.d.ts`，preload 导出的接口类型供浏览器复用。所有源码、测试和工具都纳入类型检查；类型检查错误会阻止构建。测试会检查仓库中是否重新出现自有 JavaScript 源文件。当前迁移保留了动态 SDK/JSON 数据的部分 `any`，并暂时关闭隐式 any、空值和 catch 未知类型的严格检查；这是可继续收紧的迁移基线，不代表所有数据已经完整建模。外部输入仍由现有运行时校验负责。
-
-## 测试与兼容范围
-
-```sh
-# 核心逻辑和本地代理测试；需要 Node.js 和 npm 依赖
-swift test --package-path macos
-# 仅运行不访问真实服务器的连接配置测试
-swift test --package-path macos --filter SSHConfigurationTests
-# Node 单元测试
-npm test
-```
-
-真实 SSH / 模型测试需显式配置测试主机，见 [macOS 开发与验收记录](macos/README.md)。记录中的测试结果属于对应提交和环境；不能据此认定所有新认证方式、所有服务器或所有 Claude 版本都已通过验收。
-
-后续重点：密码认证的更多服务器兼容性、认证失败后的引导、复杂交互协议适配、完整无障碍验收及正式签名发行。
-
-### 发布一个稳定版本
-
-1. 在 `macos/Resources/Info.plist` 更新产品版本（两端共用），并递增 Sparkle build number。在 `docs/releases/vX.Y.Z.md` 写一份更新说明，分别标注 Windows 和 macOS 的变化。只有单平台改动时也使用统一补丁版本。
-2. 维护者可先在 GitHub Actions 手动运行 **Stable release**，保留默认的 rehearsal 选项。在指定源码上执行两端构建、签名和校验，产物仅出现在 Actions，不会创建 Release 或变更更新源。
-3. 从已验证的提交创建并推送 `vX.Y.Z` 标签。工作流从同一提交分别构建 Windows 和 macOS；两端通过后，将 EXE、DMG、便携 ZIP、摘要和更新元数据上传到同一个草稿，逐项核验 GitHub 摘要，然后公开并设为 Latest。Sparkle 的稳定更新源在发布成功后更新。
-4. 失败时修复原因并重试。已公开的附件不允许替换；若只是发布更新源失败，重试沿用已公开的原始字节。带平台后缀的历史标签不参与稳定发布。
-
-Windows 新客户端启动时在后台检查同一稳定版本，也可从“更多操作 → 检查更新”手动检查。下载完成后选择“重启更新”。Windows 首发版用户须手动安装首个包含更新器的统一版本一次。
-
-### 维护 macOS 自动更新
-
-发布工作流通过 `SPARKLE_PRIVATE_KEY` GitHub Actions Secret 签名 DMG 和 appcast，在 Release 资产上传成功后更新 `updates` 分支的 `appcast.xml`。客户端内置公钥，安装前验证更新包和更新源。每次发布必须同时递增 `CFBundleShortVersionString` 和 `CFBundleVersion`；Windows 预览标签不会进入 macOS 更新源。
-
-本地签名工具随 SwiftPM 的 Sparkle 依赖下载，私钥保存在 macOS 登录钥匙串的 `claude-mirror` account 中，不应提交到仓库。请备份签名私钥；丢失后无法给现有安装继续签署可信更新。手动生成更新源：`bash macos/scripts/generate-appcast.sh`。更新源必须在对应安装包可下载后发布，签名后的 XML 不能手工修改。
-
-## 来源与许可
-
-项目曾名 RemoteCC、Claudock，现统一为镜像 Claude（Claude Mirror），保留原有提交历史与用户数据兼容路径。使用官方 Claude Agent SDK；Markdown 渲染使用 MarkdownUI，其依赖许可随应用打包在 `Resources/ThirdParty`。AgentBox 是交互设计参考之一，本项目没有将其整个客户端直接移植。界面配色、卡片布局尺寸和动效时长改编自 [winc](https://github.com/DEEIX-AI/Winc)（Apache-2.0，Copyright 2026 Chenyme and DEEIX AI），主题已改名并映射到本项目的界面；许可证全文随应用打包在 `Resources/ThirdParty/winc-LICENSE.txt`。代码高亮为独立实现，沿用相同的九类词法颜色。
-
-项目代码采用 MIT 许可，见 [LICENSE](LICENSE)。第三方依赖遵循各自许可。镜像 Claude 名称和标识不表示获得 Anthropic 官方授权。
-
-## 社区
-
-欢迎在 [Linux DO 社区](https://linux.do/)交流使用体验。问题反馈与功能建议请提交到 [GitHub Issues](https://github.com/xirichuyi/claude-mirror/issues)。
-
-### 账户额度与远端保护
-
-macOS 侧栏最底部只保留一行账号入口。点击账号菜单的“用量”，查看该远端 Claude 登录账户的五小时及本周全部模型已用额度、重置倒计时与时间；连接后自动读取，每分钟刷新，也可手动刷新。查询不依赖选择或创建对话，切换同一机器的对话不会重新加载额度。这里的百分比来自远端 SDK 的订阅额度查询，与单次对话费用不同。
-
-远端 worker 在首条消息和每次续聊发送前检查额度，运行中（包括后台任务）每 5 秒检查一次。同一远端登录的 worker 共享保护状态；任一周期已用达到 90% 后仅允许一个 worker 消耗，其他会话需等待后重试。检测到五小时或本周全部模型已用额度达到 95% 时拒绝新请求或关闭运行中的 worker，以保留 5% 为目标；队列不会自动继续。额度查询失败、不支持此查询或缺少五小时或本周额度数据时同样暂停。API Key 等没有订阅周期数据的账户也会被此保护阻止。
-
-额度由服务端统计，可能存在缓存、延迟和并发消耗；这是一条提前停止线，不能保证账户始终精确保留 5%，也不能限制其他客户端直接使用同一账户。共享停止状态最多保留 60 秒，随后重新检查实际额度。重置后可以重新发送请求，不自动重试被中断的工作。协调范围是同一远端登录，不覆盖其他机器或其他客户端。
-
-更新客户端后，新建立的远端 worker 自动携带此逻辑。已驻留的旧 worker 不会被热替换；需先结束旧会话的运行环境或等待其空闲退出，再继续。该查询使用 SDK 的实验性 usage 接口，远端 Claude 版本不兼容时会明确报错并暂停。
-
-### 账号与 Claude Code 信息
-
-左下角常驻显示当前机器的账号入口，点击打开紧凑账号菜单，顶部显示订阅，提供“用量”“账号详情”“设置”和“断开服务器”。通过“账号详情”打开完整信息面板，查看组织、服务提供方、认证来源（仅来源名称，不读取或传输密钥）、Claude Code 版本、输出样式、快速模式和额度重置时间。账号与额度独立查询，一项失败不遮住另一项。
-
-面板还可展开机器默认环境的可用模型、命令与技能、Agents、MCP 服务器及工具。机器信息从远端主目录查询，不创建对话或发送模型请求。项目配置可能不同：选中对话后，面板提供该对话的模型与权限、会话工具（技能、Agents、MCP、插件、任务）入口。SDK 没有返回的账号字段显示“未报告”，不会据此判断账号已退出。登录、退出登录和账单管理仍使用远端 Claude Code 原有入口。
-
-### Claude Code 工具面板
-
-窗口顶部「扩展」打开左侧分类导航，提供技能、命令、连接器、插件、Agents、后台任务、记忆与配置、模型、工具、会话状态及端口转发。输入框旁「添加」可直达技能、连接器、插件和记忆；顶部「会话详情」显示聊天旁的环境、上下文和任务。命令可搜索并填入输入框，已有草稿不会被覆盖。MCP 支持对实时会话重连和启停；技能、插件与输出样式支持显式重载，插件重载遵守远端缓存保护；后台任务可按 ID 停止。配置页可在远端编辑器打开用户/项目记忆、权限与 Hooks 设置、项目 MCP 配置。
-
-需要影响当前会话的动作只发给该会话的常驻 worker；历史会话和临时查询不能假装修改成功，界面会禁用相关按钮。完整核对范围与未实现能力见 [功能对照](FEATURE_PARITY.md#2026-11-04-当前-macos-对接核对)。
-
-
-### 上下文缓存与 Claude Code Mods
-
-macOS 的「对话选项 → 高级选项 → 上下文缓存」可选择远端默认、5 分钟或 1 小时，需远端 Claude Code 2.1.242+。默认不覆盖远端配置；远端环境变量仍优先。更长的 TTL 适合间歇工作，但缓存写入费率更高，不保证每种使用方式都省钱。修改需等待回复结束，客户端会保存会话并在下一次发送时恢复，采用新的设置；不会额外发送模型请求。
-
-提示缓存位于模型服务端，与 SSH 连接保活、远端进程常驻不同。客户端继续保留闲置休眠，恢复使用原来的会话 ID。上下文压缩由 Claude Code 的原生策略和 `/compact` 负责，不额外定时压缩；压缩会改变后续请求的上下文，可能需要重新建立缓存。
-
-远端安装的 Mods 是否执行取决于 Claude Code 版本及插件设置。Agent SDK 支持其 hooks，但不显示 Mods 自己绘制的面板；需要交互弹窗的 Mods 也不能保证完整适配。尚未完成本项目对第三方 Mods 的逐个实测。
-
-例如 cache-tax 通过模型 fork 请求续热，会消耗 token，要求 Claude 进程持续运行。它默认的 50 分钟续热周期与本项目 15 分钟闲置休眠不兼容，不能直接安装后就当作保活已生效。本项目未自动安装或启用它，也不会为缓存续热让所有会话无限常驻。
-
-参考：[Claude Code 提示缓存](https://code.claude.com/docs/en/prompt-caching) · [Mods 运行环境](https://code.claude.com/docs/en/plugins/mods/overview#where-mods-run) · [cache-tax](https://github.com/karanb192/cache-tax)。
-
-## macOS 开发文档
-
-- [构建与验证](macos/README.md)
-- [代码组织、公共组件与动画规范](docs/macos-code-style.md)
-- [v0.23.2 改动与发布记录](docs/releases/v0.23.2.md)
-
-### macOS Full Access 与 root SSH
-
-对话选项中的 **Full Access** 对应 Claude 的 `bypassPermissions`。后端始终传入 SDK 的 `allowDangerouslySkipPermissions`，允许该会话随后切换模式。Full Access 跳过 Claude 操作确认，但不会提升操作系统权限。
-
-root 登录时直接以 root 运行：后端给 Claude 进程加上 `IS_SANDBOX=1`，这是 Claude 放行 root 跳过确认的开关。此时 Claude 不经确认即可以 root 执行任何命令，只在可以承担这个风险的服务器上开启。
-
-想让 Claude 以普通账号运行时，Linux 上可保留 root SSH 连接，在**新对话**的“Claude 执行账号”填写普通账号；后端通过 `runuser` 真正降低子进程身份，使用该账号的 home、Claude 安装与登录，不继承 root 的凭据环境（包括 `IS_SANDBOX`）。已有对话不能切换执行账号。
-
-在本机一条命令创建专用账号（见“远端一键准备”）：
-
-```sh
-sh scripts/setup-remote.sh --runner claude-runner --project /opt/my-project root@example.com
-```
-
-已经在服务器上有仓库时，也可以用旧的 `npm run setup-claude-user -- --user claude-runner --project '/opt/my-project'`，随后运行 `runuser -u claude-runner -- /home/claude-runner/.local/bin/claude auth login`。
-
-工具安装当前 Claude 可执行文件，并仅给指定项目添加账号 ACL（父目录仅授予路径穿越权限），不更改项目所有者。它仅创建新账号，不修改已有账号。不支持位于 `/root` 的项目，请使用独立项目目录。
-
-若明确需要复用当前 root 的 Claude 登录，可在安装命令末尾添加 `--copy-login-from /root`；只复制 `.claude/.credentials.json`，以 `0600` 保存，不复制其他配置或密钥。后续登录刷新和历史由新账号独立维护。未加该选项时需单独登录。安装完成后，在 macOS 新对话选择 Full Access 并填写 `claude-runner`；应用前会检查执行身份、项目权限和 Claude 路径。
+项目曾名 RemoteCC、Claudock、Claude Mirror。为兼容已有安装，内部模块名、Bundle ID 和服务器上的数据目录仍沿用旧名。

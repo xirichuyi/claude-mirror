@@ -53,7 +53,7 @@ jobs:
         working-directory: android
       - uses: actions/upload-artifact@v4
         with:
-          name: claude-mirror-android-debug
+          name: tether-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
   macos:
@@ -86,10 +86,10 @@ jobs:
       - run: cargo test --locked --manifest-path vendor/winc-preview/Cargo.toml -p winc-preview
       - run: sh macos/scripts/build-dmg.sh
       - name: Verify bundled Winc preview bridge
-        run: WINC_PREVIEW_HELPER="$PWD/macos/dist/claude-mirror.app/Contents/MacOS/WincPreview" python3 macos/Helpers/WincPreview/tests/smoke.py
+        run: WINC_PREVIEW_HELPER="$PWD/macos/dist/Tether.app/Contents/MacOS/WincPreview" python3 macos/Helpers/WincPreview/tests/smoke.py
       - uses: actions/upload-artifact@v4
         with:
-          name: claude-mirror-macOS-arm64-${{ github.sha }}
+          name: tether-macOS-arm64-${{ github.sha }}
           path: |
             macos/dist/*.dmg
             macos/dist/*.dmg.sha256

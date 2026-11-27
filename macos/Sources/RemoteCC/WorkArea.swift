@@ -58,7 +58,7 @@ struct WorkArea: View {
             model.showingChat = model.activeWorkspace?.activeTab == nil
         }
         .onChange(of: model.activeId) { model.focusChat() }
-        .navigationTitle(model.active.map { historyDisplayTitle($0.name) } ?? "claude-mirror")
+        .navigationTitle(model.active.map { historyDisplayTitle($0.name) } ?? "Tether")
         .navigationSubtitle(model.currentConfig?.displayName ?? "")
     }
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Runs on the target server. Without options it never needs root and does not read or write Claude credentials.
-# Claude Mirror runs it over its own SSH connection ("一键安装"); setup-remote.sh runs it from a terminal.
+# Tether runs it over its own SSH connection ("一键安装"); setup-remote.sh runs it from a terminal.
 #
 # Options for a server reached as root (Claude refuses Full Access as root):
 #   --runner NAME    create the ordinary account NAME and install Claude Code for it
 #   --project DIR    create DIR if needed and give the runner read/write access to it only
 #   --copy-login     copy root's Claude login file to the runner instead of logging in again
 #
-#   --node-only      only make sure Node.js is there; Claude Mirror runs this by itself when it connects
+#   --node-only      only make sure Node.js is there; Tether runs this by itself when it connects
 #
 # Members of a shared server (root on Linux). Each one is an ordinary account with its own SSH key,
 # Claude login, conversations and files; homes are private, so members cannot see each other.
@@ -250,7 +250,7 @@ else
 fi
 fi
 
-# Node.js runs Claude Mirror's remote agent. A missing or outdated system Node is not replaced:
+# Node.js runs Tether's remote agent. A missing or outdated system Node is not replaced:
 # an official build goes into ~/.local/share/claude-mirror/node, which the app prefers.
 echo '==> Node.js'
 NODE_HOME="$HOME/.local/share/claude-mirror/node"
@@ -332,8 +332,8 @@ if [ -x "$NODE_HOME/bin/node" ] && node_ok "$NODE_HOME/bin/node"; then
 elif [ "$node_only" = no ] && command -v node >/dev/null 2>&1 && node_ok node; then
   echo "Node.js ready: $(node --version) ($(command -v node))"
 else
-  if command -v node >/dev/null 2>&1 && ! node_ok node; then echo "Node.js $(node --version 2>/dev/null) is too old; Claude Mirror needs 18.14 or newer."; fi
-  install_node || { echo 'Claude Mirror needs Node.js >=18.14 on the remote server.' >&2; exit 3; }
+  if command -v node >/dev/null 2>&1 && ! node_ok node; then echo "Node.js $(node --version 2>/dev/null) is too old; Tether needs 18.14 or newer."; fi
+  install_node || { echo 'Tether needs Node.js >=18.14 on the remote server.' >&2; exit 3; }
 fi
 [ "$node_only" = no ] || exit 0
 
@@ -401,7 +401,7 @@ UNIT
 if [ -n "$panel" ]; then install_panel; exit; fi
 
 # systemd-logind with KillUserProcesses=yes kills every process of an SSH login when it ends,
-# including Claude Mirror's background sessions. A lingering user manager lets them survive.
+# including Tether's background sessions. A lingering user manager lets them survive.
 echo '==> Background sessions'
 if command -v loginctl >/dev/null 2>&1 && [ "$(loginctl show-session -p KillUserProcesses --value 2>/dev/null)" = yes ]; then
   user=$(id -un)
@@ -430,7 +430,7 @@ else
   echo 'Image previews: JPEG and WebP load in full. Install python3-pil, ImageMagick or ffmpeg for faster previews.'
 fi
 
-# Claude refuses Full Access as root. The runner is an ordinary account that Claude Mirror
+# Claude refuses Full Access as root. The runner is an ordinary account that Tether
 # switches to with runuser; it gets its own Claude install and login, and only the project.
 setup_runner() {
   local home source real parent
@@ -494,15 +494,15 @@ setup_runner() {
   else
     echo "Log in once as $runner:  runuser -u $runner -- $home/.local/bin/claude auth login"
   fi
-  echo "In Claude Mirror, start a new conversation, choose Full Access and enter the execution account: $runner"
+  echo "In Tether, start a new conversation, choose Full Access and enter the execution account: $runner"
 }
 if [ -n "$runner" ]; then
   echo '==> Full Access account'
   setup_runner
 fi
 if [ -n "$runner" ]; then
-  echo 'Ready. Connect to the same SSH host in Claude Mirror.'
+  echo 'Ready. Connect to the same SSH host in Tether.'
 else
   echo 'Ready. If Claude is not authenticated, SSH into this server and run: ~/.local/bin/claude auth login (or claude auth login for an existing PATH installation).'
-  echo 'Then connect to the same SSH host in Claude Mirror.'
+  echo 'Then connect to the same SSH host in Tether.'
 fi

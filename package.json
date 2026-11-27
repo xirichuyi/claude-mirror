@@ -1,9 +1,9 @@
 {
   "name": "remotecc",
-  "version": "0.14.0",
-  "description": "SSH workspace and chat client for remote Claude Code",
+  "version": "0.27.0",
+  "description": "Remote Claude Code client for macOS, Windows and Android over SSH",
   "main": "build/src/main.cjs",
-  "author": "RemoteCC",
+  "author": "Tether",
   "license": "MIT",
   "scripts": {
     "start": "electron .",

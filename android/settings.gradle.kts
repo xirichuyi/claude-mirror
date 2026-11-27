@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "claude-mirror-android"
+rootProject.name = "tether-android"
 include(":core", ":app")

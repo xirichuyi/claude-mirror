@@ -1,5 +1,5 @@
 param(
-    [string]$PublishDir = (Join-Path $PSScriptRoot 'dist/claude-mirror'),
+    [string]$PublishDir = (Join-Path $PSScriptRoot 'dist/tether'),
     [string]$Version,
     [string]$OutputDir = (Join-Path $PSScriptRoot 'dist')
 )

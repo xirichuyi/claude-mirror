@@ -1,16 +1,16 @@
 #ifndef Payload
-  #define Payload "..\dist\claude-mirror"
+  #define Payload "..\dist\tether"
 #endif
 #ifndef AppVersion
   #error Pass AppVersion via windows/build-installer.ps1
 #endif
 [Setup]
 AppId={{7A069CA4-F0B5-4503-935E-48C6EF2CC5B7}
-AppName=Claude Mirror
+AppName=Tether
 AppVersion={#AppVersion}
-AppPublisher=Claude Mirror
-AppPublisherURL=https://github.com/xirichuyi/claude-mirror
-DefaultDirName={localappdata}\Programs\Claude Mirror
+AppPublisher=Tether
+AppPublisherURL=https://github.com/xirichuyi/tether
+DefaultDirName={localappdata}\Programs\Tether
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -35,11 +35,15 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "{#Payload}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "*.pdb"
 
+; The executable keeps its old name so pinned and desktop shortcuts keep working; only the old Start menu entry is replaced.
+[InstallDelete]
+Type: files; Name: "{userprograms}\Claude Mirror.lnk"
+
 [Icons]
-Name: "{userprograms}\Claude Mirror"; Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"
+Name: "{userprograms}\Tether"; Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,Claude Mirror}"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,Tether}"; Flags: postinstall nowait skipifsilent
 Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"; Flags: nowait; Check: IsUpdateRestart
 
 [Code]

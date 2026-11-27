@@ -415,7 +415,7 @@ final class AppModel: ObservableObject {
         if active, sleepAssertion == 0 {
             var id: IOPMAssertionID = 0
             if IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                                           "镜像 Claude：服务器正在使用反向连接" as CFString, &id) == kIOReturnSuccess { sleepAssertion = id }
+                                           "Tether：服务器正在使用反向连接" as CFString, &id) == kIOReturnSuccess { sleepAssertion = id }
         } else if !active, sleepAssertion != 0 {
             IOPMAssertionRelease(sleepAssertion)
             sleepAssertion = 0

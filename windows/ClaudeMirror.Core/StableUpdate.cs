@@ -11,12 +11,12 @@ namespace ClaudeMirror.Core;
 public sealed record StableUpdate(string Tag, long Length, string Sha256)
 {
     public const string Installer = "Claude-Mirror-Setup-x64.exe";
-    private const string Repository = "https://github.com/xirichuyi/claude-mirror";
+    private const string Repository = "https://github.com/xirichuyi/tether";
     private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromMinutes(8), MaxResponseContentBufferSize = 1024 * 1024 };
     private static readonly Regex TagPattern = new(@"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z");
     private static readonly XDocument Metadata = ReadMetadata();
     public static Version CurrentVersion => Version.Parse(Setting("CFBundleShortVersionString"));
-    static StableUpdate() => Client.DefaultRequestHeaders.UserAgent.ParseAdd("Claude-Mirror-Windows/1");
+    static StableUpdate() => Client.DefaultRequestHeaders.UserAgent.ParseAdd("Tether-Windows/1");
 
     private static XDocument ReadMetadata()
     {
@@ -44,7 +44,7 @@ public sealed record StableUpdate(string Tag, long Length, string Sha256)
     }
     public static async Task<StableUpdate?> CheckAsync(CancellationToken token)
     {
-        var release = await Client.GetFromJsonAsync<JsonElement>("https://api.github.com/repos/xirichuyi/claude-mirror/releases/latest",token);
+        var release = await Client.GetFromJsonAsync<JsonElement>("https://api.github.com/repos/xirichuyi/tether/releases/latest",token);
         string tag = release.GetProperty("tag_name").GetString() ?? "";
         if (release.GetProperty("draft").GetBoolean() || release.GetProperty("prerelease").GetBoolean() || !TagPattern.IsMatch(tag))
             throw new InvalidDataException("最新发布未标记为稳定版");
@@ -63,7 +63,7 @@ public sealed record StableUpdate(string Tag, long Length, string Sha256)
     public async Task<string> StageAsync(string directory, CancellationToken token)
     {
         Directory.CreateDirectory(directory);
-        string path = Path.Combine(directory,$"Claude-Mirror-{Tag}-Setup.exe");
+        string path = Path.Combine(directory,$"Tether-{Tag}-Setup.exe");
         if (File.Exists(path)) {
             try { await VerifyFileAsync(path,token); return path; } catch (InvalidDataException) { }
         }

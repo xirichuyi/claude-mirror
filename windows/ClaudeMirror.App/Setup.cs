@@ -13,7 +13,7 @@ public sealed partial class MainWindow
 {
     private List<HealthIssue> health = [];
     private readonly StackPanel healthPanel = new() { Spacing = 10 };
-    private static readonly Uri GettingStartedUrl = new("https://github.com/xirichuyi/claude-mirror/blob/HEAD/docs/getting-started.md");
+    private static readonly Uri GettingStartedUrl = new("https://github.com/xirichuyi/tether/blob/HEAD/docs/getting-started.md");
     private static string ServerResources => Path.Combine(AppContext.BaseDirectory, "server");
 
     private async Task RefreshHealthAsync()

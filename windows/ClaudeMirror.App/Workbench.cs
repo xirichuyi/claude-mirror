@@ -55,7 +55,7 @@ public sealed partial class MainWindow
     private void UpdateSubtitle()
     {
         subtitle.Text = host==null ? "" : directory.Text;
-        windowTitle.Text = host==null ? "claude-mirror" : ShortDirectory(directory.Text) is { Length: > 0 } folder ? folder : host.Name;
+        windowTitle.Text = host==null ? "Tether" : ShortDirectory(directory.Text) is { Length: > 0 } folder ? folder : host.Name;
     }
 
     private Button PickerAction(bool model)
@@ -421,7 +421,7 @@ public sealed partial class MainWindow
     private void RefreshWorkbench()
     {
         bool online = agent?.Connected == true, empty = messages.Children.Count == 0 && conversation == null;
-        title.Text = conversation?.Name ?? (host == null ? "claude-mirror" : "新对话");
+        title.Text = conversation?.Name ?? (host == null ? "Tether" : "新对话");
         UpdateSubtitle();UpdatePickerTitle();UpdateHostPicker();
         composer.Visibility = host != null ? Visibility.Visible : Visibility.Collapsed;
         hostDot.Background=stateDot.Background=online?sage:dim;connection.Text=online?"已连接":"未连接";status.Opacity=status.Text==connection.Text?0:1;

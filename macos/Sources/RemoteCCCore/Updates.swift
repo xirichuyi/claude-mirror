@@ -11,7 +11,7 @@ public struct AppUpdate: Equatable, Sendable {
 
 /// Checks GitHub Releases. It only reports; installing stays a user action because the app is not notarized.
 public enum UpdateChecker {
-    public static let repository = "xirichuyi/claude-mirror"
+    public static let repository = "xirichuyi/tether"
     public static let latestURL = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
     private static let trustedPrefix = "https://github.com/\(repository)/"
 

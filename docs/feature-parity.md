@@ -97,7 +97,7 @@
 
 模型列表与功能随远端 Claude 版本和账户变化。未验证的项目不标记为完成。
 
-本轮竞品调研和优先级见 [COMPETITOR_RESEARCH.md](COMPETITOR_RESEARCH.md)。
+本轮竞品调研和优先级见 [COMPETITOR_RESEARCH.md](research/claude-desktop.md)。
 
 ## 0.5 工作流验证
 

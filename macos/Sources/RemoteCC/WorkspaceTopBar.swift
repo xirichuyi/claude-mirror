@@ -13,7 +13,7 @@ struct WorkspaceTopBar: View {
     @Binding var sidebarVisible: Bool
     /// The machine is named at the top of the sidebar; the title only says which project.
     private var title: String {
-        model.active.map { ($0.directory as NSString).lastPathComponent } ?? "claude-mirror"
+        model.active.map { ($0.directory as NSString).lastPathComponent } ?? "Tether"
     }
     var body: some View {
         HStack(spacing: 6) {

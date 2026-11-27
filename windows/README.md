@@ -1,10 +1,10 @@
-# claude-mirror — Windows 原生版
+# Tether · Windows
 
 C# / WinUI 3 客户端，不使用 Electron 或 WebView。SSH.NET 负责连接，复用仓库现有的远端代理与 Claude 持久任务协议。
 
 ## 构建
 
-Windows 用户运行发行附件 `Claude-Mirror-Setup-x64.exe`，按提示完成安装。从开始菜单打开 **Claude Mirror**。支持应用内更新的版本会在启动时后台检查并下载稳定版本，可在“更多操作”中手动检查，或在下载完成后选择“重启更新”。Windows 首发版需手动运行首个带更新器的安装包一次；卸载入口在 Windows 设置的“已安装的应用”中。程序按当前用户安装，已有便携版的主机配置仍可使用。
+Windows 用户运行发行附件 `Claude-Mirror-Setup-x64.exe`，按提示完成安装。从开始菜单打开 **Tether**。支持应用内更新的版本会在启动时后台检查并下载稳定版本，可在“更多操作”中手动检查，或在下载完成后选择“重启更新”。Windows 首发版需手动运行首个带更新器的安装包一次；卸载入口在 Windows 设置的“已安装的应用”中。程序按当前用户安装，已有便携版的主机配置仍可使用。
 
 Windows 10 1809+ / Windows 11，安装 .NET 9 SDK 和 Visual Studio 的 Windows 应用开发组件；构建机另需 Node.js 22。
 
@@ -12,7 +12,7 @@ Windows 10 1809+ / Windows 11，安装 .NET 9 SDK 和 Visual Studio 的 Windows 
 npm ci --ignore-scripts
 npm run prepare-server -- windows/Resources/server
 dotnet test windows/ClaudeMirror.Tests -c Release
-dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o windows/dist/claude-mirror
+dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -o windows/dist/tether
 ```
 
 构建机安装 Inno Setup 6 后执行 `./windows/build-installer.ps1`，生成自包含安装程序。也可保留完整发布目录以便携方式运行。本机用户无需安装 .NET、Node.js 或 Claude；远端只需要 Linux/macOS 和 SSH。连接后应用会检查服务器环境：缺少 Claude Code 或 Node.js 时可一键安装（装在用户目录，无需管理员权限），Claude 未登录时可打开终端登录。新手请先看[入门指南](../docs/getting-started.md)。

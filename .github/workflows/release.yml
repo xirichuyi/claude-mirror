@@ -75,7 +75,7 @@ jobs:
       - run: cargo test --locked --manifest-path vendor/winc-preview/Cargo.toml -p winc-preview
       - run: sh macos/scripts/build-dmg.sh
       - name: Verify bundled Winc preview bridge
-        run: WINC_PREVIEW_HELPER="$PWD/macos/dist/claude-mirror.app/Contents/MacOS/WincPreview" python3 macos/Helpers/WincPreview/tests/smoke.py
+        run: WINC_PREVIEW_HELPER="$PWD/macos/dist/Tether.app/Contents/MacOS/WincPreview" python3 macos/Helpers/WincPreview/tests/smoke.py
       - name: Sign Sparkle feed
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
@@ -120,11 +120,11 @@ jobs:
           path: staging
       - uses: actions/download-artifact@v4
         with:
-          name: claude-mirror-windows-installer
+          name: tether-windows-installer
           path: staging
       - uses: actions/download-artifact@v4
         with:
-          name: claude-mirror-windows-x64
+          name: tether-windows-x64
           path: staging
       - name: Prepare signed Windows update metadata
         env:

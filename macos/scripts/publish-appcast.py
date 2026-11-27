@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from xml.etree import ElementTree
 
-REPO = "repos/xirichuyi/claude-mirror"
+REPO = "repos/xirichuyi/tether"
 FEED = Path("macos/dist/appcast.xml")
 VERSION = "{http://www.andymatuschak.org/xml-namespaces/sparkle}version"
 

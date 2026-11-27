@@ -1,6 +1,6 @@
 # 入门指南
 
-镜像 Claude（claude-mirror）让你在自己的电脑上使用**服务器里的** Claude Code：代码、依赖和 Claude 都在服务器上运行，桌面应用负责对话、审批操作和查看文件。关掉应用，服务器上的任务也会继续。
+Tether 让你在自己的电脑和手机上使用**服务器里的** Claude Code：代码、依赖和 Claude 都在服务器上运行，桌面应用负责对话、审批操作和查看文件。关掉应用，服务器上的任务也会继续。
 
 整个过程大约 10 分钟，分四步。
 
@@ -24,26 +24,34 @@
 
 ### macOS
 
-1. 从[发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载 `claude-mirror-<版本号>-macOS-arm64.dmg`。
-2. 打开 DMG，把 **claude-mirror.app** 拖进 **Applications**。
-3. 从“应用程序”打开 claude-mirror。
+1. 从[发布页](https://github.com/xirichuyi/tether/releases/latest)下载 `tether-<版本号>-macOS-arm64.dmg`。
+2. 打开 DMG，把 **Tether.app** 拖进 **Applications**。
+3. 从“应用程序”打开 Tether。
 
 **第一次打开被拦截怎么办？** 当前版本还没有经过 Apple 公证，macOS 会提示“无法验证开发者”或“Apple 无法检查其是否包含恶意软件”。这不代表文件损坏。确认是从上面的发布页下载的之后：
 
 1. 在提示框里点 **完成**（不要点“移到废纸篓”）。
 2. 打开 **系统设置 → 隐私与安全性**，滚动到底部的“安全性”。
-3. 找到“已阻止 claude-mirror”，点 **仍要打开**，输入登录密码。
-4. 再次打开 claude-mirror，在弹窗里点 **打开**。
+3. 找到“已阻止 Tether”，点 **仍要打开**，输入登录密码。
+4. 再次打开 Tether，在弹窗里点 **打开**。
 
 只需要做一次，以后的应用内更新不会再出现这个提示。请不要关闭全局 Gatekeeper。
 
 ### Windows
 
-从[发布页](https://github.com/xirichuyi/claude-mirror/releases/latest)下载 `Claude-Mirror-Setup-x64.exe` 并安装，详见 [Windows 说明](../windows/README.md)。
+从[发布页](https://github.com/xirichuyi/tether/releases/latest)下载 `Claude-Mirror-Setup-x64.exe` 并安装，详见 [Windows 说明](../windows/README.md)。
+
+### Android
+
+从[发布页](https://github.com/xirichuyi/tether/releases/latest)下载 APK 安装，详见 [Android 说明](../android/README.md)。
 
 ## 3. 添加服务器
 
-首次打开时选择 **添加服务器**；已有连接时，点左上角主机名 → **添加服务器…**：
+首次打开时选择 **添加服务器**；已有连接时，点左上角主机名 → **添加服务器…**。
+
+**有连接码？** 管理员从网页面板复制给你的 `cm1.` 开头的一串字符，粘贴进“连接码”框就能直接连上，不用填下面这些，也不用确认指纹。Android 在服务器页右上角点粘贴图标。
+
+没有连接码时：
 
 - **服务器地址**：IP 或域名。可以把用户名一起写上，例如 `ubuntu@1.2.3.4`。
 - **登录方式**：大多数云服务器选 **密码**。如果你已经在终端里用密钥登录过，选 **本机 SSH 配置**。
