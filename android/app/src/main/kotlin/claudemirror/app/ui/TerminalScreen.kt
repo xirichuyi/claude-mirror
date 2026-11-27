@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,7 +79,7 @@ fun TerminalScreen(model: AppModel, hostId: String, directory: String, onBack: (
             onResize = { size -> outgoing.trySend { it.resize(size.columns, size.rows) } },
         )
     }
-    DisposableEffect(emulator) { onDispose { remote?.close(); remote = null; outgoing.close(); emulator.close() } }
+    DisposableEffect(emulator) { onDispose { remote?.let(::closeOffMain); remote = null; outgoing.close(); emulator.close() } }
     LaunchedEffect(emulator) {
         ended = null
         try {
@@ -96,7 +97,7 @@ fun TerminalScreen(model: AppModel, hostId: String, directory: String, onBack: (
             }
             ended = "已退出"
         } catch (error: CancellationException) { throw error } catch (error: Exception) { ended = error.message ?: "连接失败" }
-        remote?.close(); remote = null
+        remote?.let(::closeOffMain); remote = null
     }
 
     Scaffold(
@@ -111,7 +112,10 @@ fun TerminalScreen(model: AppModel, hostId: String, directory: String, onBack: (
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                Terminal(emulator, Modifier.fillMaxSize(), backgroundColor = Ink, foregroundColor = Paper, keyboardEnabled = true, initialFontSize = 13.sp)
+                // A reopened shell gets a fresh view; the old one stays bound to the closed emulator.
+                key(emulator) {
+                    Terminal(emulator, Modifier.fillMaxSize(), backgroundColor = Ink, foregroundColor = Paper, keyboardEnabled = true, initialFontSize = 13.sp)
+                }
                 ended?.let { Text(it, Modifier.align(Alignment.BottomCenter).padding(16.dp), color = palette.muted, style = MaterialTheme.typography.labelSmall) }
             }
             // Keys a phone keyboard does not have.
@@ -139,3 +143,6 @@ private fun Key(label: String, active: Boolean = false, onClick: () -> Unit) {
 private fun Arrow(icon: ImageVector, final: String, send: (ByteArray) -> Unit) {
     IconButton(onClick = { send("\u001b[$final".toByteArray()) }) { Icon(icon, null, tint = Paper) }
 }
+
+/** Closing sends a packet; sshj breaks the shared connection if that happens on the main thread. */
+private fun closeOffMain(shell: RemoteTerminal) { kotlin.concurrent.thread(isDaemon = true, name = "terminal-close") { shell.close() } }
