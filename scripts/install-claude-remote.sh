@@ -55,7 +55,9 @@ download() {
   if command -v curl >/dev/null 2>&1; then
     curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 20 --max-time 300 "$1" -o "$2"
   else
-    wget --quiet --https-only --tries=2 --timeout=20 -O "$2" "$1"
+    # BusyBox wget has neither option; the pinned checksum still guards what it fetches.
+    if wget --help 2>&1 | grep -q -- --https-only; then wget --quiet --https-only --tries=2 --timeout=20 -O "$2" "$1"
+    else wget -q -T 20 -O "$2" "$1"; fi
   fi
 }
 
