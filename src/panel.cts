@@ -249,7 +249,7 @@ const HTML = `<!doctype html>
 
 const STYLE = `:root{color-scheme:light dark;--bg:#faf9f5;--fg:#1f1e1d;--muted:#8a8780;--line:#e6e3da;--accent:#c96442}
 @media(prefers-color-scheme:dark){:root{--bg:#1f1e1d;--fg:#f0eee6;--muted:#9c998f;--line:#3a3935}}
-*{box-sizing:border-box}body{margin:0;font:14px/1.5 -apple-system,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+[hidden]{display:none!important}*{box-sizing:border-box}body{margin:0;font:14px/1.5 -apple-system,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
 header{display:flex;gap:12px;align-items:center;padding:14px 24px;border-bottom:1px solid var(--line)}#server{color:var(--muted)}.grow{flex:1}
 main{max-width:720px;margin:32px auto;padding:0 24px}form{display:flex;gap:8px;margin:0 0 20px}
 input,textarea{flex:1;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit}
