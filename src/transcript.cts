@@ -162,8 +162,9 @@ class Transcript {
     }
     if (event.parent_tool_use_id) { this.subagent(event); return; }
     if (event.type === 'stream_event') { delete this.message.activity; this.stream(event.event); if (event.uuid && this.currentMessageId) this.wireSources.set(event.uuid, this.currentMessageId); }
-    if (event.type === 'assistant') { if (event.uuid) this.wireSources.set(event.uuid, event.message.id); this.assistant(event); }
+    if (event.type === 'assistant') { this.retract(event.supersedes); if (event.uuid) this.wireSources.set(event.uuid, event.message.id); this.assistant(event); }
     if (event.type === 'user') this.toolResults(event);
+    if (event.type === 'system' && event.subtype === 'model_refusal_fallback') this.retract(event.retracted_message_uuids);
     if (event.type === 'system') this.system(event);
     if (event.type === 'tool_progress') {
       const block = this.message.blocks.find(item => item.id === event.tool_use_id);

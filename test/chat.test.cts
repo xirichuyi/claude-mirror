@@ -196,12 +196,17 @@ test('background membership replaces stale tasks; unsupported dialogs do not set
   service.respond(session.id, asked.id, { interaction: { action: 'accept', content: { choice: 'retry_fallback' } } });
   assert.deepEqual(await retry, { behavior: 'completed', result: 'retry_fallback' });
   assert.ok(!message.blocks.some(block => block.text === 'withdrawn'));
+  service.consumeEvent(session, { type: 'assistant', uuid: 'w2', message: { id: 'm2', content: [{ type: 'text', text: 'second' }] } }, run);
+  service.consumeEvent(session, { type: 'system', subtype: 'model_refusal_fallback', retracted_message_uuids: ['w2'] }, run);
+  service.consumeEvent(session, { type: 'assistant', uuid: 'w3', message: { id: 'm3', content: [{ type: 'text', text: 'third' }] } }, run);
+  service.consumeEvent(session, { type: 'assistant', uuid: 'w4', supersedes: ['w3'], message: { id: 'm4', content: [{ type: 'text', text: 'final' }] } }, run);
+  assert.deepEqual(message.blocks.filter(block => block.type === 'text').map(block => block.text), ['final']);
   const declined = options.onUserDialog({ dialogKind: 'refusal_fallback_prompt', payload: {} }, { signal, requestId: 'r2' });
   service.respond(session.id, session.permissions.at(-1).id, { interaction: { action: 'decline' } });
   assert.deepEqual(await declined, { behavior: 'cancelled' });
   assert.equal(session.permissions.length, 0);
   service.consumeEvent(session, { type: 'system', subtype: 'task_started', task_id: 'late' }, run);
   assert.ok(!session.tasks.some(task => task.id === 'late'));
-  assert.match(message.blocks.at(-1).text, /不支持的确认/);
+  assert.ok(message.blocks.some(block => /不支持的确认/.test(block.text)));
   await service.close();
 });
