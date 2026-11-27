@@ -203,24 +203,29 @@ public class SystemSshTests
     {
         var seen = new System.Text.StringBuilder(); var buffer = new byte[4096];
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        while (!seen.ToString().Contains(expected))
+        try
         {
-            int count = await output.ReadAsync(buffer, timeout.Token);
-            if (count == 0) break;
-            seen.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, count));
+            while (!seen.ToString().Contains(expected))
+            {
+                int count = await output.ReadAsync(buffer, timeout.Token);
+                if (count == 0) break;
+                seen.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, count));
+            }
         }
-        Assert.Contains(expected, seen.ToString());
+        catch (OperationCanceledException) { }
+        Assert.True(seen.ToString().Contains(expected), $"Waited for {expected}, got: {seen.ToString().Replace("\u001b", "\\e")}");
         return seen.ToString();
     }
 
     /// The shell starts in the project, follows the window size and ends with the session.
+    /// The expected text never appears in the typed line, and has no spaces a console may redraw as cursor moves.
     private static async Task UseTerminal(IRemoteTerminal shell)
     {
         async Task Type(string text) { await shell.Input.WriteAsync(System.Text.Encoding.UTF8.GetBytes(text)); await shell.Input.FlushAsync(); }
-        await Type("pwd\n"); await ReadUntil(shell.Output, "mirror term");
+        await Type("pwd | tr ' ' _\r"); await ReadUntil(shell.Output, "mirror_term");
         shell.Resize(100, 30);
-        await Type("stty size\n"); await ReadUntil(shell.Output, "30 100");
-        await Type("exit\n");
+        await Type("stty size | tr ' ' x\r"); await ReadUntil(shell.Output, "30x100");
+        await Type("exit\r");
         var rest = new MemoryStream(); await shell.Output.CopyToAsync(rest).WaitAsync(TimeSpan.FromSeconds(30));
     }
 
