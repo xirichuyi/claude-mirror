@@ -129,6 +129,8 @@ final class AppModel: ObservableObject {
     }
     @Published var drafts: [String: String] = [:]
     @Published var attachments: [String: [Attachment]] = [:]
+    /// Diff line comments waiting to be sent to the active conversation together.
+    @Published var reviewComments: [ReviewComment] = []
     @Published var deferredPermissionId: String?
     @Published var presentation: AppPresentation?
     @Published var fatalError: String?
@@ -889,6 +891,16 @@ final class AppModel: ObservableObject {
                 try engine.submit(id, text: value, attachments: files, steer: steer)
             } catch { restore(); throw error }
         }
+    }
+
+    /// Sends every diff comment as one message, queued behind a running reply. The composer is left alone.
+    func sendReviewComments() {
+        guard let engine, let id = activeId, !reviewComments.isEmpty else { return }
+        guard isConnected else { show("请先连接 SSH 服务器"); return }
+        do {
+            try engine.submit(id, text: ReviewComment.prompt(reviewComments, root: active?.directory), attachments: [], steer: false)
+            reviewComments = []
+        } catch { show(error.localizedDescription) }
     }
 
     /// Moves a queued message back into the composer. An unsent draft is kept below it.
