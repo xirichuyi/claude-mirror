@@ -137,10 +137,11 @@ function serve(folder: string) {
     // JSON only, so another site cannot post a plain form here with the cookie.
     if (method !== 'GET' && !(request.headers['content-type'] ?? '').startsWith('application/json')) return send(response, 415, { error: 'JSON only' });
     if (route === 'login' && method === 'POST') {
+      const { user, password } = await body(request);
+      // Checked after the body arrives, with no await until the count is updated, so parallel attempts each count.
       const client = request.socket.remoteAddress ?? '';
       const record = failures.get(client);
       if (record && record.count >= 5 && record.until > Date.now()) return send(response, 429, { error: '尝试过多，稍后再试' });
-      const { user, password } = await body(request);
       if (user !== config.user || typeof password !== 'string' || !matches(password)) {
         const count = record && record.until > Date.now() ? record.count + 1 : 1;
         failures.set(client, { count, until: Date.now() + 10 * 60_000 });
