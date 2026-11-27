@@ -30,3 +30,27 @@ Windows 新客户端启动时在后台检查同一稳定版本，也可从“更
 发布工作流通过 `SPARKLE_PRIVATE_KEY` GitHub Actions Secret 签名 DMG 和 appcast，在 Release 资产上传成功后更新 `updates` 分支的 `appcast.xml`。客户端内置公钥，安装前验证更新包和更新源。每次发布必须同时递增 `CFBundleShortVersionString` 和 `CFBundleVersion`；Windows 预览标签不会进入 macOS 更新源。
 
 本地签名工具随 SwiftPM 的 Sparkle 依赖下载，私钥保存在 macOS 登录钥匙串的 `claude-mirror` account 中，不应提交到仓库。请备份签名私钥；丢失后无法给现有安装继续签署可信更新。手动生成更新源：`bash macos/scripts/generate-appcast.sh`。更新源必须在对应安装包可下载后发布，签名后的 XML 不能手工修改。
+
+## Android 签名
+
+版本号取自 `macos/Resources/Info.plist`：`versionName` 同产品版本，`versionCode = 主 × 10000 + 次 × 100 + 补丁`（0.28.0 → 2800）。
+
+发布工作流用这 4 个 GitHub Actions Secret 签名 `tether-android.apk`：
+
+| Secret | 内容 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 release.jks` 的输出 |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
+| `ANDROID_KEY_ALIAS` | 密钥别名 |
+| `ANDROID_KEY_PASSWORD` | 密钥密码 |
+
+生成密钥（只做一次，备份好，丢了就不能再给已装的 App 发更新）：
+
+```sh
+keytool -genkeypair -keystore release.jks -alias tether -keyalg RSA -keysize 4096 -validity 10000
+```
+
+没配 Secret 时照常发布调试签名的 APK，工作流会给出警告。调试签名每次构建都不同，所以不能覆盖安装。第一次换成正式签名后，已装的调试版要先卸载一次。
+
+本地打正式包：设置同名环境变量，其中 `ANDROID_KEYSTORE` 是 keystore 文件路径，然后运行 `./gradlew assembleRelease`。
+

@@ -11,6 +11,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 INSTALLER = "Claude-Mirror-Setup-x64.exe"
+ANDROID = "tether-android.apk"
 PORTABLE = "tether-windows-x64.zip"
 SPARKLE = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
 REPO = "xirichuyi/tether"
@@ -36,7 +37,7 @@ def manifest(tag, folder):
 def verify_assets(tag, folder):
     dmg = f"tether-{tag[1:]}-macOS-arm64.dmg"
     names = ["appcast.xml", "windows-update.json", "windows-update.sig", "setup-remote.sh", "install-claude-remote.sh", "claude-mirror-panel.cjs"]
-    for name in (INSTALLER, PORTABLE, dmg):
+    for name in (INSTALLER, PORTABLE, ANDROID, dmg):
         expected = (folder / (name + ".sha256")).read_text().split()[0].lower()
         if expected != digest(folder / name):
             raise ValueError(f"Checksum mismatch: {name}")
