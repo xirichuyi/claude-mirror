@@ -645,4 +645,17 @@ class EngineTest {
         engine.refresh(session.id)
         assertEquals(1, agent.calls.count { it.operation == "history:messages" })
     }
+
+    @Test fun `files list folders first, and git reports the changes and a file's diff`() = engineTest {
+        agent.listing = json("""{"path":"/srv","parent":"/","entries":[{"path":"/srv/b.txt","name":"b.txt","size":3},{"path":"/srv/zed","name":"zed","directory":true},{"path":"/srv/A.md","name":"A.md"}]}""")
+        assertEquals(listOf("zed", "A.md", "b.txt"), engine.entries(testHost, "/srv").entries.map { it.name })
+        agent.files["gitStatus"] = json("""{"repository":true,"root":"/srv","branch":"main...origin/main","files":[{"status":" M","path":"/srv/b.txt","relative":"b.txt"}]}""")
+        val status = engine.gitStatus(testHost, "/srv")
+        assertEquals(listOf(" M"), status.files.map { it.status })
+        assertEquals("main...origin/main", status.branch)
+        agent.files["gitFileDiff"] = json("""{"text":"@@ -1 +1 @@\n-a\n+b\n"}""")
+        assertEquals("@@ -1 +1 @@\n-a\n+b\n", engine.gitDiff(testHost, "/srv/b.txt"))
+        agent.files["preview"] = json("""{"kind":"text","size":3,"text":"abc","version":"1"}""")
+        assertEquals("abc", engine.preview(testHost, "/srv/b.txt").text)
+    }
 }

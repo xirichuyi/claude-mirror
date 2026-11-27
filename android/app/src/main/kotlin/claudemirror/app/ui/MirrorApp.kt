@@ -1,6 +1,7 @@
 package claudemirror.app.ui
 
 import android.Manifest
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -62,12 +63,23 @@ fun MirrorApp(model: AppModel) {
             }
             composable("host/{id}") { entry ->
                 val id = entry.arguments?.getString("id").orEmpty()
-                SessionsScreen(model, id, snackbar, onBack = { navigation.popBackStack() }, onOpen = { navigation.navigate("chat/$it") }, onHistory = { navigation.navigate("history/$id") })
+                SessionsScreen(model, id, snackbar, onBack = { navigation.popBackStack() }, onOpen = { navigation.navigate("chat/$it") }, onHistory = { navigation.navigate("history/$id") },
+                    onFiles = { navigation.navigate("files/$id/" + Uri.encode(it)) })
             }
             composable("history/{id}") { entry ->
                 // The chat takes the list's place, so Back from it returns to the conversations.
                 HistoryScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() },
                     onOpen = { navigation.navigate("chat/$it") { popUpTo("history/{id}") { inclusive = true } } })
+            }
+            composable("files/{id}/{path}") { entry ->
+                val id = entry.arguments?.getString("id").orEmpty()
+                FilesScreen(model, id, entry.arguments?.getString("path").orEmpty(), onBack = { navigation.popBackStack() },
+                    onGit = { navigation.navigate("git/$id/" + Uri.encode(it)) })
+            }
+            composable("git/{id}/{path}") { entry ->
+                val id = entry.arguments?.getString("id").orEmpty()
+                GitScreen(model, id, entry.arguments?.getString("path").orEmpty(), onBack = { navigation.popBackStack() },
+                    onFolder = { navigation.navigate("files/$id/" + Uri.encode(it)) })
             }
             composable("chat/{id}") { entry ->
                 ChatScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() })

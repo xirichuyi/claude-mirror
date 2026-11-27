@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -69,7 +70,7 @@ fun folderName(path: String): String = path.trimEnd('/').substringAfterLast('/')
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState, onBack: () -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit) {
+fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState, onBack: () -> Unit, onOpen: (String) -> Unit, onHistory: () -> Unit, onFiles: (String) -> Unit) {
     val hosts by model.hosts.collectAsStateWithLifecycle()
     val host = hosts.firstOrNull { it.id == hostId }
     if (host == null) {
@@ -145,6 +146,7 @@ fun SessionsScreen(model: AppModel, hostId: String, snackbar: SnackbarHostState,
                             )
                             // Only a project added by hand and left empty can go; the others come from what is in them.
                             if (inside.isEmpty() && project in host.projects) TextButton(onClick = { model.removeProject(host, project) }) { Text("移除", color = palette.muted) }
+                            IconButton(onClick = { onFiles(project) }, enabled = state is ConnectionState.Connected) { Icon(Icons.Filled.FolderOpen, "文件", Modifier.size(20.dp), tint = palette.muted) }
                             IconButton(onClick = { onOpen(model.createSession(host, project).id) }) { Icon(Icons.Filled.Add, "在 ${folderName(project)} 里新建对话", Modifier.size(20.dp), tint = palette.muted) }
                         }
                     }

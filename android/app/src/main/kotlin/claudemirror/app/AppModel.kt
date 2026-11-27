@@ -262,6 +262,10 @@ class AppModel(private val application: Application) {
     fun rename(id: String, name: String) = engine.rename(id, name)
     suspend fun folders(host: HostConfig, path: String): RemoteListing = engine.folders(host, path)
     suspend fun history(host: HostConfig): List<RemoteConversation> = engine.history(host)
+    suspend fun entries(host: HostConfig, path: String): RemoteListing = engine.entries(host, path)
+    suspend fun preview(host: HostConfig, path: String) = engine.preview(host, path)
+    suspend fun gitStatus(host: HostConfig, directory: String) = engine.gitStatus(host, directory)
+    suspend fun gitDiff(host: HostConfig, path: String) = engine.gitDiff(host, path)
     suspend fun adopt(host: HostConfig, item: RemoteConversation): ChatSession = engine.adopt(host, item)
     fun loadEarlier(id: String) = act { engine.loadEarlier(id) }
     /** Quietly: an adopted conversation that cannot be refreshed still shows what it had. */

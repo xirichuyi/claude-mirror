@@ -45,6 +45,7 @@ class FakeAgent : Launcher {
     @Volatile var status: JsonObject = json("""{"done":false}""")
     @Volatile var inspection: JsonObject = json("{}")
     @Volatile var listing: JsonObject = json("{}")
+    val files = java.util.concurrent.ConcurrentHashMap<String, JsonObject>()
     /** Answers a request about the conversations Claude Code keeps on the server. */
     @Volatile var onHistory: (JsonObject) -> JsonObject = { json("{}") }
     @Volatile var launches = 0
@@ -87,7 +88,7 @@ class FakeAgent : Launcher {
         if (request["op"].string() == "frames") { send(buildJsonObject { put("id", id); put("error", "未知请求") }); return }
         val params = request["params"]!!.jsonObject
         val result: JsonElement = when (request["op"].string()) {
-            "file" -> if (params["operation"].string() == "list") listing else json("""{"home":"/home/dev","hostname":"box","node":"v22.1.0","nodeSupported":true}""")
+            "file" -> files[params["operation"].string()] ?: if (params["operation"].string() == "list") listing else json("""{"home":"/home/dev","hostname":"box","node":"v22.1.0","nodeSupported":true}""")
             "history" -> { calls += Call("history:" + params["operation"].string(), params); onHistory(params) }
             "taskWatch" -> {
                 synchronized(this) { subscriptions[params["taskId"].string()!!] = params["subscription"].string()!! }

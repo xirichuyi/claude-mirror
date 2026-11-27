@@ -53,17 +53,17 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /** What a screen that asks the server for something is showing. */
-private sealed interface Loaded<out T> {
+internal sealed interface Loaded<out T> {
     data object Waiting : Loaded<Nothing>
     data class Failed(val reason: String) : Loaded<Nothing>
     data class Ready<T>(val value: T) : Loaded<T>
 }
 
-private suspend fun <T> load(ask: suspend () -> T): Loaded<T> =
+internal suspend fun <T> load(ask: suspend () -> T): Loaded<T> =
     try { Loaded.Ready(ask()) } catch (error: CancellationException) { throw error } catch (error: Exception) { Loaded.Failed(if ("EACCES" in error.message.orEmpty()) "无权读取" else error.message ?: "加载失败") }
 
 @Composable
-private fun <T> Loading(state: Loaded<T>, modifier: Modifier, onRetry: () -> Unit, content: @Composable (T) -> Unit) {
+internal fun <T> Loading(state: Loaded<T>, modifier: Modifier, onRetry: () -> Unit, content: @Composable (T) -> Unit) {
     when (state) {
         is Loaded.Ready -> Box(modifier) { content(state.value) }
         Loaded.Waiting -> Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) }

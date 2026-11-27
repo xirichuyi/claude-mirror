@@ -19,11 +19,29 @@ data class RemoteConversation(
 )
 
 @Serializable
-data class RemoteEntry(val path: String, val name: String, val directory: Boolean = false)
+data class RemoteEntry(val path: String, val name: String, val directory: Boolean = false, val size: Long = 0, val broken: Boolean = false)
 
-/** The folders of one remote directory. */
+/** What is in one remote directory. */
 @Serializable
-data class RemoteListing(val path: String, val parent: String = "", val entries: List<RemoteEntry> = emptyList())
+data class RemoteListing(val path: String, val parent: String = "", val entries: List<RemoteEntry> = emptyList(), val truncated: Boolean = false)
+
+/** One changed file, `status` as in `git status --porcelain`. */
+@Serializable
+data class GitChange(val status: String, val path: String, val relative: String)
+
+@Serializable
+data class GitStatus(val repository: Boolean = false, val root: String = "", val branch: String = "", val files: List<GitChange> = emptyList(), val truncated: Boolean = false)
+
+/** The first part of a remote file: text, an image (base64, maybe a thumbnail), or why it cannot be shown. */
+@Serializable
+data class FilePreview(
+    val kind: String = "binary",
+    val size: Long = 0,
+    val text: String? = null,
+    val inlineData: String? = null,
+    val reason: String? = null,
+    val truncated: Boolean = false,
+)
 
 private val commandName = Regex("<command-name>([^<]*)</command-name>")
 private val commandArguments = Regex("<command-args>(.*?)</command-args>", RegexOption.DOT_MATCHES_ALL)

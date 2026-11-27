@@ -113,6 +113,23 @@ class Engine(
         return listing.copy(entries = listing.entries.filter { it.directory })
     }
 
+    /** Everything inside [path] on the server, folders first. */
+    suspend fun entries(host: HostConfig, path: String): RemoteListing {
+        val listing = MirrorJson.decodeFromJsonElement<RemoteListing>(agents.call(host, "file", buildJsonObject { put("operation", "list"); put("path", path) }))
+        return listing.copy(entries = listing.entries.sortedWith(compareBy<RemoteEntry> { !it.directory }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }))
+    }
+
+    /** Small images come whole, larger ones as a thumbnail; text up to the first 256 KB. */
+    suspend fun preview(host: HostConfig, path: String): FilePreview = MirrorJson.decodeFromJsonElement(
+        agents.call(host, "file", buildJsonObject { put("operation", "preview"); put("path", path); put("thumbnail", true); put("inlineMedia", true); put("textLimit", 256 * 1024) }),
+    )
+
+    suspend fun gitStatus(host: HostConfig, directory: String): GitStatus =
+        MirrorJson.decodeFromJsonElement(agents.call(host, "file", buildJsonObject { put("operation", "gitStatus"); put("base", directory) }))
+
+    suspend fun gitDiff(host: HostConfig, path: String): String =
+        agents.call(host, "file", buildJsonObject { put("operation", "gitFileDiff"); put("path", path) }).obj()?.get("text").string().orEmpty()
+
     /** The conversations Claude Code keeps on the server, newest first. */
     suspend fun history(host: HostConfig): List<RemoteConversation> {
         val found = ArrayList<RemoteConversation>()
