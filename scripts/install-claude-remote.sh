@@ -136,6 +136,11 @@ install_node() {
   [ "$actual" = "$expected" ] || { echo 'Node.js download failed its checksum; nothing was installed.' >&2; return 1; }
   mkdir -p "$work/node" "$(dirname "$NODE_HOME")" "$HOME/.local/bin"
   tar -xzf "$work/$name" -C "$work/node" --strip-components 1 || { echo 'Could not unpack Node.js (needs tar and gzip).' >&2; return 1; }
+  # The musl builds link libstdc++, which stock Alpine does not have.
+  if ! node_ok "$work/node/bin/node" && [ "${platform%-musl}" != "$platform" ]; then
+    if [ "$(id -u)" = 0 ] && command -v apk >/dev/null 2>&1; then apk add --no-cache -q libstdc++ >/dev/null || true
+    else echo 'Node.js needs libstdc++: run apk add libstdc++ as root.' >&2; fi
+  fi
   node_ok "$work/node/bin/node" || { echo 'The downloaded Node.js cannot run on this server.' >&2; return 1; }
   rm -rf "$NODE_HOME.old"; [ -e "$NODE_HOME" ] && mv "$NODE_HOME" "$NODE_HOME.old"
   mv "$work/node" "$NODE_HOME"; rm -rf "$NODE_HOME.old"
