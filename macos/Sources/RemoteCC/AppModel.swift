@@ -677,6 +677,7 @@ final class AppModel: ObservableObject {
                 }
                 let workspace = workspace(for: current)
                 if workspace?.root == nil { Task { await workspace?.browse(current.directory) } }
+                else { Task { await workspace?.revalidateTabs() } }
                 if current.historyLoaded == false {
                     try await engine.loadHistory(id)
                     historyRefreshedAt[id] = Date()
@@ -807,8 +808,10 @@ final class AppModel: ObservableObject {
         attachments[id] = nil
         let restore = { [weak self] in
             guard let self else { return }
-            if (self.drafts[id] ?? "").isEmpty { self.drafts[id] = text }
-            if (self.attachments[id] ?? []).isEmpty { self.attachments[id] = files }
+            let typed = self.drafts[id] ?? ""
+            self.drafts[id] = typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : text + "\n\n" + typed
+            let attached = self.attachments[id] ?? []
+            self.attachments[id] = files + attached.filter { file in !files.contains { $0.path == file.path } }
         }
         if let session = engine.session(id), engine.projectPresent(session.config) {
             do { try engine.submit(id, text: value, attachments: files, steer: steer) }

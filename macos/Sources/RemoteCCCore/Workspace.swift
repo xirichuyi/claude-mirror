@@ -263,6 +263,12 @@ public struct TreeRow: Identifiable, Equatable {
         changed()
     }
 
+    /// Pushes only reach the active conversation's tabs; the others are checked when it comes back.
+    public func revalidateTabs() async {
+        let folders = Set(tabs.filter { !$0.isDiff && $0.preview != nil }.map(\.directory))
+        if !folders.isEmpty { await filesChanged(Array(folders)) }
+    }
+
     // MARK: Tabs
 
     @discardableResult
