@@ -241,6 +241,29 @@ public class SystemSshTests
         await UseTerminal(shell);
     }
 
+    private static async Task<string> Collect(Stream output, string expected)
+    {
+        try { return await ReadUntil(output, expected); }
+        catch (Xunit.Sdk.XunitException e) { return e.Message; }
+    }
+
+    /// Keys reach a local program in the pseudo console, and a remote command's output comes back through it.
+    [SystemSshFact]
+    public async Task APseudoConsoleCarriesKeysAndOutput()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string local, remote;
+        using (var cmd = new PseudoConsoleTerminal(Path.Combine(Environment.SystemDirectory, "cmd.exe"), ["/q", "/k"], 80, 24))
+        {
+            await cmd.Input.WriteAsync("set /a 6*7\r"u8.ToArray()); await cmd.Input.FlushAsync();
+            local = await Collect(cmd.Output, "42");
+        }
+        var arguments = SystemSsh.Arguments(Host("mirror-target"), "echo tty-$((6*7))", null, Config);
+        arguments[arguments.IndexOf("-T")] = "-tt";
+        using (var ssh = new PseudoConsoleTerminal(SystemSsh.Executable(), arguments, 80, 24)) remote = await Collect(ssh.Output, "tty-42");
+        Assert.True(local.Contains("42") && !local.StartsWith("Waited") && remote.Contains("tty-42") && !remote.StartsWith("Waited"), $"local: {local}\nremote: {remote}");
+    }
+
     [SystemSshFact]
     public async Task ATerminalOverSystemSshInAPseudoConsole()
     {
