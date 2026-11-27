@@ -11,6 +11,11 @@ public final class ChatEngine {
         projectStates[config.key]?[config.directory] == "missing"
     }
 
+    /// Whether the server has confirmed the project directory exists.
+    public func projectPresent(_ config: ConnectionConfig) -> Bool {
+        projectStates[config.key]?[config.directory].map { $0 != "missing" && $0 != "unknown" } == true
+    }
+
     public func refreshProjects(_ config: ConnectionConfig, directories: [String]? = nil) async throws {
         let paths = Array(Set(directories ?? sessions.filter { $0.config.key == config.key }.map(\.directory)))
         for start in stride(from: 0, to: paths.count, by: 200) {
