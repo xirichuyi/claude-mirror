@@ -143,3 +143,17 @@ test('member options need root and go alone', () => {
     assert.equal(f.run('--key', 'ssh-ed25519 AAAA').status, 2);
   } finally { f.close(); }
 });
+test('--claim swaps the invitation key for the app key and keeps the others', () => {
+  const f = fixture(); try {
+    const ssh = path.join(f.home, '.ssh'); fs.mkdirSync(ssh);
+    fs.writeFileSync(path.join(ssh, 'authorized_keys'), 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOld laptop\nexpiry-time="203001010000" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIInv claude-mirror-invite\n');
+    const key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJicQEkLt46JTOUutsQxgSDR9f2KuTIuIlLprFr65vfd mac';
+    const result = f.run('--claim', key);
+    assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /claimed/);
+    assert.equal(fs.readFileSync(path.join(ssh, 'authorized_keys'), 'utf8'), 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOld laptop\n' + key + '\n');
+    assert.equal(fs.statSync(path.join(ssh, 'authorized_keys')).mode & 0o777, 0o600);
+    assert.equal(f.run('--claim', 'ssh-ed25519 AAAA claude-mirror-invite').status, 2);
+    assert.equal(f.run('--claim', key, '--node-only').status, 2);
+    assert.equal(f.run('--host', 'x').status, 2);
+  } finally { f.close(); }
+});

@@ -14,13 +14,21 @@
 #   --list-users                      print "member NAME FINGERPRINT" per member
 #   --add-user NAME --key 'ssh-...'   create the account (or add the key to it) and install Claude Code
 #   --remove-user NAME                delete the account and its home; only accounts added here
+#   --invite NAME [--host ADDRESS]    create the member (or keep it) and print a one-use connection code
+#                                     that is valid for 24 hours; the app pastes it in place of a manual setup
+#   --claim 'ssh-...'                 run by the member: replace the invitation key with the app's own key
+#
+# Web panel (root on Linux with systemd), like the members page but in a browser:
+#   --panel           install or update it; the first run prints its address, account and password
+#   --panel-reset     print a new account name and password
+#   --remove-panel    stop and delete it; members stay
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 case "$(uname -s)" in
   Linux|Darwin) ;;
   *) echo 'This installer supports Linux, macOS and Linux under WSL.' >&2; exit 1 ;;
 esac
-runner=''; project=''; copy_login=no; node_only=no; members=''; member=''; key=''
+runner=''; project=''; copy_login=no; node_only=no; members=''; member=''; key=''; invite_host=''; claim=''; panel=''
 # Directories that are never opened to the runner.
 protected() {
   case "$1" in
@@ -37,7 +45,13 @@ while [ "$#" -gt 0 ]; do
     --node-only) node_only=yes; shift ;;
     --list-users) members=list; shift ;;
     --add-user|--remove-user) [ "$#" -ge 2 ] || usage "$1 needs an account name."; members=${1#--}; members=${members%-user}; member=$2; shift 2 ;;
+    --invite) [ "$#" -ge 2 ] || usage '--invite needs an account name.'; members=invite; member=$2; shift 2 ;;
     --key) [ "$#" -ge 2 ] || usage '--key needs a public key.'; key=$2; shift 2 ;;
+    --host) [ "$#" -ge 2 ] || usage '--host needs an address.'; invite_host=$2; shift 2 ;;
+    --claim) [ "$#" -ge 2 ] || usage '--claim needs a public key.'; claim=$2; shift 2 ;;
+    --panel) panel=install; shift ;;
+    --panel-reset) panel=reset; shift ;;
+    --remove-panel) panel=remove; shift ;;
     *) usage "Unknown option: $1" ;;
   esac
 done
@@ -46,6 +60,36 @@ MEMBERS=/etc/claude-mirror/members
 # A marker holds the uid it was created with, so an account recreated elsewhere under the same name is not managed.
 managed() { [ -f "$MEMBERS/$1" ] && getent passwd "$1" >/dev/null && [ "$(cat -- "$MEMBERS/$1")" = "$(id -u -- "$1")" ]; }
 [ -z "$key" ] || [ "$members" = add ] || usage '--key only goes with --add-user.'
+[ -z "$invite_host" ] || [ "$members" = invite ] || usage '--host only goes with --invite.'
+public_key() {
+  [[ "$1" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\ [A-Za-z0-9+/]+=*(\ [^[:cntrl:]]*)?$ ]] || return 1
+  ! command -v ssh-keygen >/dev/null 2>&1 || ssh-keygen -lf /dev/stdin <<<"$1" >/dev/null 2>&1
+}
+# Adds a key to this account's authorized_keys; an invitation key replaces the previous one.
+AUTHORIZE='umask 077 && mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/authorized_keys" && f="$HOME/.ssh/authorized_keys" &&
+  if [ "$2" = replace ]; then grep -v -- " claude-mirror-invite\$" "$f" > "$f.new" || true; mv -f "$f.new" "$f"; fi &&
+  { grep -qxF -- "$1" "$f" || printf "%s\n" "$1" >> "$f"; } && chmod 700 "$HOME/.ssh" && chmod 600 "$f"'
+if [ -n "$claim" ]; then
+  [ -z "$members$panel$runner$project" ] && [ "$node_only" = no ] && [ "$copy_login" = no ] || usage '--claim goes alone.'
+  public_key "$claim" && [[ "$claim" != *claude-mirror-invite* ]] || usage 'Not an SSH public key.'
+  sh -c "$AUTHORIZE" sh "$claim" replace
+  echo 'claimed'
+  exit 0
+fi
+if [ -n "$panel" ]; then
+  [ -z "$members$runner$project" ] && [ "$node_only" = no ] && [ "$copy_login" = no ] || usage 'Panel options go alone.'
+  [ "$(uname -s)" = Linux ] && [ "$(id -u)" -eq 0 ] || usage 'The panel needs root on Linux.'
+  command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] || usage 'The panel needs systemd.'
+fi
+PANEL_LIB=/usr/local/lib/claude-mirror
+PANEL_CONF=/etc/claude-mirror/panel
+if [ "$panel" = remove ]; then
+  systemctl disable --now claude-mirror-panel >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/claude-mirror-panel.service; systemctl daemon-reload
+  rm -rf -- "$PANEL_LIB" "$PANEL_CONF"
+  echo 'Removed the panel. Members are kept.'
+  exit 0
+fi
 if [ -n "$members" ]; then
   [ "$node_only" = no ] && [ -z "$runner$project" ] && [ "$copy_login" = no ] || usage 'Member options go alone.'
   [ "$(uname -s)" = Linux ] && [ "$(id -u)" -eq 0 ] || usage 'Managing members needs a root SSH login on Linux.'
@@ -58,8 +102,11 @@ if [ -n "$members" ]; then
     fi
   fi
   if [ "$members" = add ]; then
-    [[ "$key" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\ [A-Za-z0-9+/]+=*(\ [^[:cntrl:]]*)?$ ]] || usage 'Not an SSH public key.'
-    ! command -v ssh-keygen >/dev/null 2>&1 || ssh-keygen -lf /dev/stdin <<<"$key" >/dev/null 2>&1 || usage 'Not an SSH public key.'
+    public_key "$key" || usage 'Not an SSH public key.'
+  fi
+  if [ "$members" = invite ]; then
+    command -v ssh-keygen >/dev/null 2>&1 && command -v base64 >/dev/null 2>&1 || usage 'This server has no ssh-keygen or base64.'
+    [ -z "$invite_host" ] || [[ "$invite_host" =~ ^[A-Za-z0-9._:-]{1,253}$ ]] || usage "Invalid address: $invite_host"
   fi
 fi
 # Everything about the runner is checked before anything is installed.
@@ -115,7 +162,7 @@ add_member() {
   home=$(member_home "$member")
   chmod 700 -- "$home"
   # Written by the member itself, never by root.
-  as_member sh -c 'umask 077 && mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/authorized_keys" && { grep -qxF -- "$1" "$HOME/.ssh/authorized_keys" || printf "%s\n" "$1" >> "$HOME/.ssh/authorized_keys"; } && chmod 700 "$HOME/.ssh" && chmod 600 "$HOME/.ssh/authorized_keys"' sh "$key"
+  as_member sh -c "$AUTHORIZE" sh "$key" "${1:-}"
   if as_member "$home/.local/bin/claude" --version >/dev/null 2>&1; then :
   elif command -v claude >/dev/null 2>&1 && source=$(readlink -f -- "$(command -v claude)") &&
     as_member sh -c 'mkdir -p "$HOME/.local/bin" && cat > "$HOME/.local/bin/.claude-new" && chmod 755 "$HOME/.local/bin/.claude-new" && mv "$HOME/.local/bin/.claude-new" "$HOME/.local/bin/claude"' < "$source" &&
@@ -149,13 +196,43 @@ remove_member() {
   rm -f -- "$MEMBERS/$member"
   echo "Removed $member and their files."
 }
+# The code carries everything the app needs: address, port, account, the server's host keys and
+# a fresh key that sshd accepts for 24 hours. The app swaps it for its own key on first connect.
+invite_member() {
+  local host port stamp version line payload file
+  ssh-keygen -q -t ed25519 -N '' -C claude-mirror-invite -f "$work/invite" >/dev/null
+  line=$(cat "$work/invite.pub")
+  version=$(ssh -V 2>&1 | sed -n 's/^OpenSSH_\([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
+  # expiry-time needs OpenSSH 8.2; an older sshd would ignore the whole line.
+  if [ -n "$version" ] && [ "${version% *}" -gt 8 -o \( "${version% *}" -eq 8 -a "${version#* }" -ge 2 \) ]; then
+    stamp=$(date -d '+24 hours' +%Y%m%d%H%M 2>/dev/null || date -v+24H +%Y%m%d%H%M)
+    line="expiry-time=\"$stamp\" $line"
+  else echo 'This sshd is older than OpenSSH 8.2: the code does not expire, it only stops working once used.' >&2
+  fi
+  key=$line; add_member replace >&2
+  host=$invite_host
+  [ -n "$host" ] || host=$(hostname -I 2>/dev/null | awk '{print $1}')
+  [ -n "$host" ] || host=$(hostname)
+  port=$(sshd -T 2>/dev/null | awk '$1=="port"{print $2; exit}')
+  [ -n "$port" ] || port=$(awk 'tolower($1)=="port"{print $2; exit}' /etc/ssh/sshd_config 2>/dev/null)
+  payload="claude-mirror 1"$'\n'"name $(hostname)"$'\n'"host $host"$'\n'"port ${port:-22}"$'\n'"user $member"
+  # Every client checks Ed25519, which keeps the code short; other key types only stand in for it.
+  for file in /etc/ssh/ssh_host_ed25519_key.pub; do [ -f "$file" ] || file=/etc/ssh/ssh_host_*_key.pub; done
+  for file in $file; do
+    [ -f "$file" ] && payload+=$'\n'"hostkey $(awk '{print $1" "$2}' "$file")"
+  done
+  payload+=$'\n'"$(cat "$work/invite")"
+  echo "Connection code for $member (one use, 24 hours):" >&2
+  echo "invite cm1.$(printf '%s\n' "$payload" | base64 | tr -d '\n=' | tr '+/' '-_')"
+}
 case "$members" in
   list) list_members; exit 0 ;;
   add) add_member; exit ;;
+  invite) invite_member; exit ;;
   remove) remove_member; exit ;;
 esac
 
-if [ "$node_only" = yes ]; then :
+if [ "$node_only" = yes ] || [ -n "$panel" ]; then :
 else
 echo '==> Claude Code'
 if command -v claude >/dev/null 2>&1; then
@@ -257,6 +334,68 @@ else
   install_node || { echo 'Claude Mirror needs Node.js >=18.14 on the remote server.' >&2; exit 3; }
 fi
 [ "$node_only" = no ] || exit 0
+
+# Pinned to the release this script came from; a checkout or test points CLAUDE_MIRROR_PANEL_SOURCE at a folder.
+PANEL_RELEASE=latest
+install_panel() {
+  local node source url ip port path account cert
+  if [ -x "$NODE_HOME/bin/node" ] && node_ok "$NODE_HOME/bin/node"; then node=$NODE_HOME/bin/node; else node=$(command -v node); fi
+  command -v openssl >/dev/null 2>&1 || { echo 'The panel needs openssl for its HTTPS certificate.' >&2; return 1; }
+  mkdir -p "$work/panel"
+  if [ -n "${CLAUDE_MIRROR_PANEL_SOURCE:-}" ]; then
+    cp -- "$CLAUDE_MIRROR_PANEL_SOURCE/claude-mirror-panel.cjs" "$CLAUDE_MIRROR_PANEL_SOURCE/install-claude-remote.sh" "$work/panel/"
+  else
+    if [ "$PANEL_RELEASE" = latest ]; then url=https://github.com/xirichuyi/claude-mirror/releases/latest/download
+    else url=https://github.com/xirichuyi/claude-mirror/releases/download/$PANEL_RELEASE; fi
+    echo 'Downloading the panel...'
+    for source in claude-mirror-panel.cjs install-claude-remote.sh; do
+      download "$url/$source" "$work/panel/$source" || { echo "Could not download $source." >&2; return 1; }
+    done
+  fi
+  install -d -m 755 "$PANEL_LIB"
+  install -m 644 "$work/panel/claude-mirror-panel.cjs" "$PANEL_LIB/claude-mirror-panel.cjs"
+  install -m 755 "$work/panel/install-claude-remote.sh" "$PANEL_LIB/install-claude-remote.sh"
+  install -d -m 700 /etc/claude-mirror "$PANEL_CONF"
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  if [ ! -s "$PANEL_CONF/cert.pem" ]; then
+    # Self-signed: the browser warns once; the fingerprint below tells it is this server.
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 -subj '/CN=Claude Mirror' \
+      ${ip:+-addext "subjectAltName=IP:$ip"} -keyout "$PANEL_CONF/key.pem" -out "$PANEL_CONF/cert.pem" >/dev/null 2>&1 ||
+      openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj '/CN=Claude Mirror' -keyout "$PANEL_CONF/key.pem" -out "$PANEL_CONF/cert.pem" >/dev/null 2>&1 ||
+      { echo 'Could not create the HTTPS certificate.' >&2; return 1; }
+    chmod 600 "$PANEL_CONF/key.pem"
+  fi
+  if [ "$panel" = reset ]; then account=$("$node" "$PANEL_LIB/claude-mirror-panel.cjs" reset "$PANEL_CONF")
+  else account=$("$node" "$PANEL_LIB/claude-mirror-panel.cjs" init "$PANEL_CONF"); fi
+  read -r port path < <("$node" "$PANEL_LIB/claude-mirror-panel.cjs" address "$PANEL_CONF")
+  cat > /etc/systemd/system/claude-mirror-panel.service <<UNIT
+[Unit]
+Description=Claude Mirror panel
+After=network-online.target
+
+[Service]
+ExecStart=$node $PANEL_LIB/claude-mirror-panel.cjs serve $PANEL_CONF
+Environment=CLAUDE_MIRROR_SCRIPT=$PANEL_LIB/install-claude-remote.sh
+Restart=on-failure
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable claude-mirror-panel >/dev/null 2>&1
+  systemctl restart claude-mirror-panel
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then ufw allow "$port/tcp" >/dev/null
+  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --quiet --permanent --add-port="$port/tcp" && firewall-cmd --quiet --reload
+  fi
+  cert=$(openssl x509 -noout -fingerprint -sha256 -in "$PANEL_CONF/cert.pem" | cut -d= -f2)
+  echo "Panel: https://${ip:-SERVER}:$port/$path/"
+  [ -z "$account" ] || printf '%s\n' "$account"
+  echo "Certificate SHA-256: $cert"
+  echo 'Open the port in the cloud provider firewall if the page does not load.'
+}
+if [ -n "$panel" ]; then install_panel; exit; fi
 
 # systemd-logind with KillUserProcesses=yes kills every process of an SSH login when it ends,
 # including Claude Mirror's background sessions. A lingering user manager lets them survive.
