@@ -130,7 +130,7 @@ fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> 
                 !shown.repository -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("不是 Git 仓库", color = palette.muted) }
                 shown.files.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("没有改动", color = palette.muted) }
                 else -> LazyColumn(Modifier.fillMaxSize()) {
-                    items(shown.files, key = { it.path }) { change ->
+                    items(shown.files, key = { it.status + it.path }) { change ->
                         ListItem(
                             leadingContent = {
                                 Text(change.status.trim().take(1).replace("?", "U"), Modifier.width(18.dp), style = CodeStyle, fontWeight = FontWeight.Bold, color = changeColor(change.status))
