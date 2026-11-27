@@ -52,7 +52,15 @@ function homeOf(name: string) {
   return line?.split(':')[5];
 }
 function authorizedKeys(name: string) {
-  try { return fs.readFileSync(path.join(homeOf(name) ?? '/nonexistent', '.ssh/authorized_keys'), 'utf8'); } catch { return ''; }
+  // The member owns this file: only a small regular file is read, never a link, pipe or device.
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(path.join(homeOf(name) ?? '/nonexistent', '.ssh/authorized_keys'), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > 1 << 16) return '';
+    const buffer = Buffer.alloc(stat.size);
+    return buffer.subarray(0, fs.readSync(fd, buffer, 0, stat.size, 0)).toString('utf8');
+  } catch { return ''; } finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 function shortError(reason: string) {
   const account = /(?:Account|account) (\S+)/.exec(reason)?.[1] ?? /^(\S+) is not/.exec(reason)?.[1];
