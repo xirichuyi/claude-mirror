@@ -173,8 +173,7 @@ private fun FileViewer(model: AppModel, host: HostConfig, file: String, onDismis
     LaunchedEffect(attempt) { state = Loaded.Waiting; state = load { model.preview(host, file) } }
     Loading(state, Modifier.fillMaxSize(), onRetry = { attempt++ }) { preview ->
         val image = remember(preview) {
-            preview.inlineData?.takeIf { preview.kind == "image" }?.let { runCatching { Base64.decode(it, Base64.DEFAULT) }.getOrNull() }
-                ?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+            preview.inlineData?.takeIf { preview.kind == "image" }?.let { runCatching { Base64.decode(it, Base64.DEFAULT) }.getOrNull() }?.let(::screenBitmap)
         }
         when {
             image != null -> Image(image, folderName(file), Modifier.fillMaxSize().padding(12.dp), contentScale = ContentScale.Fit)
@@ -201,6 +200,16 @@ private fun Viewer(title: String, onDismiss: () -> Unit, content: @Composable ()
             },
         ) { padding -> Box(Modifier.fillMaxSize().padding(padding)) { content() } }
     }
+}
+
+/** A few hundred KB of PNG can be tens of thousands of pixels across; it is decoded no larger than a screen needs. */
+private fun screenBitmap(bytes: ByteArray): androidx.compose.ui.graphics.ImageBitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2048) sample *= 2
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
 }
 
 private fun byteSize(bytes: Long): String = when {
