@@ -204,7 +204,7 @@ sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
 - 使用系统 OpenSSH，支持 SSH config 别名、密码和密钥；保留主机指纹检查。
 - **已有 Claude：** 只验证能否运行，不覆盖、不升级、不改认证配置。
 - **没有 Claude：** 下载 [Claude 官方安装器](https://github.com/anthropics/claude-code#installation)并安装 stable 版本，由官方安装器选择平台和架构。
-- 远端 Node.js 低于 18.14 或不存在时，把固定版本、校验过 SHA-256 的 Node.js 装到用户目录，不改系统包（nodejs.org 不通时换 npmmirror；Alpine、CentOS 7 用非官方构建）。
+- 远端 Node.js 低于 18.14 或不存在时，把固定版本、校验过 SHA-256 的 Node.js 装到用户目录，不改系统包（nodejs.org 不通时换 npmmirror；Alpine、CentOS 7 用非官方构建）。唯一例外：Alpine 上以 root 连接时会 `apk add libstdc++`，Node.js 的 musl 构建依赖它。
 - SSH 断开会杀后台进程的服务器上自动开启 `loginctl enable-linger`；需要管理员权限时先试免密 `sudo`，不行再给出要运行的命令。
 
 **用 root 登录的新服务器**再加三个选项，一条命令配好 Full Access 需要的普通执行账号：
