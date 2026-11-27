@@ -1,5 +1,5 @@
 {
-  "name": "tether",
+  "name": "remotecc",
   "version": "0.27.0",
   "description": "Remote Claude Code client for macOS, Windows and Android over SSH",
   "main": "build/src/main.cjs",
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "local.remotecc.desktop",
-    "productName": "Tether",
+    "productName": "RemoteCC",
     "icon": "assets/icon.png",
     "directories": {
       "output": "dist"
