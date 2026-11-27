@@ -106,7 +106,7 @@ install_node() {
   if [ "$os" = linux ]; then
     glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
     # Alpine and other musl systems, and glibc older than 2.28 (CentOS 7), take the unofficial builds.
-    if ldd --version 2>&1 | grep -qi musl; then platform="$platform-musl"
+    if { ldd --version 2>&1 || true; } | grep -qi musl; then platform="$platform-musl"
     elif [ -n "$glibc" ] && [ "$(printf '%s\n2.28\n' "$glibc" | sort -V | head -1)" != 2.28 ]; then
       [ "$arch" = x64 ] || { echo "glibc $glibc is too old for Node.js on $arch. Install Node.js 18.14+ from the system's packages." >&2; return 1; }
       platform="$platform-glibc-217"
