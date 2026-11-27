@@ -98,7 +98,7 @@ list_members() {
     [ -f "$marker" ] || continue
     name=${marker##*/}
     managed "$name" || continue
-    fingerprint=$(ssh-keygen -lf "$(member_home "$name")/.ssh/authorized_keys" 2>/dev/null | awk 'NR==1{print $2}')
+    fingerprint=$({ ssh-keygen -lf "$(member_home "$name")/.ssh/authorized_keys" 2>/dev/null || true; } | awk 'NR==1{print $2}')
     echo "member $name ${fingerprint:--}"
   done
 }
