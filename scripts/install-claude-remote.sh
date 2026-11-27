@@ -67,7 +67,7 @@ public_key() {
 }
 # Adds a key to this account's authorized_keys; an invitation key replaces the previous one.
 AUTHORIZE='umask 077 && mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/authorized_keys" && f="$HOME/.ssh/authorized_keys" &&
-  if [ "$2" = replace ]; then grep -v -- " claude-mirror-invite\$" "$f" > "$f.new" || true; mv -f "$f.new" "$f"; fi &&
+  if [ "$2" = replace ]; then { grep -v -- " claude-mirror-invite\$" "$f"; [ "$?" -le 1 ]; } > "$f.new" && mv -f "$f.new" "$f"; fi &&
   { grep -qxF -- "$1" "$f" || printf "%s\n" "$1" >> "$f"; } && chmod 700 "$HOME/.ssh" && chmod 600 "$f"'
 if [ -n "$claim" ]; then
   [ -z "$members$panel$runner$project" ] && [ "$node_only" = no ] && [ "$copy_login" = no ] || usage '--claim goes alone.'
