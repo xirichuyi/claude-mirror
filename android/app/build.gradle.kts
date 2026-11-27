@@ -9,7 +9,7 @@ val productVersion = Regex("<key>CFBundleShortVersionString</key>\\s*<string>(\\
     .find(rootProject.file("../macos/Resources/Info.plist").readText())?.groupValues ?: error("No version in macos/Resources/Info.plist")
 
 // Release signing comes only from the environment (CI secrets); nothing is kept in the repository.
-val releaseKeystore = System.getenv("ANDROID_KEYSTORE")?.takeIf { it.isNotBlank() }?.let(::file)
+val releaseKeystore = System.getenv("ANDROID_KEYSTORE")?.takeIf { it.isNotBlank() }?.let(rootProject::file)
 
 android {
     namespace = "claudemirror.app"
