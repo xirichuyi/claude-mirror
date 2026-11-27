@@ -12,13 +12,17 @@ final class LocalLauncher: RemoteLauncher, @unchecked Sendable {
     }
 }
 
-/// Fault injection affects bulk transfer only; metadata still uses the real agent.
-final class BrokenTransferLauncher: RemoteLauncher, @unchecked Sendable {
+/// Fault injection: the real agent's output stops after `limit` bytes, then the channel closes or stalls.
+final class CutLauncher: RemoteLauncher, @unchecked Sendable {
     let base: LocalLauncher
-    let command: String
-    init(home: String, command: String) { base = LocalLauncher(home: home); self.command = command }
+    let limit: Int, stall: Bool
+    init(home: String, limit: Int, stall: Bool = false) { base = LocalLauncher(home: home); self.limit = limit; self.stall = stall }
     func spawn(_ config: ConnectionConfig, command: String) throws -> RemoteProcess {
-        try base.spawn(config, command: command.contains(" transfer ") ? self.command : command)
+        guard command.contains("exec node") else { return try base.spawn(config, command: command) }
+        // `head -c` would hold the bytes in its buffer; this passes each chunk on as it arrives.
+        let after = stall ? "setTimeout(()=>process.exit(0),4000)" : "process.exit(0)"
+        let cut = #"node -e 'let n=\#(limit);process.stdin.on("data",d=>{if(n<=0)return;const s=d.subarray(0,n);n-=s.length;process.stdout.write(s,()=>{if(n<=0)\#(after)})})'"#
+        return try base.spawn(config, command: "{ \(command); } | \(cut)")
     }
 }
 
@@ -141,38 +145,45 @@ final class AgentTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: important), "keep")
     }
 
-    func testInterruptedOrTruncatedDownloadPreservesExistingFile() async throws {
+    func testInterruptedDownloadPreservesExistingFileAndResumes() async throws {
         let environment = try AgentEnvironment(); defer { environment.cleanup() }
-        let source = environment.home.appendingPathComponent("source.txt")
-        try "complete remote contents".write(to: source, atomically: true, encoding: .utf8)
+        let source = environment.home.appendingPathComponent("source.bin")
+        let content = Data((0..<1_000_000).map { _ in UInt8.random(in: 0...255) })
+        try content.write(to: source)
         let destination = environment.home.appendingPathComponent("existing.txt")
         try "original local contents".write(to: destination, atomically: true, encoding: .utf8)
-        for command in ["printf partial; exit 1", "printf partial; exit 0"] {
-            let launcher = BrokenTransferLauncher(home: environment.home.path, command: command)
-            let agents = AgentClient(launcher: launcher, resources: try ServerResources(directory: environment.resourcesDirectory))
-            let files = RemoteFiles(agents: agents, cacheDirectory: environment.home.appendingPathComponent("fault-cache"))
-            do {
-                try await files.download(environment.config, source.path, to: destination)
-                XCTFail("An interrupted or short download must fail")
-            } catch { XCTAssertFalse(error.localizedDescription.isEmpty) }
-            XCTAssertEqual(try String(contentsOf: destination), "original local contents")
-            XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: environment.home.path).contains { $0.hasPrefix(".remotecc-") })
-            agents.close(environment.config)
-        }
+        let cache = environment.home.appendingPathComponent("fault-cache")
+        let agents = AgentClient(launcher: CutLauncher(home: environment.home.path, limit: 300_000), resources: try ServerResources(directory: environment.resourcesDirectory))
+        let files = RemoteFiles(agents: agents, cacheDirectory: cache)
+        do {
+            try await files.download(environment.config, source.path, to: destination)
+            XCTFail("An interrupted download must fail")
+        } catch { XCTAssertFalse(error.localizedDescription.isEmpty) }
+        agents.close(environment.config)
+        XCTAssertEqual(try String(contentsOf: destination), "original local contents")
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: environment.home.path).contains { $0.hasPrefix(".remotecc-") })
+        let partial = try FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: [.fileSizeKey]).filter { $0.pathExtension == "partial" }
+        XCTAssertEqual(partial.count, 1)
+        let kept = try XCTUnwrap(partial.first?.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        XCTAssertGreaterThan(kept, 0); XCTAssertLessThan(kept, content.count)
+        let resumed = RemoteFiles(agents: environment.agents, cacheDirectory: cache)
+        try await resumed.download(environment.config, source.path, to: destination)
+        XCTAssertEqual(try Data(contentsOf: destination), content)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(partial.first).path))
     }
 
     func testCancelStalledDownloadReturnsPromptlyAndPreservesDestination() async throws {
         let environment = try AgentEnvironment(); defer { environment.cleanup() }
-        let source = environment.home.appendingPathComponent("source.txt")
+        let source = environment.home.appendingPathComponent("source.bin")
         let destination = environment.home.appendingPathComponent("destination.txt")
-        try "remote".write(to: source, atomically: true, encoding: .utf8)
+        try Data(repeating: 7, count: 1_000_000).write(to: source)
         try "keep".write(to: destination, atomically: true, encoding: .utf8)
-        let launcher = BrokenTransferLauncher(home: environment.home.path, command: "exec sleep 4")
+        let launcher = CutLauncher(home: environment.home.path, limit: 100_000, stall: true)
         let agents = AgentClient(launcher: launcher, resources: try ServerResources(directory: environment.resourcesDirectory))
         let files = RemoteFiles(agents: agents, cacheDirectory: environment.home.appendingPathComponent("cancel-cache"))
         _ = try await agents.info(environment.config)
         let task = Task { try await files.download(environment.config, source.path, to: destination) }
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await Task.sleep(nanoseconds: 300_000_000)
         let start = Date(); task.cancel()
         do { try await task.value; XCTFail("Cancelled download succeeded") } catch { }
         print("CANCEL stalled download returned in \(Int(Date().timeIntervalSince(start) * 1000))ms")
@@ -195,8 +206,8 @@ final class AgentTests: XCTestCase {
         XCTAssertTrue(first.path.contains("claudock-attachments-"))
         XCTAssertEqual(try Data(contentsOf: remote), content)
         let before = try FileManager.default.attributesOfItem(atPath: remote.path)[.modificationDate] as? Date
-        // A cache hit must work even when every bulk-transfer channel fails.
-        let cachedAgents = AgentClient(launcher: BrokenTransferLauncher(home: env.home.path, command: "exit 81"), resources: try ServerResources(directory: env.resourcesDirectory))
+        // A second client finds the stored copy instead of sending it again.
+        let cachedAgents = AgentClient(launcher: LocalLauncher(home: env.home.path), resources: try ServerResources(directory: env.resourcesDirectory))
         defer { cachedAgents.close(env.config) }
         let cachedFiles = RemoteFiles(agents: cachedAgents, cacheDirectory: env.home.appendingPathComponent("second-client"))
         let repeated = try await cachedFiles.upload(env.config, file: source)
@@ -266,10 +277,9 @@ final class AgentTests: XCTestCase {
         XCTAssertTrue(finished.allSatisfy { $0.config.directory.hasSuffix($0.config.host) })
     }
 
-    func testSmallMediaPreviewAvoidsTransferAndRevalidatesChanges() async throws {
+    func testMediaPreviewRevalidatesChanges() async throws {
         let env = try AgentEnvironment(); defer { env.cleanup() }
-        let agents = AgentClient(launcher: BrokenTransferLauncher(home: env.home.path, command: "exit 42"),
-                                 resources: try ServerResources(directory: env.resourcesDirectory))
+        let agents = AgentClient(launcher: LocalLauncher(home: env.home.path), resources: try ServerResources(directory: env.resourcesDirectory))
         defer { agents.close(env.config) }
         let files = RemoteFiles(agents: agents, cacheDirectory: env.home.appendingPathComponent("inline-cache"))
         let file = env.home.appendingPathComponent("preview.png")
@@ -285,17 +295,15 @@ final class AgentTests: XCTestCase {
         let changed = try await files.preview(env.config, file.path)
         XCTAssertEqual(changed.data, updated)
         XCTAssertNotEqual(first.version, changed.version)
-        try (header + Data(repeating: 3, count: 300_000)).write(to: file, options: .atomic)
-        do {
-            _ = try await files.preview(env.config, file.path)
-            XCTFail("Large media must still use the separate transfer channel")
-        } catch { XCTAssertTrue(error.localizedDescription.contains("42")) }
+        let large = header + Data(repeating: 3, count: 300_000)
+        try large.write(to: file, options: .atomic)
+        let streamed = try await files.preview(env.config, file.path)
+        XCTAssertEqual(streamed.data, large)
     }
 
     func testPreviewCacheSurvivesRecreationAndDownloadReusesOriginal() async throws {
         let env = try AgentEnvironment(); defer { env.cleanup() }
-        let agents = AgentClient(launcher: BrokenTransferLauncher(home: env.home.path, command: "exit 42"),
-                                 resources: try ServerResources(directory: env.resourcesDirectory))
+        let agents = AgentClient(launcher: LocalLauncher(home: env.home.path), resources: try ServerResources(directory: env.resourcesDirectory))
         defer { agents.close(env.config) }
         let cache = env.home.appendingPathComponent("reuse-cache")
         let files = RemoteFiles(agents: agents, cacheDirectory: cache)

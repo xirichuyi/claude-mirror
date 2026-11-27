@@ -8,6 +8,7 @@ sshj = "0.41.1"
 bouncycastle = "1.84"
 composeBom = "2026.09.00"
 activity = "1.12.4"
+core = "1.18.0"
 lifecycle = "2.11.0"
 navigation = "2.10.1"
 markdown = "0.45.0"
@@ -25,6 +26,7 @@ compose-ui = { module = "androidx.compose.ui:ui" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
 compose-icons = { module = "androidx.compose.material:material-icons-extended" }
 compose-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+core = { module = "androidx.core:core-ktx", version.ref = "core" }
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
 lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }

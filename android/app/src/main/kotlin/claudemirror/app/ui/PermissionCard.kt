@@ -1,29 +1,40 @@
 package claudemirror.app.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import claudemirror.core.PermissionRequest
+import claudemirror.core.permissionDetail
+import claudemirror.core.permissionHeadline
+import claudemirror.core.ruleLines
+import claudemirror.core.toolLook
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -32,12 +43,17 @@ import kotlinx.serialization.json.put
 
 private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
 
+private val Refusal get() = buildJsonObject { put("allow", false); put("reason", "") }
+
 /** Claude waits for this answer before it goes on. */
 @Composable
 fun PermissionCard(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit) {
-    val questions = ((permission.input as? JsonObject)?.get("questions") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
-    ElevatedCard(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val questions = questions(permission)
+    Surface(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), color = palette.popup,
+        shape = MaterialTheme.shapes.large, border = BorderStroke(1.dp, palette.line), shadowElevation = if (palette.dark) 0.dp else 3.dp,
+    ) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             when {
                 permission.kind == "elicitation" -> Elicitation(permission, onAnswer)
                 questions.isNotEmpty() -> Questions(questions, onAnswer)
@@ -47,22 +63,57 @@ fun PermissionCard(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit
     }
 }
 
+private fun questions(permission: PermissionRequest) = ((permission.input as? JsonObject)?.get("questions") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+
+/** The same answer in one line, for a window too short to show the card. A question still needs the card. */
+@Composable
+fun PermissionBar(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit) {
+    if (permission.kind == "elicitation" || questions(permission).isNotEmpty()) return
+    val look = remember(permission.name, permission.input) { toolLook(permission.name, permission.input) }
+    Row(
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(look.detail.ifBlank { look.title }, Modifier.weight(1f), style = CodeStyle, color = palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        TextButton(onClick = { onAnswer(Refusal) }) { Text("拒绝", color = palette.muted) }
+        Button(
+            onClick = { onAnswer(buildJsonObject { put("allow", true); put("useSuggestedPermissions", false) }) },
+            Modifier.height(34.dp), contentPadding = PaddingValues(horizontal = 16.dp), colors = fillColors(),
+        ) { Text(if (permission.name == "ExitPlanMode") "执行" else "允许") }
+    }
+}
+
+@Composable
+private fun Actions(refuse: String, accept: String?, enabled: Boolean = true, onRefuse: () -> Unit, onAccept: () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = onRefuse) { Text(refuse, color = palette.muted) }
+        if (accept != null) Button(onClick = onAccept, enabled = enabled, colors = fillColors()) { Text(accept) }
+    }
+}
+
 @Composable
 private fun Approval(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit) {
-    Text(permission.title ?: "Claude 想使用 ${permission.name ?: "工具"}", style = MaterialTheme.typography.titleSmall)
-    permission.description?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-    // Every field in full: allowing covers the whole request, so none of it may be left out or cut off.
-    val fields = permission.input as? JsonObject
-    if (fields == null) {
-        if (permission.input != null) Text(prettyJson(permission.input), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-    } else for ((name, value) in fields) {
-        if (fields.size > 1) Text(name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(fields.text(name) ?: prettyJson(value), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+    Text(permissionHeadline(permission.name, permission.input), style = MaterialTheme.typography.titleSmall, color = palette.text)
+    // A command's own description is shown with the command below.
+    permissionDetail(permission.title, permission.description)?.takeIf { it != (permission.input as? JsonObject)?.text("description") }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted) }
+    // In full: allowing covers the whole request, so none of it may be left out or cut off.
+    ToolInput(permission.name, permission.input)
+    val rules = remember(permission.suggestions) { ruleLines(permission.suggestions) }
+    var keep by rememberSaveable(permission.id) { mutableStateOf(false) }
+    if (rules.isNotEmpty()) Row(
+        Modifier.fillMaxWidth().toggleable(keep, role = Role.Checkbox) { keep = it },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Checkbox(keep, null, Modifier.size(20.dp))
+        Column {
+            for (rule in rules) {
+                Text(rule.action + " · " + rule.scope, style = MaterialTheme.typography.bodySmall, color = if (rule.widens) palette.warning else palette.text)
+            }
+        }
     }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-        OutlinedButton(onClick = { onAnswer(buildJsonObject { put("allow", false); put("reason", "") }) }) { Text("拒绝") }
-        Button(onClick = { onAnswer(buildJsonObject { put("allow", true); put("useSuggestedPermissions", false) }) }) { Text("允许") }
-    }
+    Actions(
+        "拒绝", if (permission.name == "ExitPlanMode") "执行" else "允许", onRefuse = { onAnswer(Refusal) },
+        onAccept = { onAnswer(buildJsonObject { put("allow", true); put("useSuggestedPermissions", keep && rules.isNotEmpty()) }) },
+    )
 }
 
 @Composable
@@ -71,50 +122,49 @@ private fun Questions(questions: List<JsonObject>, onAnswer: (JsonObject) -> Uni
     var chosen by rememberSaveable { mutableStateOf(mapOf<String, Set<String>>()) }
     var typed by rememberSaveable { mutableStateOf(mapOf<String, String>()) }
     fun answer(question: String): String = (chosen[question].orEmpty() + listOfNotNull(typed[question]?.trim()?.takeIf { it.isNotEmpty() })).joinToString(", ")
-    Text("Claude 想问你", style = MaterialTheme.typography.titleSmall)
     for (item in questions) {
         val question = item.text("question") ?: continue
         val multiple = (item["multiSelect"] as? JsonPrimitive)?.content == "true"
-        Text(question + if (multiple) "（可多选）" else "", style = MaterialTheme.typography.bodyMedium)
-        for (option in (item["options"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()) {
-            val label = option.text("label") ?: continue
-            val selected = label in chosen[question].orEmpty()
-            val toggle = {
-                chosen = chosen + (question to if (multiple) { if (selected) chosen[question].orEmpty() - label else chosen[question].orEmpty() + label } else setOf(label))
-            }
-            Row(Modifier.fillMaxWidth().selectable(selected, onClick = toggle), verticalAlignment = Alignment.CenterVertically) {
-                if (multiple) Checkbox(selected, { toggle() }) else RadioButton(selected, toggle)
-                Column {
-                    Text(label)
-                    option.text("description")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        Text(question, style = MaterialTheme.typography.titleSmall, color = palette.text)
+        Column {
+            for (option in (item["options"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()) {
+                val label = option.text("label") ?: continue
+                val selected = label in chosen[question].orEmpty()
+                val toggle = {
+                    chosen = chosen + (question to if (multiple) { if (selected) chosen[question].orEmpty() - label else chosen[question].orEmpty() + label } else setOf(label))
+                }
+                Row(
+                    Modifier.fillMaxWidth().selectable(selected, role = if (multiple) Role.Checkbox else Role.RadioButton, onClick = toggle).padding(vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (multiple) Checkbox(selected, null, Modifier.size(20.dp)) else RadioButton(selected, null, Modifier.size(20.dp))
+                    Column {
+                        Text(label, style = MaterialTheme.typography.bodyMedium, color = palette.text)
+                        option.text("description")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted) }
+                    }
                 }
             }
         }
-        OutlinedTextField(typed[question].orEmpty(), { typed = typed + (question to it) }, Modifier.fillMaxWidth(), label = { Text("其他回答") }, singleLine = true)
+        OutlinedTextField(
+            typed[question].orEmpty(), { typed = typed + (question to it) }, Modifier.fillMaxWidth(),
+            placeholder = { Text("其他", color = palette.muted) }, singleLine = true, textStyle = MaterialTheme.typography.bodyMedium,
+        )
     }
     val names = questions.mapNotNull { it.text("question") }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-        OutlinedButton(onClick = { onAnswer(buildJsonObject { put("allow", false); put("reason", "") }) }) { Text("不回答") }
-        Button(
-            enabled = names.all { answer(it).isNotEmpty() },
-            onClick = {
-                onAnswer(buildJsonObject {
-                    put("allow", true); put("useSuggestedPermissions", false)
-                    put("answers", buildJsonObject { names.forEach { put(it, answer(it)) } })
-                })
-            },
-        ) { Text("提交") }
+    Actions("跳过", "提交", enabled = names.all { answer(it).isNotEmpty() }, onRefuse = { onAnswer(Refusal) }) {
+        onAnswer(buildJsonObject {
+            put("allow", true); put("useSuggestedPermissions", false)
+            put("answers", buildJsonObject { names.forEach { put(it, answer(it)) } })
+        })
     }
 }
 
+/** A form from an MCP server. It can be turned down here; filling it in takes the desktop app. */
 @Composable
 private fun Elicitation(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit) {
     val request = permission.request as? JsonObject
-    Text(request?.text("title") ?: "需要你的输入", style = MaterialTheme.typography.titleSmall)
-    request?.text("serverName")?.let { Text("来自 MCP 服务 $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-    request?.text("message")?.let { Text(it) }
-    Text("手机端暂不支持填写这类表单，可以拒绝，或在电脑上的 Claude Mirror 里填写。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-        OutlinedButton(onClick = { onAnswer(buildJsonObject { put("interaction", buildJsonObject { put("action", "decline") }) }) }) { Text("拒绝") }
-    }
+    Text(request?.text("title") ?: request?.text("serverName") ?: "MCP", style = MaterialTheme.typography.titleSmall, color = palette.text)
+    request?.text("message")?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = palette.text) }
+    Text("请在电脑端填写", style = MaterialTheme.typography.bodySmall, color = palette.muted)
+    Actions("拒绝", null, onRefuse = { onAnswer(buildJsonObject { put("interaction", buildJsonObject { put("action", "decline") }) }) })
 }

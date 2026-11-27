@@ -37,6 +37,8 @@ data class HostConfig(
     val host: String,
     val port: Int = 22,
     val directory: String,
+    /** Other project directories on this server, besides [directory]. */
+    val projects: List<String> = emptyList(),
     val auth: AuthMethod = AuthMethod.Password,
     /** Fingerprint accepted on the first connection. A server presenting another key is refused. */
     val hostKey: String? = null,
@@ -53,7 +55,13 @@ data class ServerInfo(
     val nodeSupported: Boolean = true,
     val claude: String? = null,
     val persistenceWarning: String? = null,
+    val nodePath: String = "",
+    val agentPath: String = "",
 )
+
+/** A file on the server that goes with a message. */
+@Serializable
+data class Attachment(val name: String, val path: String, val size: Long = 0)
 
 @Serializable
 data class ChildTool(
@@ -82,6 +90,7 @@ data class Block(
     /** Set on a message inserted into a running reply until Claude has read it. */
     val pending: Boolean? = null,
     val cancelled: Boolean? = null,
+    val attachments: List<Attachment>? = null,
 )
 
 @Serializable
@@ -97,6 +106,7 @@ data class ChatMessage(
     val model: String? = null,
     val durationMs: Double? = null,
     val costUSD: Double? = null,
+    val attachments: List<Attachment>? = null,
 )
 
 @Serializable
@@ -109,6 +119,8 @@ data class PermissionRequest(
     val description: String? = null,
     /** For kind "elicitation": what an MCP server asks the user. */
     val request: JsonElement? = null,
+    /** Permission rules the server offers to save along with an approval. */
+    val suggestions: JsonElement? = null,
 )
 
 @Serializable
@@ -119,8 +131,17 @@ data class Preferences(
     val executionUser: String? = null,
 )
 
+/** A model the server's Claude Code offers, with the thinking efforts it accepts. */
 @Serializable
-data class QueuedMessage(val id: String, val text: String)
+data class RemoteModel(
+    val value: String,
+    val displayName: String? = null,
+    val description: String? = null,
+    val supportedEffortLevels: List<String>? = null,
+)
+
+@Serializable
+data class QueuedMessage(val id: String, val text: String, val attachments: List<Attachment> = emptyList())
 
 /** One reply being produced: the worker process [id] is answering [messageId]. */
 @Serializable
@@ -175,6 +196,14 @@ data class ChatSession(
     val queuePaused: Boolean = false,
     /** The queue was written for another machine; only the user's explicit go-ahead sends it. */
     val queueHeld: Boolean = false,
+    /** Claude Code's own transcript on the server, for a conversation that was not started here. */
+    val historyRef: String? = null,
+    /** Where the earlier part of that transcript continues, when there is more. */
+    val historyBefore: String? = null,
+    /** The last message that came from that transcript; what follows it was said here. */
+    val historyTail: String? = null,
+    /** Results of tools whose calls are in the earlier part, not loaded yet. */
+    val historyLoose: List<Block> = emptyList(),
 ) {
     val isBusy: Boolean get() = status in BUSY
 

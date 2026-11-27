@@ -1,5 +1,33 @@
 package claudemirror.app.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,44 +48,48 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.platform.LocalConfiguration
+import claudemirror.core.modelName
+import claudemirror.core.readableError
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.input.key.onPreInterceptKeyBeforeSoftKeyboard
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -74,17 +106,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Refresh
 import claudemirror.app.AppModel
+import claudemirror.app.Picked
+import claudemirror.core.ATTACHMENTS_ONLY
+import claudemirror.core.QueuedMessage
 import claudemirror.core.ChatSession
 import claudemirror.core.ConnectionState
 import kotlinx.serialization.json.JsonObject
 
-private val PermissionModes = listOf(
-    null to "默认：每次操作先询问",
-    "acceptEdits" to "自动接受文件修改",
-    "plan" to "计划模式：只读不改",
-    "bypassPermissions" to "Full Access：不再询问",
-)
+private val PermissionModes = listOf(null to "询问", "acceptEdits" to "自动编辑", "plan" to "计划", "bypassPermissions" to "Full Access")
+private val Efforts = mapOf("low" to "低", "medium" to "中", "high" to "高", "xhigh" to "极高", "max" to "最大")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,33 +137,27 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
     }
     val connections by model.connections.collectAsStateWithLifecycle()
     var draft by rememberSaveable(sessionId) { mutableStateOf("") }
-    var menu by remember { mutableStateOf(false) }
+    val picked by model.picked.collectAsStateWithLifecycle()
+    val files = picked[sessionId].orEmpty()
+    val online = connections[session.hostId] is ConnectionState.Connected
+    LaunchedEffect(sessionId, online) { if (online) model.refresh(sessionId) }
 
+    // A phone on its side with its keyboard up: the title gives its room to the conversation.
+    val screen = LocalConfiguration.current
+    val tight = screen.screenWidthDp > screen.screenHeightDp && with(LocalDensity.current) { screen.screenHeightDp.dp - WindowInsets.ime.getBottom(this).toDp() } < 300.dp
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (!tight) CenterAlignedTopAppBar(
                 title = {
-                    Column {
-                        Text(session.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        (session.statusLabel() ?: session.model)?.let {
-                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(session.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // The model is on the composer; only what the conversation is doing is worth a second line.
+                        session.statusLabel()?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
-                actions = {
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.Tune, "权限模式") }
-                    DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                        for ((mode, label) in PermissionModes) {
-                            DropdownMenuItem(
-                                text = { Text(label) },
-                                leadingIcon = { RadioButton(session.preferences.permissionMode == mode, null) },
-                                enabled = session.remoteTask == null,
-                                onClick = { menu = false; model.configure(sessionId, session.preferences.copy(permissionMode = mode)) },
-                            )
-                        }
-                    }
-                },
             )
         },
         snackbarHost = { Snackbar(snackbar) },
@@ -132,6 +166,8 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
             // What is left of a phone on its side, or under its keyboard: the composer takes one line.
             val compact = maxHeight < 320.dp
             val wide = maxWidth >= 600.dp
+            // Larger type needs the room a wider window has.
+            val narrow = maxWidth < 380.dp * LocalDensity.current.fontScale
             val queueRoom = minOf(maxHeight / 4, 144.dp)
             Column(Modifier.fillMaxSize()) {
                 if (session.status == "detached" || session.transportError != null) {
@@ -139,21 +175,29 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
                     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                session.transportError ?: (connections[session.hostId] as? ConnectionState.Failed)?.error?.message ?: "连接已断开，回复仍在服务器上进行",
+                                // Why a connection could not be made is worth reading; how an open one broke is not.
+                                (connections[session.hostId] as? ConnectionState.Failed)?.error?.message ?: "已断开",
                                 Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall,
                             )
-                            if (host != null) TextButton(onClick = { model.reconnect(host) }) { Text("重新连接") }
+                            if (host != null) TextButton(onClick = { model.reconnect(host) }) { Text("重连") }
                         }
                     }
                 }
                 // The composer keeps its place below, however short the window and however much waits above it.
                 Column(Modifier.weight(1f)) {
-                    Transcript(session, Modifier.weight(1f)) { permission, answer -> model.respond(sessionId, permission, answer) }
+                    Transcript(session, Modifier.weight(1f), onEarlier = { model.loadEarlier(sessionId) }) { permission, answer -> model.respond(sessionId, permission, answer) }
                     // Editing a queued message must not throw away what is already being written.
-                    Queue(session, model, queueRoom, onEdit = { item -> draft = if (draft.isBlank()) item else draft.trimEnd() + "\n" + item })
+                    Queue(session, model, queueRoom, onEdit = { item ->
+                        model.attach(sessionId, item.attachments).also { fits ->
+                            val words = item.text.takeUnless { it == ATTACHMENTS_ONLY && item.attachments.isNotEmpty() }
+                            if (fits && words != null) draft = if (draft.isBlank()) words else draft.trimEnd() + "\n" + words
+                        }
+                    })
                 }
+                // Under a keyboard there is no room left for the request's card, so its answer comes down here.
+                if (compact) session.permissions.firstOrNull()?.let { permission -> PermissionBar(permission) { answer -> model.respond(sessionId, permission.id, answer) } }
                 Composer(
-                    session, draft, compact, wide, onDraft = { draft = it },
+                    session, model, draft, files, compact, wide, narrow, onDraft = { draft = it },
                     onSend = { steer -> if (model.submit(sessionId, draft, steer)) draft = "" },
                     onStop = { model.stop(sessionId) },
                 )
@@ -163,7 +207,7 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
 }
 
 @Composable
-private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (permission: String, JsonObject) -> Unit) {
+private fun Transcript(session: ChatSession, modifier: Modifier, onEarlier: () -> Unit, onAnswer: (permission: String, JsonObject) -> Unit) {
     val list = rememberLazyListState()
     // One row per block, so a long reply only redraws the part that is still being written.
     val rows = remember(session.messages) {
@@ -174,9 +218,8 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
     }
     val last = session.messages.lastOrNull()
     if (rows.isEmpty() && session.permissions.isEmpty()) {
-        Box(modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-            Text("在 ${session.directory} 里开始对话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        // Nothing said yet: the page is Claude's mark and the composer.
+        Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Spark(Modifier.size(48.dp)) }
         return
     }
     // Whether the view keeps up with the reply. Only the reader's own scrolling changes it:
@@ -211,13 +254,18 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
     LaunchedEffect(asked) {
         if (asked != null) { following = true; list.scrollToItem(rows.size) }
     }
-    LazyColumn(modifier.fillMaxWidth().nestedScroll(reader), state = list) {
+    Column(modifier) {
+    // A conversation brought over from the server shows its latest part; the rest comes on request.
+    if (session.historyBefore != null && !list.canScrollBackward) {
+        TextButton(onClick = onEarlier, Modifier.align(Alignment.CenterHorizontally)) { Text("更早", color = palette.muted) }
+    }
+    LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(reader), state = list) {
         items(rows.size, key = { rows[it].first }) { index ->
             val (_, message, part) = rows[index]
             when (part) {
-                -1 -> UserBubble(message.text.orEmpty())
-                -2 -> Column(Modifier.padding(horizontal = 16.dp)) {
-                    message.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                -1 -> UserBubble(message.text.orEmpty(), message.attachments.orEmpty())
+                -2 -> Column(Modifier.padding(horizontal = 20.dp)) {
+                    readableError(message.error)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     if (message.interrupted == true) Text("已停止", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 }
                 else -> BlockView(message.blocks!![part])
@@ -226,8 +274,8 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
         item(key = "status") {
             // A pending request is shown by its own card.
             if (session.isBusy && session.status != "permission") {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (session.status != "detached") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (session.status != "detached") Spark(Modifier.size(20.dp), turning = true)
                     Text(
                         if (session.status == "working") last?.activity?.takeIf { it.isNotBlank() } ?: "Claude 正在回复…" else session.statusLabel().orEmpty(),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -240,96 +288,281 @@ private fun Transcript(session: ChatSession, modifier: Modifier, onAnswer: (perm
             PermissionCard(permission) { answer -> onAnswer(permission.id, answer) }
         }
     }
+    }
 }
 
-/** Messages waiting for the current reply to end. Each can go into the reply now, back to the editor, or away. */
+/** Messages waiting for the current reply to end. Each can go into the reply now, back to the editor (when its files fit there), or away. */
 @Composable
-private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (String) -> Unit) {
+private fun Queue(session: ChatSession, model: AppModel, room: Dp, onEdit: (QueuedMessage) -> Boolean) {
     if (session.queue.isEmpty()) return
-    HorizontalDivider()
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp), shape = MaterialTheme.shapes.large, color = palette.selection) {
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val waiting = (session.queuePaused || session.queueHeld) && session.remoteTask == null
             Text(
                 when {
-                    session.queueHeld -> "排队 ${session.queue.size} 条 · 服务器地址已更改，确认后才会发送"
-                    waiting -> "排队 ${session.queue.size} 条 · 已暂停"
-                    else -> "排队 ${session.queue.size} 条 · 回复结束后依次发送"
+                    session.queueHeld -> "排队 ${session.queue.size} · 服务器已更改"
+                    waiting -> "排队 ${session.queue.size} · 已暂停"
+                    else -> "排队 ${session.queue.size}"
                 },
                 Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (waiting) TextButton(onClick = { model.resumeQueue(session.id) }) { Text("继续发送") }
+            if (waiting) TextButton(onClick = { model.resumeQueue(session.id) }) { Text("继续") }
             TextButton(onClick = { model.clearQueue(session.id) }) { Text("清空") }
         }
         Column(Modifier.heightIn(max = room).verticalScroll(rememberScrollState())) {
             for (item in session.queue) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (item.attachments.isNotEmpty()) {
+                        Icon(Icons.Filled.AttachFile, "附件", Modifier.size(14.dp), tint = palette.muted)
+                        Text("${item.attachments.size} ", style = MaterialTheme.typography.labelMedium, color = palette.muted)
+                    }
                     Text(item.text, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                    if (session.remoteTask != null) IconButton(onClick = { model.steer(session.id, item.id) }) { Icon(Icons.Filled.Bolt, "立即发送：插入当前回复") }
-                    IconButton(onClick = { model.cancelQueued(session.id, item.id); onEdit(item.text) }) { Icon(Icons.Filled.Edit, "编辑") }
+                    if (session.remoteTask != null) IconButton(onClick = { model.steer(session.id, item.id) }) { Icon(Icons.Filled.Bolt, "插队") }
+                    IconButton(onClick = { if (onEdit(item)) model.cancelQueued(session.id, item.id) }) { Icon(Icons.Filled.Edit, "编辑") }
                     IconButton(onClick = { model.cancelQueued(session.id, item.id) }) { Icon(Icons.Filled.Close, "移除") }
                 }
             }
         }
     }
 }
+}
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun Composer(
-    session: ChatSession, draft: String, compact: Boolean, wide: Boolean,
+    session: ChatSession, model: AppModel, draft: String, files: List<Picked>, compact: Boolean, wide: Boolean, narrow: Boolean,
     onDraft: (String) -> Unit, onSend: (steer: Boolean) -> Unit, onStop: () -> Unit,
 ) {
     val replying = session.remoteTask != null
-    val ready = draft.isNotBlank()
+    // A file still on its way holds the message back; one that failed is sent again or taken off first.
+    val ready = (draft.isNotBlank() || files.isNotEmpty()) && files.all { it.file != null }
     val actions: @Composable () -> Unit = {
-        if (session.isBusy) {
-            FilledIconButton(
-                onClick = onStop, enabled = session.status != "stopping",
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
-            ) { Icon(Icons.Filled.Stop, "停止") }
-        }
-        if (replying) {
-            FilledTonalIconButton(onClick = { onSend(true) }, enabled = ready) { Icon(Icons.Filled.Bolt, "插队：让 Claude 在下一步读取") }
-            FilledIconButton(onClick = { onSend(false) }, enabled = ready) { Icon(Icons.AutoMirrored.Filled.Send, "排队：回复结束后发送") }
-        } else {
-            FilledIconButton(onClick = { onSend(false) }, enabled = ready) { Icon(Icons.AutoMirrored.Filled.Send, "发送") }
-        }
+        if (session.isBusy) Act(Icons.Filled.Stop, "停止", palette.text, palette.frame, enabled = session.status != "stopping", onClick = onStop)
+        if (replying) Act(Icons.Filled.Bolt, "插队", palette.selection, palette.accent, ready) { onSend(true) }
+        if (!session.isBusy || replying) Act(Icons.Filled.ArrowUpward, if (replying) "排队" else "发送", palette.accentFill, enabled = ready) { onSend(false) }
     }
-    // How full Claude's context window is, as last reported by the server.
-    val meter: @Composable (bar: Boolean) -> Unit = { bar ->
-        session.context?.let { context ->
-            if (bar) LinearProgressIndicator(
-                progress = { context.fraction }, modifier = Modifier.width(56.dp),
-                trackColor = MaterialTheme.colorScheme.surfaceVariant, gapSize = 0.dp, drawStopIndicator = {},
-            )
-            Text("上下文 ${context.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+    // One place for both layouts: what is picked while the window turns still arrives.
+    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { if (it.isNotEmpty()) model.attach(session.id, it) }
+    val documents = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) model.attach(session.id, it) }
+    val attach: @Composable () -> Unit = {
+        Attach(onPhotos = { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, onFiles = { documents.launch(arrayOf("*/*")) })
     }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = if (compact) 4.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val field: @Composable (Modifier) -> Unit = { modifier ->
+        BasicTextField(
+            draft, onDraft,
+            // Before the on-screen keyboard takes Esc to close itself.
+            modifier.onPreInterceptKeyBeforeSoftKeyboard { event ->
+                (event.type == KeyEventType.KeyDown && event.key == Key.Escape && session.isBusy).also { if (it) onStop() }
+            }.onPreviewKeyEvent { event ->
+                // Hardware keyboards only; on-screen keyboards insert the newline themselves.
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when {
+                    event.key == Key.Escape && session.isBusy -> { onStop(); true }
+                    event.key == Key.Enter && !event.isShiftPressed && ready -> { onSend(replying && (event.isCtrlPressed || event.isMetaPressed)); true }
+                    else -> false
+                }
+            },
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = palette.text),
+            cursorBrush = SolidColor(palette.accent),
+            maxLines = if (compact) 2 else 6,
+            decorationBox = { inner ->
+                Box(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                    if (draft.isEmpty()) Text(if (replying) "排队或插队" else "发消息", style = MaterialTheme.typography.bodyLarge, color = palette.muted, maxLines = 1)
+                    inner()
+                }
+            },
+        )
+    }
+    Surface(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = if (compact) 4.dp else 8.dp),
+        shape = MaterialTheme.shapes.extraLarge, color = palette.card, border = BorderStroke(1.dp, palette.line),
+        shadowElevation = if (palette.dark) 0.dp else 3.dp,
+    ) {
         // The field keeps its place in both layouts, so it keeps the keyboard when one turns into the other.
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                draft, onDraft,
-                Modifier.weight(1f).onPreviewKeyEvent { event ->
-                    // Hardware keyboards only; on-screen keyboards insert the newline themselves.
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when {
-                        event.key == Key.Escape && session.isBusy -> { onStop(); true }
-                        event.key == Key.Enter && !event.isShiftPressed && ready -> { onSend(replying && (event.isCtrlPressed || event.isMetaPressed)); true }
-                        else -> false
-                    }
-                },
-                placeholder = { Text(if (replying) "回复中：可以排队，或插入当前回复" else "给 Claude 发消息", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                maxLines = if (compact) 2 else 6,
-            )
-            if (compact) {
-                if (wide) meter(false)
+        Column(Modifier.padding(start = 10.dp, end = 8.dp, top = if (compact) 2.dp else 8.dp, bottom = if (compact) 2.dp else 6.dp)) {
+            if (files.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (file in files) PickedChip(file, onRetry = { model.retry(session.id, file.id) }, onRemove = { model.detach(session.id, file.id) })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (compact) attach()
+                field(Modifier.weight(1f))
+                if (compact) {
+                    if (wide) Meter(session)
+                    actions()
+                }
+            }
+            if (!compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                attach()
+                ModeChip(session, model)
+                Box(Modifier.weight(1f)) { ModelChip(session, model) }
+                Meter(session, label = !narrow)
+                Spacer(Modifier.width(4.dp))
                 actions()
             }
         }
-        if (!compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { meter(true) }
-            actions()
+    }
+}
+
+/** Photos come from the system's picker, which needs no permission; anything else from its file browser. */
+@Composable
+private fun Attach(onPhotos: () -> Unit, onFiles: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, Modifier.size(32.dp)) { Icon(Icons.Filled.Add, "附件", Modifier.size(20.dp), tint = palette.muted) }
+        DropdownMenu(open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("照片") }, leadingIcon = { Icon(Icons.Filled.Image, null) }, onClick = { open = false; onPhotos() })
+            DropdownMenuItem(text = { Text("文件") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null) }, onClick = { open = false; onFiles() })
+        }
+    }
+}
+
+@Composable
+private fun PickedChip(file: Picked, onRetry: () -> Unit, onRemove: () -> Unit) {
+    val failed = file.error != null
+    val tint = if (failed) palette.error else palette.text
+    Surface(
+        shape = MaterialTheme.shapes.medium, color = palette.selection, border = if (failed) BorderStroke(1.dp, palette.error) else null,
+        modifier = if (failed) Modifier.clip(MaterialTheme.shapes.medium).clickable(role = Role.Button, onClickLabel = "重试", onClick = onRetry) else Modifier,
+    ) {
+        Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            when {
+                failed -> Icon(Icons.Filled.Refresh, "重试", Modifier.size(16.dp), tint = tint)
+                file.file != null -> Icon(fileIcon(file.name), null, Modifier.size(16.dp), tint = palette.muted)
+                file.size > 0 -> CircularProgressIndicator({ file.sent.toFloat() / file.size }, Modifier.size(16.dp).semantics { contentDescription = "上传中" }, strokeWidth = 2.dp)
+                else -> CircularProgressIndicator(Modifier.size(16.dp).semantics { contentDescription = "上传中" }, strokeWidth = 2.dp)
+            }
+            Text(file.name, Modifier.widthIn(max = 140.dp), style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+            IconButton(onClick = onRemove, Modifier.size(28.dp)) { Icon(Icons.Filled.Close, "移除 ${file.name}", Modifier.size(14.dp), tint = palette.muted) }
+        }
+    }
+}
+
+@Composable
+private fun Act(icon: ImageVector, label: String, fill: Color, tint: Color = Color.White, enabled: Boolean = true, onClick: () -> Unit) {
+    FilledIconButton(
+        onClick, Modifier.size(34.dp), enabled,
+        // Unavailable is the same button, fainter: the composer keeps its one spot of colour.
+        colors = IconButtonDefaults.filledIconButtonColors(containerColor = fill, contentColor = tint, disabledContainerColor = fill.copy(alpha = 0.4f), disabledContentColor = tint.copy(alpha = 0.8f)),
+    ) { Icon(icon, label, Modifier.size(19.dp)) }
+}
+
+/** The mark Claude's apps show while it works: a burst of rays, turning when [turning]. */
+@Composable
+fun Spark(modifier: Modifier = Modifier, turning: Boolean = false) {
+    val tint = palette.accentFill
+    val angle = if (turning) rememberInfiniteTransition(label = "spark").animateFloat(0f, 360f, infiniteRepeatable(tween(2400, easing = LinearEasing)), label = "turn").value else 0f
+    Canvas(modifier.semantics { if (turning) contentDescription = "回复中" }) {
+        val reach = size.minDimension / 2
+        rotate(angle) {
+            repeat(8) { ray ->
+                rotate(ray * 45f) {
+                    // Rays of two lengths, so the burst reads as drawn by hand rather than as a spinner.
+                    drawLine(tint, center.copy(y = center.y - reach * 0.22f), center.copy(y = center.y - reach * if (ray % 2 == 0) 1f else 0.78f), reach * 0.2f, StrokeCap.Round)
+                }
+            }
+        }
+    }
+}
+
+/** How full Claude's context window is, as last reported by the server. */
+@Composable
+private fun Meter(session: ChatSession, label: Boolean = true) {
+    val context = session.context ?: return
+    val tint = if (context.fraction >= 0.9f) palette.error else if (context.fraction >= 0.75f) palette.warning else palette.muted
+    val track = palette.line
+    Row(
+        Modifier.semantics(mergeDescendants = true) { contentDescription = "上下文 ${context.label}" },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Canvas(Modifier.size(12.dp)) {
+            val stroke = Stroke(2.dp.toPx(), cap = StrokeCap.Round)
+            drawArc(track, 0f, 360f, false, style = stroke)
+            drawArc(tint, -90f, 360f * context.fraction, false, style = stroke)
+        }
+        if (label) Text(context.label, style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1)
+    }
+}
+
+@Composable
+private fun Chip(label: String, modifier: Modifier = Modifier, tint: Color = palette.muted, onClick: () -> Unit) {
+    Row(
+        modifier.clip(MaterialTheme.shapes.small).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 6.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Icon(Icons.Filled.ExpandMore, null, Modifier.size(14.dp), tint = tint)
+    }
+}
+
+@Composable
+private fun ModeChip(session: ChatSession, model: AppModel) {
+    var open by remember { mutableStateOf(false) }
+    val mode = session.preferences.permissionMode
+    Box {
+        Chip(PermissionModes.firstOrNull { it.first == mode }?.second ?: mode.orEmpty(), tint = if (mode == "bypassPermissions") palette.warning else palette.muted) { open = true }
+        DropdownMenu(open, onDismissRequest = { open = false }) {
+            for ((value, label) in PermissionModes) DropdownMenuItem(
+                text = { Text(label) },
+                trailingIcon = { if (value == mode) Icon(Icons.Filled.Check, null, Modifier.size(18.dp)) },
+                enabled = session.remoteTask == null,
+                onClick = { open = false; if (value != mode) model.configure(session.id, session.preferences.copy(permissionMode = value)) },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModelChip(session: ChatSession, model: AppModel) {
+    var open by remember { mutableStateOf(false) }
+    val offered by model.models.collectAsStateWithLifecycle()
+    val models = offered[session.hostId].orEmpty()
+    val chosen = session.preferences.selectedModel
+    val current = models.firstOrNull { it.value == chosen }
+    val effort = session.preferences.effort
+    val name = current?.displayName ?: (chosen ?: session.model)?.let(::modelName) ?: "模型"
+    Chip(if (effort != null && Efforts[effort] != null) "$name · ${Efforts[effort]}" else name) { open = true }
+    if (!open) return
+    var attempt by remember { mutableIntStateOf(0) }
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(attempt) { failed = false; failed = !model.fetchModels(session.id) }
+    val idle = session.remoteTask == null
+    // Opened whole: half open, the last row would sit under the gesture bar.
+    ModalBottomSheet(onDismissRequest = { open = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = palette.popup) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
+            if (models.isEmpty()) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                if (failed) TextButton(onClick = { attempt++ }) { Text("重试") } else CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+            }
+            for (item in models) {
+                val selected = item.value == chosen || (chosen == null && item.value == "default")
+                Row(
+                    Modifier.fillMaxWidth().selectable(selected, enabled = idle, role = Role.RadioButton) {
+                        // An effort the new model does not accept goes back to the model's own default.
+                        val keep = effort?.takeIf { it in item.supportedEffortLevels.orEmpty() }
+                        model.configure(session.id, session.preferences.copy(selectedModel = item.value.takeIf { it != "default" }, effort = keep))
+                    }.padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(item.displayName ?: item.value, style = MaterialTheme.typography.bodyLarge, color = if (idle) palette.text else palette.dim)
+                        item.description?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                    }
+                    if (selected) Icon(Icons.Filled.Check, null, Modifier.size(18.dp), tint = palette.accent)
+                }
+            }
+            val levels = (current ?: models.firstOrNull { it.value == "default" }.takeIf { chosen == null })?.supportedEffortLevels.orEmpty()
+            if (levels.isNotEmpty()) {
+                HorizontalDivider(Modifier.padding(vertical = 8.dp), color = palette.line)
+                Row(Modifier.padding(horizontal = 20.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("思考", style = MaterialTheme.typography.labelLarge, color = palette.muted)
+                    for (level in listOf<String?>(null) + levels) FilterChip(
+                        selected = effort == level, enabled = idle,
+                        onClick = { model.configure(session.id, session.preferences.copy(effort = level)) },
+                        label = { Text(if (level == null) "默认" else Efforts[level] ?: level) },
+                    )
+                }
+            }
         }
     }
 }

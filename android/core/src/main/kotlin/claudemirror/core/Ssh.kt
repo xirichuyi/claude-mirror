@@ -70,14 +70,17 @@ class SshLauncher(
 
     override fun start(host: HostConfig, command: String): RemoteProcess {
         val client = client(host)
-        val session = try { client.startSession() } catch (error: IOException) {
+        // A connection that went away since it was looked up is refused by the library with an IllegalStateException.
+        val session = try { client.startSession() } catch (error: Exception) {
+            if (error !is IOException && error !is IllegalStateException) throw error
             val stale = synchronized(clients) { if (clients[host.id] === client) clients.remove(host.id) else null }
             runCatching { stale?.close() }
-            throw RemoteException(error.message ?: "SSH 通道已断开", confirmed = false)
+            throw RemoteException("SSH 通道已断开", confirmed = false)
         }
-        val running = try { session.exec(command) } catch (error: IOException) {
+        val running = try { session.exec(command) } catch (error: Exception) {
             runCatching { session.close() }
-            throw RemoteException(error.message ?: "SSH 通道已断开", confirmed = false)
+            if (error !is IOException && error !is IllegalStateException) throw error
+            throw RemoteException("SSH 通道已断开", confirmed = false)
         }
         val errors = StringBuffer()
         thread(isDaemon = true, name = "ssh-stderr") {
@@ -109,7 +112,13 @@ class SshLauncher(
             try { client.connect(host.host, host.port) } catch (error: IOException) {
                 val seen = offered
                 if (seen != null && seen != host.hostKey) throw if (host.hostKey == null) UnknownHostKeyException(seen) else HostKeyChangedException(seen)
-                throw RemoteException("无法连接 ${host.host}:${host.port}：${error.message ?: error.javaClass.simpleName}", confirmed = false)
+                val why = when (error) {
+                    is java.net.UnknownHostException -> "找不到主机"
+                    is java.net.SocketTimeoutException -> "超时"
+                    is java.net.ConnectException -> "被拒绝"
+                    else -> null
+                }
+                throw RemoteException("无法连接 ${host.host}:${host.port}" + (why?.let { "：$it" } ?: ""), confirmed = false)
             }
             client.connection.keepAlive.keepAliveInterval = 15
             val secret = secret(host)
@@ -123,7 +132,7 @@ class SshLauncher(
             } catch (error: UserAuthException) {
                 throw RemoteException(if (host.auth == AuthMethod.Key) "服务器拒绝了这个私钥" else "用户名或密码不正确", confirmed = false)
             } catch (error: IOException) {
-                throw RemoteException("登录失败：${error.message ?: error.javaClass.simpleName}", confirmed = false)
+                throw RemoteException("登录失败", confirmed = false)
             }
             // Once logged in, quiet periods are normal; keep-alives notice a dead connection.
             client.socket.soTimeout = 0

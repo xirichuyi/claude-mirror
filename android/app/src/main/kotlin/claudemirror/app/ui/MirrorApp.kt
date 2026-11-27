@@ -1,43 +1,57 @@
 package claudemirror.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import claudemirror.app.AppModel
+import claudemirror.core.ConnectionState
 
 @Composable
 fun MirrorApp(model: AppModel) {
-    val dark = isSystemInDarkTheme()
-    val context = LocalContext.current
-    val colors = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
-    }
-    MaterialTheme(colorScheme = colors) {
+    MirrorTheme {
         val navigation = rememberNavController()
         val snackbar = remember { SnackbarHostState() }
-        LaunchedEffect(model) { model.notices.collect { snackbar.showSnackbar(it) } }
+        LaunchedEffect(model) { model.snackbar.collect { snackbar.showSnackbar(it) } }
         val trust by model.trust.collectAsStateWithLifecycle()
+
+        // Asked once, when the first reply starts: that is when being told about it matters.
+        val allow = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        val running by model.running.collectAsStateWithLifecycle()
+        val context = LocalContext.current
+        LaunchedEffect(running.isNotEmpty()) {
+            val refused = Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            if (running.isNotEmpty() && refused && model.askNotifications()) allow.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        val target by model.target.collectAsStateWithLifecycle()
+        LaunchedEffect(target) {
+            val session = model.sessions.value.firstOrNull { it.id == target }
+            model.target.value = null
+            if (session == null) return@LaunchedEffect
+            // The list of conversations, which otherwise connects, is passed over.
+            val state = model.connections.value[session.hostId]
+            if (state !is ConnectionState.Connected && state !is ConnectionState.Connecting) model.host(session.hostId)?.let(model::connect)
+            navigation.navigate("host/${session.hostId}") { popUpTo("hosts") }
+            navigation.navigate("chat/${session.id}")
+        }
 
         NavHost(navigation, startDestination = "hosts") {
             composable("hosts") {
@@ -47,7 +61,13 @@ fun MirrorApp(model: AppModel) {
                 HostEditScreen(model, entry.arguments?.getString("id").orEmpty(), onDone = { navigation.popBackStack() })
             }
             composable("host/{id}") { entry ->
-                SessionsScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() }, onOpen = { navigation.navigate("chat/$it") })
+                val id = entry.arguments?.getString("id").orEmpty()
+                SessionsScreen(model, id, snackbar, onBack = { navigation.popBackStack() }, onOpen = { navigation.navigate("chat/$it") }, onHistory = { navigation.navigate("history/$id") })
+            }
+            composable("history/{id}") { entry ->
+                // The chat takes the list's place, so Back from it returns to the conversations.
+                HistoryScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() },
+                    onOpen = { navigation.navigate("chat/$it") { popUpTo("history/{id}") { inclusive = true } } })
             }
             composable("chat/{id}") { entry ->
                 ChatScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() })
@@ -59,7 +79,7 @@ fun MirrorApp(model: AppModel) {
                 onDismissRequest = { model.trust.value = null },
                 title = { Text("确认服务器密钥") },
                 text = {
-                    Text("第一次连接 ${request.host.address}。请核对它的密钥指纹，一致再继续：\n\n${request.fingerprint}\n\n在服务器上运行 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub 可以看到同样的指纹。", fontFamily = FontFamily.Default)
+                    Text("${request.host.address}\n\n${request.fingerprint}\n\ncat /etc/ssh/ssh_host_*_key.pub | ssh-keygen -lf -", fontFamily = FontFamily.Default)
                 },
                 confirmButton = { TextButton(onClick = { model.acceptKey(request) }) { Text("指纹一致，连接") } },
                 dismissButton = { TextButton(onClick = { model.trust.value = null }) { Text("取消") } },

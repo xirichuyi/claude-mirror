@@ -30,3 +30,4 @@ windows/dist/
 
 # TypeScript build output
 /build/
+/node_modules

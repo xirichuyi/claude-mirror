@@ -18,6 +18,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
@@ -89,11 +90,156 @@ class Engine(
 
     // Conversations
 
-    fun create(host: HostConfig): ChatSession {
-        val session = ChatSession(id = newId(), hostId = host.id, directory = host.directory, createdAt = now(), updatedAt = now())
+    fun create(host: HostConfig, directory: String = host.directory): ChatSession =
+        added(ChatSession(id = newId(), hostId = host.id, directory = directory, createdAt = now(), updatedAt = now()))
+
+    private fun added(session: ChatSession): ChatSession {
         state.value = listOf(session) + state.value
         update(session.id) { it }
         return session
+    }
+
+    fun rename(id: String, name: String) {
+        val value = name.trim().take(80)
+        if (value.isNotEmpty()) update(id) { it.copy(name = value) }
+    }
+
+    // What is already on the server
+
+    /** The folders inside [path] on the server. */
+    suspend fun folders(host: HostConfig, path: String): RemoteListing {
+        val result = agents.call(host, "file", buildJsonObject { put("operation", "list"); put("path", path) })
+        val listing = MirrorJson.decodeFromJsonElement<RemoteListing>(result)
+        return listing.copy(entries = listing.entries.filter { it.directory })
+    }
+
+    /** The conversations Claude Code keeps on the server, newest first. */
+    suspend fun history(host: HostConfig): List<RemoteConversation> {
+        val found = ArrayList<RemoteConversation>()
+        var offset: JsonElement = JsonPrimitive(0)
+        // 200 a page; beyond a couple of thousand nobody scrolls on a phone.
+        repeat(10) {
+            val page = agents.call(host, "history", buildJsonObject { put("operation", "list"); put("offset", offset) }).obj() ?: return found
+            page.list("sessions").mapNotNullTo(found) { runCatching { MirrorJson.decodeFromJsonElement<RemoteConversation>(it) }.getOrNull() }
+            offset = page["nextOffset"]?.takeIf { it.string() != null } ?: return found
+        }
+        return found
+    }
+
+    private suspend fun transcript(host: HostConfig, reference: String, before: String? = null): JsonObject =
+        agents.call(host, "history", buildJsonObject {
+            put("operation", "messages"); put("reference", reference)
+            if (before != null) put("before", before)
+        }).obj() ?: throw RemoteException("服务器没有返回对话")
+
+    /** Opens a conversation from the server here, so it can be continued from the phone. */
+    suspend fun adopt(host: HostConfig, item: RemoteConversation): ChatSession {
+        fun known() = state.value.firstOrNull { it.hostId == host.id && it.remoteSessionId == item.sessionId }
+        known()?.let { return it }
+        val reply = transcript(host, item.reference)
+        val page = historyPage(reply.list("records"))
+        val directory = reply["directory"].string()?.takeIf { it.startsWith("/") } ?: throw RemoteException("这个对话没有记录工作目录")
+        known()?.let { return it }
+        val time = if (item.updatedAt > 0) item.updatedAt.toLong() else now()
+        return added(ChatSession(
+            id = newId(), hostId = host.id, name = historyTitle(item.name), directory = directory, createdAt = time, updatedAt = time,
+            messages = page.messages, remoteSessionId = item.sessionId, historyRef = item.reference,
+            historyBefore = reply["before"].string(), historyTail = page.messages.lastOrNull()?.id, historyLoose = page.loose,
+        ))
+    }
+
+    /** Loads the part of an adopted conversation that comes before what is shown. */
+    suspend fun loadEarlier(id: String) {
+        val session = require(id)
+        val reference = session.historyRef ?: return
+        val before = session.historyBefore ?: return
+        val reply = transcript(hostOf(session), reference, before)
+        val page = historyPage(reply.list("records"))
+        update(id) { current ->
+            if (current.historyBefore != before) return@update current
+            val shown = current.messages.mapTo(HashSet()) { it.id }
+            val called = page.messages.flatMapTo(HashSet()) { message -> message.blocks.orEmpty().filter { it.type == "tool" }.map { it.id } }
+            current.copy(
+                messages = page.messages.answered(current.historyLoose).filter { it.id !in shown } + current.messages,
+                // A result whose call is further back still is kept for the page that has it.
+                historyBefore = reply["before"].string(), historyLoose = page.loose + current.historyLoose.filter { it.id !in called },
+            )
+        }
+    }
+
+    /**
+     * Picks up what was said elsewhere (in a terminal, on the Mac) since an adopted conversation
+     * was last shown. Left alone while a reply is running here: then this app is the one writing.
+     */
+    suspend fun refresh(id: String) {
+        val original = require(id)
+        val reference = original.historyRef ?: return
+        if (original.remoteTask != null) return
+        val shown = original.messages.mapTo(HashSet()) { it.id }
+        // Back from the end until something shown turns up, so that what is new joins on without a gap.
+        var records = emptyList<JsonElement>()
+        var before: String? = null
+        val asked = HashSet<String?>()
+        while (asked.add(before) && asked.size <= 20) {
+            val reply = transcript(hostOf(original), reference, before)
+            val batch = reply.list("records")
+            records = batch + records
+            before = reply["before"].string()
+            if (before == null || batch.any { it.obj()?.get("uuid").string() in shown }) break
+        }
+        val page = historyPage(records)
+        val incoming = page.messages
+        if (incoming.isEmpty()) return
+
+        // What was said here follows the transcript's last message and carries other IDs than
+        // Claude gives it. Until the transcript has it, the transcript is behind and is not shown.
+        val said = original.messages.drop(original.messages.indexOfLast { it.id == original.historyTail } + 1)
+        // Only what the transcript gained since counts: an older prompt with the same words proves nothing.
+        val news = incoming.drop(incoming.indexOfLast { it.id == original.historyTail } + 1)
+        // Each of the transcript's prompts stands for one said here, however many share its words.
+        val arrived = HashMap<String?, Int>()
+        for (message in news) if (message.role == "user") arrived.merge(message.text, 1, Int::plus)
+        fun reached(prompt: ChatMessage) = (arrived[prompt.text] ?: 0) > 0 && arrived.merge(prompt.text, -1, Int::plus) != null
+        fun ChatMessage.failed() = role == "assistant" && error != null && blocks.isNullOrEmpty()
+        val (doubtful, sure) = said.withIndex().filter { it.value.role == "user" }.partition { said.getOrNull(it.index + 1)?.failed() == true }
+        // A prompt that was answered is in the transcript, or the transcript is behind and is not shown.
+        if (sure.any { !reached(it.value) }) return
+        // A prompt whose reply failed before it began, and that the transcript does not have,
+        // never reached Claude: it is not waited for, and it stays, at the end.
+        val unsent = doubtful.filter { !reached(it.value) }.flatMap { listOf(it.value, said[it.index + 1]) }
+        val first = incoming.indexOfFirst { it.id in shown }
+        // Nothing in common: the latest part replaces what is shown.
+        val kept = if (first < 0) emptyList() else original.messages.take(original.messages.indexOfFirst { it.id == incoming[first].id })
+        val merged = kept.answered(page.loose) + incoming.drop(maxOf(first, 0)) + unsent
+        if (merged == original.messages) return
+
+        val owner = original.remoteOwner
+        if (owner != null) {
+            // The worker kept alive for this conversation remembers only what was said here. While
+            // nothing else was said it stays; once something was, the next prompt needs a worker
+            // that reads the transcript again.
+            // Counted, not looked up: the same words typed elsewhere are one prompt more than was said here.
+            val here = HashMap<String?, Int>()
+            for (message in said) {
+                if (message.role == "user") here.merge(message.text, 1, Int::plus)
+                else for (block in message.blocks.orEmpty()) if (block.type == "user") here.merge(block.text, 1, Int::plus)
+            }
+            if (news.none { it.role == "user" && here.merge(it.text, -1, Int::plus)!! < 0 }) return
+            // Let go of the worker before telling it to close: a prompt sent in the meantime
+            // starts a new worker instead of reaching one that is on its way out.
+            val free = session(id)?.let { it.remoteTask == null && it.messages == original.messages && it.remoteOwner?.id == owner.id } == true
+            if (!free) return
+            update(id) { it.copy(remoteOwner = null) }
+            watchers.remove(id)?.kill()
+            // If this fails the worker lingers until it tires of waiting; nothing reaches it any more.
+            try { command(original, "close") } catch (error: CancellationException) { throw error } catch (_: Exception) {}
+        }
+        update(id) { current ->
+            val moved = current.remoteTask != null || current.messages != original.messages || (current.remoteOwner != null && current.remoteOwner.id != owner?.id)
+            if (moved) current
+            else if (first < 0) current.copy(messages = merged, remoteOwner = null, historyBefore = before, historyLoose = page.loose, historyTail = incoming.last().id, updatedAt = now())
+            else current.copy(messages = merged, remoteOwner = null, historyTail = incoming.last().id, updatedAt = now())
+        }
     }
 
     fun remove(id: String) {
@@ -116,22 +262,43 @@ class Engine(
         update(id) { it.copy(preferences = preferences, remoteOwner = null) }
     }
 
+    private val catalogue = MutableStateFlow<Map<String, List<RemoteModel>>>(emptyMap())
+    /** The models each server offers, by host ID, once known. */
+    val models: StateFlow<Map<String, List<RemoteModel>>> = catalogue
+
+    private fun offered(host: String, capabilities: JsonElement?) {
+        val list = capabilities.obj()?.get("models")?.let { runCatching { MirrorJson.decodeFromJsonElement<List<RemoteModel>>(it) }.getOrNull() }
+        if (!list.isNullOrEmpty()) catalogue.value = catalogue.value + (host to list)
+    }
+
+    /** Asks the server which models it offers, unless a reply has already told. */
+    suspend fun loadModels(id: String) {
+        val session = require(id)
+        val host = hostOf(session)
+        if (host.id in catalogue.value) return
+        ensureInstalled(host)
+        offered(host.id, agents.call(host, "task", buildJsonObject {
+            put("operation", "inspect"); put("digest", agents.resources.bundleDigest); put("action", "catalogue")
+            put("directory", session.directory); put("preferences", MirrorJson.encodeToJsonElement(session.preferences))
+        }))
+        if (host.id !in catalogue.value) throw RemoteException("服务器没有返回模型")
+    }
+
     // Sending and the queue
 
     /** Sends now when Claude is idle. During a reply the message waits in the queue, or with [steer] goes into the running reply. */
-    fun submit(id: String, text: String, steer: Boolean = false) {
-        if (require(id).remoteTask == null) return send(id, text)
-        val item = enqueue(id, text)
+    fun submit(id: String, text: String, attachments: List<Attachment> = emptyList(), steer: Boolean = false) {
+        if (require(id).remoteTask == null) return send(id, text, attachments)
+        val item = enqueue(id, text, attachments)
         if (steer) scope.launch { runCatching { steer(id, item.id) }.onFailure { onError?.invoke(it.message ?: "插队失败") } }
     }
 
     var onError: ((String) -> Unit)? = null
 
-    private fun enqueue(id: String, text: String): QueuedMessage {
-        val value = text.trim()
-        if (value.isEmpty() || text.length > MAX_LENGTH) throw RemoteException("消息不能为空或超过 20 万字符")
+    private fun enqueue(id: String, text: String, attachments: List<Attachment>): QueuedMessage {
+        val value = said(text, attachments)
         if (require(id).queue.size >= 20) throw RemoteException("最多排队 20 条消息")
-        val item = QueuedMessage(newId(), value)
+        val item = QueuedMessage(newId(), value, attachments)
         update(id) { it.copy(queue = it.queue + item) }
         return item
     }
@@ -164,7 +331,7 @@ class Engine(
         val item = session.queue.firstOrNull() ?: return
         if (session.remoteTask != null || session.queuePaused || session.queueHeld) return
         update(id) { it.copy(queue = it.queue.drop(1)) }
-        try { send(id, item.text) } catch (error: RemoteException) {
+        try { send(id, item.text, item.attachments) } catch (error: RemoteException) {
             update(id) { it.copy(queue = listOf(item) + it.queue, queuePaused = true) }
             onError?.invoke(error.message.orEmpty())
         }
@@ -180,7 +347,10 @@ class Engine(
         if (session.remoteTask == null) return resumeQueue(id)
         update(id) { it.withQueue(it.queue.filter { other -> other.id != item }) }
         try {
-            command(session, "steer", commandId = queued.id) { put("id", queued.id); put("text", queued.text); put("prompt", queued.text) }
+            command(session, "steer", commandId = queued.id) { 
+                put("id", queued.id); put("text", queued.text); put("prompt", prompt(queued.text, queued.attachments))
+                if (queued.attachments.isNotEmpty()) put("attachments", MirrorJson.encodeToJsonElement(queued.attachments))
+            }
         } catch (error: RemoteException) {
             // The acknowledgement can be lost after the worker took the message; the transcript then shows it.
             val delivered = session(id)?.messages?.any { message -> message.blocks.orEmpty().any { it.type == "user" && it.id == queued.id && it.cancelled != true } } == true
@@ -191,21 +361,27 @@ class Engine(
         }
     }
 
-    fun send(id: String, text: String) {
+    /** What the message reads as: one that is only files still needs words for Claude. */
+    private fun said(text: String, attachments: List<Attachment>): String {
+        val value = text.trim()
+        if ((value.isEmpty() && attachments.isEmpty()) || text.length > MAX_LENGTH) throw RemoteException("消息不能为空或超过 20 万字符")
+        return value.ifEmpty { ATTACHMENTS_ONLY }
+    }
+
+    fun send(id: String, text: String, attachments: List<Attachment> = emptyList()) {
         val session = require(id)
         if (session.remoteTask != null) throw RemoteException("Claude 正在回复，请先停止或等待完成")
-        val value = text.trim()
-        if (value.isEmpty() || text.length > MAX_LENGTH) throw RemoteException("消息不能为空或超过 20 万字符")
+        val value = said(text, attachments)
         hostOf(session)
         val reply = ChatMessage(id = newId(), role = "assistant", blocks = emptyList(), createdAt = now().toDouble())
         val owner = session.remoteOwner
         update(id) {
             it.copy(
                 name = if (it.messages.isEmpty() && it.name == ChatSession.NEW_NAME) value.take(28) else it.name,
-                messages = it.messages + ChatMessage(id = newId(), role = "user", text = value, createdAt = now().toDouble()) + reply,
+                messages = it.messages + ChatMessage(id = newId(), role = "user", text = value, createdAt = now().toDouble(), attachments = attachments.ifEmpty { null }) + reply,
                 status = "connecting", updatedAt = now(), queuePaused = false, transportError = null,
                 // Stored before anything is sent: after an unanswered request the same task ID is used again.
-                remoteTask = RemoteTask(id = owner?.id ?: newId(), prompt = value, messageId = reply.id, continuation = owner != null),
+                remoteTask = RemoteTask(id = owner?.id ?: newId(), prompt = prompt(value, attachments), messageId = reply.id, continuation = owner != null),
             )
         }
         dispatch { if (owner != null) continueTurn(id) else attach(id) }
@@ -387,6 +563,7 @@ class Engine(
         if (turnEnded) message = if (done && status == "stopped") message.cutShort() else message.settled()
         // Until the worker confirms the stop, states it wrote before hearing of it still say "working".
         if (!turnEnded && id in stopRequests && status != "stopping") status = "stopping"
+        if (session.hostId !in catalogue.value) offered(session.hostId, remote["capabilities"])
         val permissions = remote["permissions"]?.let { runCatching { MirrorJson.decodeFromJsonElement<List<PermissionRequest>>(it) }.getOrNull() }.orEmpty()
         val delivered = message.blocks.orEmpty().filter { it.type == "user" }.mapNotNull { it.id }.toSet()
         update(id, immediate = turnEnded || permissions.isNotEmpty()) {
@@ -452,6 +629,8 @@ class Engine(
      */
     fun endpointChanged(host: String) {
         installs.remove(host)
+        // What the old machine offered says nothing about the new one.
+        catalogue.value = catalogue.value - host
         for (session in state.value.filter { it.hostId == host }) {
             watchers.remove(session.id)?.kill()
             val reply = session.remoteTask?.messageId
@@ -460,6 +639,8 @@ class Engine(
                     messages = it.messages.map { message -> if (message.id == reply) message.cutShort() else message },
                     status = if (it.isBusy) "stopped" else it.status, permissions = emptyList(), transportError = null,
                     remoteTask = null, remoteOwner = null, remoteSessionId = null,
+                    // Claude's transcript is on the old machine too.
+                    historyRef = null, historyBefore = null, historyTail = null, historyLoose = emptyList(),
                     queueHeld = it.queue.isNotEmpty(),
                 )
             }
@@ -519,7 +700,10 @@ class Engine(
     suspend fun respond(id: String, permission: String, answer: JsonObject) {
         val session = require(id)
         if (session.permissions.none { it.id == permission }) throw RemoteException("该请求已结束")
+        val mode = suggestedMode(session.permissions.first { it.id == permission }.suggestions).takeIf { answer["useSuggestedPermissions"].truthy }
         command(session, "respond") { put("permissionId", permission); put("answer", answer) }
+        // The server has changed the mode with the rules it saved; the conversation's own setting follows.
+        if (mode != null) update(id) { it.copy(preferences = it.preferences.copy(permissionMode = mode.takeIf { name -> name != "default" })) }
     }
 
     private companion object {

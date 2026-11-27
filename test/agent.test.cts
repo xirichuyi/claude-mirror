@@ -212,3 +212,69 @@ test('search and quick-open find files; git status reports changes', async () =>
     await assert.rejects(call({ operation: 'remove', path: f.home, recursive: true }), /不能删除/);
   } finally { f.close(); }
 });
+
+function png(width, height, kind, pixel, extra: [string, Buffer][] = [], bloat = 0) {
+  const { deflateSync, crc32 } = require('node:zlib');
+  const channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[kind];
+  const lines = Buffer.alloc((width * channels + 1) * height + bloat);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) lines.set(pixel(x, y), y * (width * channels + 1) + 1 + x * channels);
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]), head = Buffer.alloc(4), tail = Buffer.alloc(4);
+    head.writeUInt32BE(data.length); tail.writeUInt32BE(crc32(body));
+    return Buffer.concat([head, body, tail]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = kind;
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header), ...extra.map(([type, data]) => chunk(type, data)), chunk('IDAT', deflateSync(lines)), chunk('IEND', Buffer.alloc(0))]);
+}
+function pixels(data) {
+  const { inflateSync } = require('node:zlib');
+  const width = data.readUInt32BE(16), height = data.readUInt32BE(20);
+  const raw = inflateSync(data.subarray(41, 41 + data.readUInt32BE(33)));
+  return { width, height, kind: data[25], at: (x, y) => [...raw.subarray(y * (width * 3 + 1) + 1 + x * 3, y * (width * 3 + 1) + 4 + x * 3)] };
+}
+
+test('a PNG is shrunk without any image tool on the server', () => {
+  const { shrinkPNG } = require('../src/remote-agent.cjs');
+  // Left half opaque red, right half fully transparent: the right shows the pale preview background.
+  const small = pixels(shrinkPNG(png(400, 200, 6, x => x < 200 ? [255, 0, 0, 255] : [0, 0, 255, 0]), 100));
+  assert.deepEqual([small.width, small.height, small.kind], [100, 50, 2]);
+  assert.deepEqual(small.at(10, 10), [255, 0, 0]);
+  assert.deepEqual(small.at(90, 40), [250, 246, 242]);
+  // Each output pixel is the average of the block it covers.
+  const grey = pixels(shrinkPNG(png(4, 4, 0, (x, y) => [(x + y) % 2 ? 200 : 100]), 2));
+  assert.deepEqual([grey.width, grey.at(0, 0), grey.at(1, 1)], [2, [150, 150, 150], [150, 150, 150]]);
+  // An image already small enough keeps its size.
+  assert.equal(pixels(shrinkPNG(png(30, 20, 2, () => [1, 2, 3]), 1024)).width, 30);
+  assert.throws(() => shrinkPNG(Buffer.from('89504e470d0a1a0a', 'hex'), 100), /PNG/);
+  // Without an alpha channel, the one colour tRNS names is transparent.
+  const keyed = pixels(shrinkPNG(png(2, 1, 2, x => x ? [9, 8, 7] : [0, 255, 0], [['tRNS', Buffer.from([0, 0, 0, 255, 0, 0])]]), 2));
+  assert.deepEqual([keyed.at(0, 0), keyed.at(1, 0)], [[250, 246, 242], [9, 8, 7]]);
+  const greyKeyed = pixels(shrinkPNG(png(2, 1, 0, x => [x ? 40 : 200], [['tRNS', Buffer.from([0, 200])]]), 2));
+  assert.deepEqual([greyKeyed.at(0, 0), greyKeyed.at(1, 0)], [[250, 246, 242], [40, 40, 40]]);
+  // Pixel data that inflates to more than the header declares is refused, not held in memory.
+  assert.throws(() => shrinkPNG(png(2, 2, 2, () => [1, 2, 3], [], 64 * 1024 * 1024), 2), { code: 'ERR_BUFFER_TOO_LARGE' });
+});
+
+test('a large image previews as a thumbnail when the server has no image tool', async () => {
+  const { fileOperations } = require('../src/remote-agent.cjs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-thumb-'));
+  const saved = process.env.PATH;
+  try {
+    let seed = 1;
+    const noise = () => { seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff; return seed >> 16 & 255; };
+    const original = png(1600, 900, 2, () => [noise(), noise(), noise()]);
+    assert.ok(original.length > 256 * 1024);
+    const file = path.join(home, 'shot.png');
+    fs.writeFileSync(file, original);
+    process.env.PATH = home; // No python3, ImageMagick or ffmpeg here.
+    const preview = await fileOperations.preview({ path: file, thumbnail: true, inlineMedia: true });
+    assert.equal(preview.thumbnail, true); assert.equal(preview.mime, 'image/png'); assert.equal(preview.size, original.length);
+    const small = Buffer.from(preview.inlineData, 'base64');
+    assert.ok(small.length <= 400 * 1024 && small.length < original.length);
+    assert.ok(pixels(small).width <= 1024);
+    // Without the thumbnail request the original is still what gets downloaded.
+    const full = await fileOperations.preview({ path: file, inlineMedia: true });
+    assert.equal(full.thumbnail, undefined); assert.equal(full.inlineData, undefined); assert.equal(full.mime, 'image/png');
+  } finally { process.env.PATH = saved; fs.rmSync(home, { recursive: true, force: true }); }
+});

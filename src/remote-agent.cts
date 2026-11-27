@@ -67,16 +67,10 @@ function imageType(magic) {
   return null;
 }
 
-// Optional Pillow support. Never install packages or block the agent event loop.
-let thumbnailUnavailableUntil = 0;
-const thumbnailJobs = new Map();
-async function thumbnail(filename, version) {
-  if (Date.now() < thumbnailUnavailableUntil) return null;
-  const key = filename + ':' + version;
-  if (thumbnailJobs.has(key)) return thumbnailJobs.get(key);
-  if (thumbnailJobs.size >= 2) return null;
-  const job = new Promise(done => {
-    const script = `import sys, io, warnings
+// A small copy of an image, so a preview does not wait for megabytes of original. Made by whatever
+// the server already has: Pillow, ImageMagick or ffmpeg. A PNG needs none of them. Nothing is
+// installed, and the work is done in a child process so the agent keeps answering meanwhile.
+const PILLOW = `import sys, io, warnings
 warnings.simplefilter('error')
 from PIL import Image, ImageOps
 Image.MAX_IMAGE_PIXELS = 40000000
@@ -93,15 +87,121 @@ with Image.open(sys.argv[1]) as im:
  if output.tell() > 96 * 1024: raise ValueError('thumbnail too large')
  sys.stdout.buffer.write(output.getvalue())
 `;
-    execFile('python3', ['-c', script, filename], { encoding: 'buffer', timeout: 5000, maxBuffer: 512 * 1024 }, (error, output, stderr) => {
-      if (error) {
-        if (error.code === 'ENOENT' || String(stderr || '').includes('No module named')) thumbnailUnavailableUntil = Date.now() + 60000;
-        done(null);
-      } else done(output);
+const THUMBNAIL_LIMIT = 400 * 1024;
+const magick = (file, coder) => [coder + ':' + file, '-auto-orient', '-thumbnail', '1024x1024>', '-background', '#faf6f2', '-flatten', '-strip', '-quality', '75', 'jpg:-'];
+const thumbnailers = [
+  { name: 'pillow', command: 'python3', args: file => ['-c', PILLOW, file] },
+  { name: 'magick', command: 'magick', args: magick },
+  { name: 'convert', command: 'convert', args: magick },
+  { name: 'ffmpeg', command: 'ffmpeg', args: file => ['-v', 'error', '-i', file, '-frames:v', '1',
+    '-vf', "scale='min(1024,iw)':'min(1024,ih)':force_original_aspect_ratio=decrease", '-q:v', '6', '-f', 'image2pipe', '-c:v', 'mjpeg', 'pipe:1'] },
+  { name: 'node', command: process.execPath, args: file => [__filename, 'thumbnail', file], only: 'image/png' },
+];
+const thumbnailMissing = new Map();
+const thumbnailJobs = new Map();
+async function thumbnail(filename, version, mime) {
+  const key = filename + ':' + version;
+  if (thumbnailJobs.has(key)) return thumbnailJobs.get(key);
+  while (thumbnailJobs.size >= 3) await Promise.race(thumbnailJobs.values());
+  if (thumbnailJobs.has(key)) return thumbnailJobs.get(key);
+  const attempt = tool => new Promise<Buffer | null>(done => {
+    execFile(tool.command, tool.args(filename, mime.slice(6)), { encoding: 'buffer', timeout: 8000, maxBuffer: 2 * MEGABYTE }, (error, output, stderr) => {
+      // A tool this server does not have is not asked again for a while.
+      if (error && ((error as NodeJS.ErrnoException).code === 'ENOENT' || String(stderr || '').includes('No module named'))) thumbnailMissing.set(tool.name, Date.now() + 600000);
+      done(error || !output.length || output.length > THUMBNAIL_LIMIT ? null : output);
     });
-  }).finally(() => thumbnailJobs.delete(key));
+  });
+  const job = (async () => {
+    for (const tool of thumbnailers) {
+      if ((tool.only && tool.only !== mime) || Date.now() < (thumbnailMissing.get(tool.name) || 0)) continue;
+      const data = await attempt(tool);
+      if (data) return { data, mime: imageType(data.subarray(0, 16)) || 'image/jpeg' };
+    }
+    return null;
+  })().finally(() => thumbnailJobs.delete(key));
   thumbnailJobs.set(key, job);
   return job;
+}
+
+const CRC = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+function pngChunk(type, data) {
+  const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+  let crc = 0xffffffff;
+  for (const byte of body) crc = CRC[(crc ^ byte) & 255] ^ (crc >>> 8);
+  const head = Buffer.alloc(4), tail = Buffer.alloc(4);
+  head.writeUInt32BE(data.length); tail.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+  return Buffer.concat([head, body, tail]);
+}
+
+// Shrinks an 8-bit, non-interlaced PNG to fit `edge` pixels, on the same pale background as the other tools.
+function shrinkPNG(source: Buffer, edge: number) {
+  let offset = 8, header = null, palette = null, alpha = null;
+  const parts = [];
+  while (offset + 12 <= source.length) {
+    const length = source.readUInt32BE(offset), type = source.toString('latin1', offset + 4, offset + 8);
+    const data = source.subarray(offset + 8, offset + 8 + length);
+    if (type === 'IHDR') header = data; else if (type === 'PLTE') palette = data; else if (type === 'tRNS') alpha = data; else if (type === 'IDAT') parts.push(data);
+    else if (type === 'IEND') break;
+    offset += 12 + length;
+  }
+  if (!header) throw new Error('not a PNG');
+  const width = header.readUInt32BE(0), height = header.readUInt32BE(4), kind = header[9];
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[kind];
+  if (header[8] !== 8 || header[12] !== 0 || !channels || !width || !height || width * height > 40000000) throw new Error('unsupported PNG');
+  // The size the header declares is all the pixel data may inflate to, whatever the stream holds.
+  const stride = width * channels, raw = zlib.inflateSync(Buffer.concat(parts), { maxOutputLength: (stride + 1) * height });
+  if (raw.length < (stride + 1) * height) throw new Error('truncated PNG');
+  // Without an alpha channel, one colour named in tRNS is the transparent one.
+  const clearGrey = kind === 0 && alpha?.length >= 2 ? alpha.readUInt16BE(0) : -1;
+  const clearColour = kind === 2 && alpha?.length >= 6 ? [alpha.readUInt16BE(0), alpha.readUInt16BE(2), alpha.readUInt16BE(4)] : null;
+  const scale = Math.max(1, Math.max(width, height) / edge);
+  const columns = Math.max(1, Math.round(width / scale)), rows = Math.max(1, Math.round(height / scale));
+  const column = Uint32Array.from({ length: width }, (_, x) => Math.min(columns - 1, Math.floor(x * columns / width)) * 3);
+  const sums = new Float64Array(columns * rows * 3), counts = new Uint32Array(columns * rows);
+  let previous = new Uint8Array(stride), current = new Uint8Array(stride);
+  for (let y = 0; y < height; y++) {
+    const start = y * (stride + 1), filter = raw[start];
+    for (let i = 0; i < stride; i++) {
+      const left = i >= channels ? current[i - channels] : 0, up = previous[i], corner = i >= channels ? previous[i - channels] : 0;
+      let predicted = 0;
+      if (filter === 1) predicted = left; else if (filter === 2) predicted = up; else if (filter === 3) predicted = (left + up) >> 1;
+      else if (filter === 4) { const p = left + up - corner, a = Math.abs(p - left), b = Math.abs(p - up), c = Math.abs(p - corner); predicted = a <= b && a <= c ? left : b <= c ? up : corner; }
+      current[i] = (raw[start + 1 + i] + predicted) & 255;
+    }
+    const row = Math.min(rows - 1, Math.floor(y * rows / height)) * columns;
+    for (let x = 0; x < width; x++) {
+      const i = x * channels;
+      let r, g, b, a = 255;
+      if (kind === 3) { const index = current[i]; r = palette[index * 3]; g = palette[index * 3 + 1]; b = palette[index * 3 + 2]; a = alpha && index < alpha.length ? alpha[index] : 255; }
+      else if (kind === 0 || kind === 4) { r = g = b = current[i]; if (kind === 4) a = current[i + 1]; else if (r === clearGrey) a = 0; }
+      else {
+        r = current[i]; g = current[i + 1]; b = current[i + 2];
+        if (kind === 6) a = current[i + 3]; else if (clearColour && r === clearColour[0] && g === clearColour[1] && b === clearColour[2]) a = 0;
+      }
+      const target = row * 3 + column[x], clear = 255 - a;
+      sums[target] += (r * a + 250 * clear) / 255; sums[target + 1] += (g * a + 246 * clear) / 255; sums[target + 2] += (b * a + 242 * clear) / 255;
+      counts[row + column[x] / 3]++;
+    }
+    [previous, current] = [current, previous];
+  }
+  const lines = Buffer.alloc((columns * 3 + 1) * rows);
+  for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
+    const from = (y * columns + x) * 3, to = y * (columns * 3 + 1) + 1 + x * 3, count = counts[y * columns + x] || 1;
+    for (let c = 0; c < 3; c++) lines[to + c] = Math.round(sums[from + c] / count);
+  }
+  const head = Buffer.alloc(13);
+  head.writeUInt32BE(columns, 0); head.writeUInt32BE(rows, 4); head[8] = 8; head[9] = 2;
+  return Buffer.concat([source.subarray(0, 8), pngChunk('IHDR', head), pngChunk('IDAT', zlib.deflateSync(lines, { level: 6 })), pngChunk('IEND', Buffer.alloc(0))]);
+}
+
+function thumbnailCommand(filename) {
+  // Each smaller size is made from the one before, so the original is decoded once.
+  let small = fs.readFileSync(filename);
+  for (const edge of [1024, 768, 512, 384]) {
+    small = shrinkPNG(small, edge);
+    if (small.length <= THUMBNAIL_LIMIT) break;
+  }
+  process.stdout.write(small);
 }
 
 async function preview(request) {
@@ -115,10 +215,10 @@ async function preview(request) {
     await source.read(header, 0, header.length, 0);
     const detected = imageType(header);
     if (request.thumbnail === true && ['image/png', 'image/jpeg', 'image/webp'].includes(detected) && info.size > 256 * 1024 && info.size <= 20 * MEGABYTE) {
-      const small = await thumbnail(filename, info.version);
+      const small = await thumbnail(filename, info.version, detected);
       const current = await metadata(filename);
       if (current.version !== info.version) throw new Error('远端文件已变化，请重试');
-      if (small && small.length < info.size) return { ...info, kind: 'image', mime: 'image/jpeg', thumbnail: true, inlineData: small.toString('base64') };
+      if (small && small.data.length < info.size) return { ...info, kind: 'image', mime: small.mime, thumbnail: true, inlineData: small.data.toString('base64') };
     }
     const inline = request.inlineMedia === true && info.size <= 256 * 1024;
     if (detected && !inline) {
@@ -1237,12 +1337,138 @@ function createDirectoryWatcher(emit) {
 
 // ---------------------------------------------------------------- RPC
 
+// ---------------------------------------------------------------- framed transfers (docs/agent-wire.md)
+
+const FRAME = { JSON: 1, BLOB: 2, DATA: 3, END: 4, CREDIT: 5 };
+const FRAME_CHUNK = 128 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
+const SKIP_REPLY = Symbol('skip reply');
+function frame(type, id, payload = Buffer.alloc(0)) {
+  const head = Buffer.alloc(9);
+  head.writeUInt32BE(5 + payload.length, 0); head.writeUInt8(type, 4); head.writeUInt32BE(id >>> 0, 5);
+  return Buffer.concat([head, payload]);
+}
+function inbox() {
+  const items = []; let wake = null;
+  return {
+    save: null as null | (() => void),
+    push(item) { items.push(item); const resume = wake; wake = null; resume?.(); },
+    async next() { while (!items.length) await new Promise(resume => wake = resume); return items.shift(); },
+  };
+}
+
+async function framedRead(id, request, token, wire) {
+  const filename = resolve(request.path, request.base);
+  const before = await regular(filename);
+  if (request.version && request.version !== before.version) throw new Error('远端文件已变化，请重试');
+  const offset = Math.max(0, Math.min(Number.isInteger(request.offset) ? request.offset : 0, before.size));
+  const stream = { credit: Math.max(FRAME_CHUNK, Math.min(Number.isInteger(request.window) ? request.window : FRAME_WINDOW, 4 * MEGABYTE)), wake: null };
+  const source = await fsp.open(filename, 'r');
+  wire.credits.set(id, stream);
+  token.cancel = () => { const resume = stream.wake; stream.wake = null; resume?.(); };
+  wire.send({ id, result: { size: before.size, version: before.version, offset } });
+  try {
+    let position = offset;
+    while (position < before.size) {
+      if (token.cancelled) throw new Error('已取消');
+      if (stream.credit <= 0) { await new Promise(resume => stream.wake = resume); continue; }
+      const buffer = Buffer.allocUnsafe(Math.min(FRAME_CHUNK, stream.credit, before.size - position));
+      const { bytesRead } = await source.read(buffer, 0, buffer.length, position);
+      if (!bytesRead) throw new Error('传输期间远端文件已变化，请重试');
+      stream.credit -= bytesRead; position += bytesRead;
+      await wire.write(frame(FRAME.DATA, id, buffer.subarray(0, bytesRead)));
+    }
+    if ((await regular(filename)).version !== before.version) throw new Error('传输期间远端文件已变化，请重试');
+    await wire.write(frame(FRAME.END, id));
+  } catch (error) { await wire.write(frame(FRAME.END, id, Buffer.from(error.message || '读取失败'))); }
+  finally { wire.credits.delete(id); await source.close().catch(() => {}); }
+  return SKIP_REPLY;
+}
+
+async function framedWrite(id, request, token, wire) {
+  const cached = request.attachment === true;
+  if (!Number.isInteger(request.size) || request.size < 0 || request.size > 1024 ** 3) throw new Error('文件大小超出限制（1 GB）');
+  const destination = cached ? await attachmentLocation(request) : path.join(resolve(request.directory), checkName(request.name));
+  const folder = path.dirname(destination);
+  // An attachment's folder is private and named by its digest, so a broken upload kept beside it can be resumed.
+  // It sits outside the folder so no stored attachment can share its name; renaming it away gives it to one upload only.
+  const partial = folder + '.partial';
+  const temporary = temporaryName(folder, 'upload');
+  const hash = cached ? crypto.createHash('sha256') : null;
+  let offset = 0, claimed = false;
+  if (cached) {
+    try {
+      await fsp.rename(partial, temporary);
+      const info = await fsp.lstat(temporary);
+      if (info.isFile() && info.size <= request.size) {
+        for await (const chunk of fs.createReadStream(temporary)) hash.update(chunk);
+        offset = info.size; claimed = true;
+      } else await fsp.rm(temporary, { force: true });
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  const target = await fsp.open(temporary, claimed ? 'a' : 'wx', 0o600);
+  const box = inbox();
+  // Called when the channel dies: an attachment keeps its bytes for the next upload to resume, anything else is removed.
+  box.save = () => { try { if (cached) fs.renameSync(temporary, partial); else fs.rmSync(temporary, { force: true }); } catch { /* Nothing to keep. */ } };
+  wire.uploads.set(id, box);
+  token.cancel = () => box.push({ error: '已取消' });
+  if (token.cancelled) token.cancel();
+  try {
+    wire.send({ stream: id, offset });
+    const grant = bytes => { const value = Buffer.alloc(4); value.writeUInt32BE(bytes); return wire.write(frame(FRAME.CREDIT, id, value)); };
+    await grant(FRAME_WINDOW);
+    let received = offset;
+    for (;;) {
+      const item = await box.next();
+      if (item.error !== undefined) throw new Error(item.error);
+      if (item.end) break;
+      received += item.data.length;
+      if (received > request.size) throw new Error('上传大小不匹配');
+      hash?.update(item.data);
+      await target.writeFile(item.data);
+      await grant(item.data.length);
+    }
+    if (received !== request.size) throw new Error('上传未完成');
+    if (hash && hash.digest('hex') !== request.digest) throw new Error('文件在上传期间发生变化，请重试');
+    await target.sync();
+    if (!cached) await target.chmod(0o666 & ~process.umask());
+    await target.close();
+    if (cached) {
+      const existing = await matchingAttachment(destination, request.digest);
+      if (existing) return existing;
+      await fsp.rename(temporary, destination);
+      return await metadata(destination);
+    }
+    try { await fsp.link(temporary, destination); }
+    catch (error) { if (error.code === 'EEXIST') throw new Error('同名文件已存在：' + path.basename(destination)); throw error; }
+    return await metadata(destination);
+  } finally {
+    wire.uploads.delete(id);
+    await target.close().catch(() => {});
+    await fsp.rm(temporary, { force: true });
+  }
+}
+
 function serve() {
   const tokens = new Map();
-  const send = value => process.stdout.write(JSON.stringify(value) + '\n');
+  let framed = false;
+  const write = data => process.stdout.write(data) ? Promise.resolve() : new Promise(resume => process.stdout.once('drain', resume));
+  const send = value => {
+    if (!framed) return void process.stdout.write(JSON.stringify(value) + '\n');
+    if (typeof value.result?.inlineData === 'string') {
+      const { inlineData, ...result } = value.result;
+      const bytes = Buffer.from(inlineData, 'base64');
+      const reply = Buffer.from(JSON.stringify({ ...value, result: { ...result, inlineBytes: bytes.length } }));
+      const length = Buffer.alloc(4); length.writeUInt32BE(reply.length);
+      return void write(frame(FRAME.BLOB, value.id, Buffer.concat([length, reply, bytes])));
+    }
+    void write(frame(FRAME.JSON, 0, Buffer.from(JSON.stringify(value))));
+  };
+  const wire = { send, write, credits: new Map(), uploads: new Map() };
   const watcher = createDirectoryWatcher(data => send({ event: 'fs', ...data }));
   const operations = {
-    file: (request, token) => {
+    file: (request, token, id) => {
+      if (framed && request.operation === 'read') return framedRead(id, request, token, wire);
+      if (framed && request.operation === 'write') return framedWrite(id, request, token, wire);
       const operation = fileOperations[request.operation];
       if (!operation) throw new Error('未知操作');
       return operation(request, token);
@@ -1274,24 +1500,58 @@ function serve() {
     try {
       const operation = operations[message.op];
       if (!operation) throw new Error('未知请求');
-      send({ id: message.id, result: await operation(message.params || {}, token) });
+      const result = await operation(message.params || {}, token, message.id);
+      if (result !== SKIP_REPLY) send({ id: message.id, result });
     } catch (error) { send({ id: message.id, error: error.message }); }
     finally { tokens.delete(message.id); }
   };
-  let buffered = '';
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', data => {
-    buffered += data;
-    let index;
-    while ((index = buffered.indexOf('\n')) >= 0) {
-      const line = buffered.slice(0, index);
-      buffered = buffered.slice(index + 1);
-      if (!line) continue;
-      try { void handle(JSON.parse(line)); } catch (error) { process.stderr.write(error.message + '\n'); }
+  let buffered = Buffer.alloc(0);
+  const dispatch = (type, id, payload) => {
+    if (type === FRAME.JSON) void handle(JSON.parse(payload.toString('utf8')));
+    else if (type === FRAME.DATA) wire.uploads.get(id)?.push({ data: payload });
+    else if (type === FRAME.END) wire.uploads.get(id)?.push(payload.length ? { error: payload.toString('utf8') } : { end: true });
+    else if (type === FRAME.CREDIT && payload.length >= 4) {
+      const stream = wire.credits.get(id);
+      if (stream) { stream.credit += payload.readUInt32BE(0); const resume = stream.wake; stream.wake = null; resume?.(); }
     }
+  };
+  const frames = () => {
+    while (buffered.length >= 4) {
+      const length = buffered.readUInt32BE(0);
+      if (length < 5 || length > MAX_FRAME) { process.stderr.write('bad frame\n'); process.exit(1); }
+      if (buffered.length < 4 + length) return;
+      const type = buffered[4], id = buffered.readUInt32BE(5), payload = buffered.subarray(9, 4 + length);
+      buffered = buffered.subarray(4 + length);
+      try { dispatch(type, id, payload); } catch (error) { process.stderr.write(error.message + '\n'); }
+    }
+  };
+  const lines = () => {
+    let index;
+    while (!framed && (index = buffered.indexOf(10)) >= 0) {
+      const line = buffered.subarray(0, index).toString('utf8');
+      buffered = buffered.subarray(index + 1);
+      if (!line) continue;
+      try {
+        const message = JSON.parse(line);
+        if (message.op === 'frames') {
+          send({ id: message.id, result: { version: 1, chunk: FRAME_CHUNK, window: FRAME_WINDOW } });
+          framed = true;
+        } else void handle(message);
+      } catch (error) { process.stderr.write(error.message + '\n'); }
+    }
+  };
+  process.stdin.on('data', data => {
+    buffered = buffered.length ? Buffer.concat([buffered, data]) : data;
+    if (!framed) lines();
+    if (framed) frames();
   });
-  process.stdin.on('end', () => process.exit(0)); // The SSH channel closed; detached tasks keep running.
-  process.stdout.on('error', () => process.exit(0));
+  // The SSH channel closed; detached tasks keep running.
+  const closed = () => {
+    for (const box of wire.uploads.values()) box.save?.();
+    process.exit(0);
+  };
+  process.stdin.on('end', closed);
+  process.stdout.on('error', closed);
   send({ rcc: 'ready', pid: process.pid });
 }
 
@@ -1301,8 +1561,10 @@ if (require.main === module) {
       process.stderr.write(error.message + '\n');
       process.exitCode = 1;
     });
+  } else if (process.argv[2] === 'thumbnail') {
+    try { thumbnailCommand(process.argv[3]); } catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
   } else serve();
 }
 
 module.exports = { fileOperations, historyOperations, historyScope, accountHistory, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
-  processCommand, persistenceWarning, workerCommand, parseAuthStatus };
+  processCommand, persistenceWarning, workerCommand, parseAuthStatus, shrinkPNG };
