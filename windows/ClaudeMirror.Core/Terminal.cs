@@ -76,7 +76,7 @@ internal sealed class PseudoConsoleTerminal : IRemoteTerminal
             // Without its own (empty) standard handles the child would inherit this process's and bypass the console.
             var startup = new StartupInfoEx { Size = Marshal.SizeOf<StartupInfoEx>(), Flags = UseStandardHandles, Attributes = attributes };
             var line = new StringBuilder(CommandLine(executable, arguments));
-            if (!CreateProcessW(null, line, IntPtr.Zero, IntPtr.Zero, false, ExtendedStartupInfo | NoWindow, IntPtr.Zero, null, ref startup, out var info))
+            if (!CreateProcessW(null, line, IntPtr.Zero, IntPtr.Zero, false, ExtendedStartupInfo, IntPtr.Zero, null, ref startup, out var info))
             {
                 var error = Marshal.GetLastWin32Error();
                 ClosePseudoConsole(console); readSide.Dispose(); writeSide.Dispose();
@@ -119,7 +119,8 @@ internal sealed class PseudoConsoleTerminal : IRemoteTerminal
         return quoted.Append('\\', slashes * 2).Append('"').ToString();
     }
 
-    private const uint ExtendedStartupInfo = 0x00080000, NoWindow = 0x08000000;
+    // No CREATE_NO_WINDOW: it gives the child a hidden console of its own instead of the pseudo console.
+    private const uint ExtendedStartupInfo = 0x00080000;
     private const int UseStandardHandles = 0x00000100;
     private static readonly IntPtr PseudoConsoleAttribute = 0x00020016;
 
