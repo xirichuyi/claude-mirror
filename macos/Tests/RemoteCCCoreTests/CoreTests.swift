@@ -102,6 +102,11 @@ func eventually(_ timeout: TimeInterval = 8, _ condition: () -> Bool) async thro
 }
 
 final class AgentTests: XCTestCase {
+    func testLoginShellStartsInProjectOrHome() {
+        XCTAssertEqual(loginShellCommand(in: "/srv/my app"), #"cd -- '/srv/my app' 2>/dev/null || cd; exec "${SHELL:-/bin/sh}" -l"#)
+        XCTAssertEqual(loginShellCommand(in: "~/it's"), #"cd -- "$HOME"'/it'\''s' 2>/dev/null || cd; exec "${SHELL:-/bin/sh}" -l"#)
+    }
+
     func testInstallHandshakeAndConcurrentRequests() async throws {
         let environment = try AgentEnvironment(); defer { environment.cleanup() }
         try "echo welcome to the server\n".write(to: environment.home.appendingPathComponent(".profile"), atomically: true, encoding: .utf8)

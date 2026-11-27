@@ -1,5 +1,11 @@
 import Foundation
 
+/// A login shell started in `directory`; a folder that is gone leaves it at home.
+public func loginShellCommand(in directory: String) -> String {
+    let folder = directory == "~" || directory.hasPrefix("~/") ? "\"$HOME\"" + shellQuote(String(directory.dropFirst())) : shellQuote(directory)
+    return "cd -- \(folder) 2>/dev/null || cd; exec \"${SHELL:-/bin/sh}\" -l"
+}
+
 public func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
@@ -421,6 +427,14 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
 
     /// A Terminal command that opens an interactive session on the server, reusing this
     /// app's connection when there is one so password logins are not asked again.
+    public var sshExecutable: String { executable }
+
+    /// `ssh -tt` over the live ControlMaster, for a shell inside the app. Nil while not connected.
+    public func terminalArguments(_ config: ConnectionConfig, remoteCommand: String) -> [String]? {
+        guard let socket = withLock({ entries[config.key]?.state.status == .connected ? entries[config.key]?.socket : nil }) else { return nil }
+        return ["-tt", "-S", socket, "-o", "ControlMaster=no", "-o", "ProxyCommand=false"] + portArguments(config) + [config.host, remoteCommand]
+    }
+
     public func terminalCommand(_ config: ConnectionConfig, remoteCommand: String) -> String {
         let socket = withLock { entries[config.key]?.state.status == .connected ? entries[config.key]?.socket : nil }
         let options = socket.map { ["-S", $0, "-o", "ControlMaster=no"] } ?? Self.authenticationArguments(config)

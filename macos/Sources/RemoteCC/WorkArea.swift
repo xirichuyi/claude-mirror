@@ -9,6 +9,8 @@ struct WorkArea: View {
 
     @State private var splitFraction: CGFloat = 0.5
     @State private var dragFraction: CGFloat?
+    @AppStorage("workspace.terminalHeight") private var terminalHeight: Double = 260
+    @State private var dragHeight: Double?
 
     var body: some View {
         GeometryReader { geometry in
@@ -43,6 +45,11 @@ struct WorkArea: View {
                         splitHandle(width: geometry.size.width, fraction: fraction)
                     }
                 }
+                if let terminal = model.terminal {
+                    terminalHandle(height: geometry.size.height)
+                    TerminalPanel(session: terminal)
+                        .frame(height: min(max(160, terminalHeight), max(160, geometry.size.height - 220)))
+                }
             }
             .islandCard()
 
@@ -53,6 +60,20 @@ struct WorkArea: View {
         .onChange(of: model.activeId) { model.focusChat() }
         .navigationTitle(model.active.map { historyDisplayTitle($0.name) } ?? "claude-mirror")
         .navigationSubtitle(model.currentConfig?.displayName ?? "")
+    }
+
+    private func terminalHandle(height: CGFloat) -> some View {
+        Rectangle().fill(WorkbenchTheme.separator)
+            .frame(height: 1).frame(maxWidth: .infinity)
+            .frame(height: 5).contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { value in
+                    if dragHeight == nil { dragHeight = terminalHeight }
+                    terminalHeight = min(max(160, (dragHeight ?? terminalHeight) - value.translation.height), max(160, height - 220))
+                }
+                .onEnded { _ in dragHeight = nil })
+            .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
+            .accessibilityHidden(true)
     }
 
     private func splitHandle(width: CGFloat, fraction: CGFloat) -> some View {

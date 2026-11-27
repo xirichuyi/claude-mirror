@@ -1,0 +1,91 @@
+#if canImport(SwiftUI)
+import SwiftUI
+import AppKit
+import SwiftTerm
+import RemoteCCCore
+
+/// One shell per machine and folder. It keeps running while the panel is hidden.
+final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalViewDelegate {
+    let key: String
+    let directory: String
+    let view = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 240))
+    @Published private(set) var ended = false
+    private let launch: () -> (executable: String, arguments: [String])?
+
+    init(key: String, directory: String, launch: @escaping () -> (executable: String, arguments: [String])?) {
+        self.key = key
+        self.directory = directory
+        self.launch = launch
+        super.init()
+        view.processDelegate = self
+        view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        view.nativeBackgroundColor = .textBackgroundColor
+        view.nativeForegroundColor = .textColor
+    }
+
+    func start() {
+        guard let target = launch() else { ended = true; return }
+        ended = false
+        var environment = ProcessInfo.processInfo.environment
+        environment["TERM"] = "xterm-256color"
+        environment["COLORTERM"] = "truecolor"
+        view.startProcess(executable: target.executable, args: target.arguments, environment: environment.map { "\($0.key)=\($0.value)" }, execName: "ssh")
+    }
+
+    func terminate() { if !ended { view.terminate() } }
+
+    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    func processTerminated(source: TerminalView, exitCode: Int32?) {
+        DispatchQueue.main.async { self.ended = true }
+    }
+}
+
+struct TerminalPanel: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject var session: TerminalSession
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                WorkbenchIcon(symbol: "terminal").foregroundStyle(WorkbenchTheme.inkMuted)
+                Text((session.directory as NSString).lastPathComponent)
+                    .font(.system(size: 11)).foregroundStyle(WorkbenchTheme.inkMuted)
+                    .lineLimit(1).truncationMode(.middle).help(session.directory)
+                Spacer(minLength: 4)
+                if session.ended {
+                    Button { session.start() } label: { WorkbenchIcon(symbol: "arrow.clockwise") }
+                        .help("重新打开").accessibilityLabel("重新打开")
+                }
+                Button { model.closeTerminal() } label: { WorkbenchIcon(symbol: "xmark") }
+                    .help("关闭终端").accessibilityLabel("关闭终端")
+            }
+            .buttonStyle(WorkbenchIconButtonStyle()).padding(.horizontal, 10).frame(height: 30)
+            TerminalHost(view: session.view).padding(.leading, 6)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+/// The terminal view is owned by its session, so SwiftUI only borrows it.
+private struct TerminalHost: NSViewRepresentable {
+    let view: LocalProcessTerminalView
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ container: NSView, context: Context) {
+        guard view.superview !== container else { return }
+        view.removeFromSuperview()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            view.topAnchor.constraint(equalTo: container.topAnchor),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+    }
+}
+#endif

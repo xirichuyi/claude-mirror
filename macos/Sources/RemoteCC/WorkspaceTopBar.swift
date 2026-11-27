@@ -25,6 +25,10 @@ struct WorkspaceTopBar: View {
                 .font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle).frame(maxWidth: 360, alignment: .leading)
                 .help(model.active?.directory ?? "")
             Spacer(minLength: 12)
+            Button { model.terminalVisible.toggle() } label: { WorkbenchIcon(symbol: "terminal").frame(width: 18) }
+                .buttonStyle(WorkbenchIconButtonStyle(selected: model.terminalVisible, size: 28))
+                .disabled(!model.isConnected)
+                .help("终端 ⌃`").accessibilityLabel("终端")
         }
         .buttonStyle(WorkbenchIconButtonStyle(size: 28)).font(WorkbenchMetrics.ui)
         .padding(.horizontal, 10).frame(height: WorkbenchMetrics.header + 6)

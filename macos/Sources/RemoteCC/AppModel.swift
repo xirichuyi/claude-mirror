@@ -67,6 +67,28 @@ final class AppModel: ObservableObject {
         panel = value; showFiles = true; sidebarVisible = true
         sidebarFocus = UUID()
     }
+    @Published var terminalVisible = false
+    private var terminals: [String: TerminalSession] = [:]
+
+    /// The shell for the current machine and project, created when first shown.
+    var terminal: TerminalSession? {
+        guard terminalVisible, let config = currentConfig, let connections else { return nil }
+        let directory = active?.directory ?? "~"
+        let key = config.key + "\n" + directory
+        if let existing = terminals[key] { return existing }
+        let session = TerminalSession(key: key, directory: directory) {
+            connections.terminalArguments(config, remoteCommand: loginShellCommand(in: directory)).map { (connections.sshExecutable, $0) }
+        }
+        terminals[key] = session
+        DispatchQueue.main.async { session.start() }
+        return session
+    }
+
+    func closeTerminal() {
+        if let session = terminal { session.terminate(); terminals[session.key] = nil }
+        terminalVisible = false
+    }
+
     @Published var showFiles = false {
         didSet { if showFiles { sidebarVisible = true } }
     }
