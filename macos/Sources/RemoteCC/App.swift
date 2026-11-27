@@ -63,13 +63,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     /// Renames an install from before the rename to Tether.app once, then relaunches from there.
     private func moveToCurrentName() {
-        guard let target = BundleRename.target(for: Bundle.main.bundleURL),
+        let original = Bundle.main.bundleURL
+        guard let target = BundleRename.target(for: original),
               !FileManager.default.fileExists(atPath: target.path),
-              (try? FileManager.default.moveItem(at: Bundle.main.bundleURL, to: target)) != nil else { return }
+              (try? FileManager.default.moveItem(at: original, to: target)) != nil else { return }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: target, configuration: configuration) { _, _ in
-            DispatchQueue.main.async { NSApp.terminate(nil) }
+        NSWorkspace.shared.openApplication(at: target, configuration: configuration) { _, error in
+            DispatchQueue.main.async {
+                // Without a relaunch this process keeps running from the old path, so put the bundle back.
+                if error == nil { NSApp.terminate(nil) } else { try? FileManager.default.moveItem(at: target, to: original) }
+            }
         }
     }
 
