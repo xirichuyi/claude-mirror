@@ -199,6 +199,53 @@ public class SystemSshTests
         Assert.Equal("ssh -J bastion -p 2200 -l me 10.0.0.5", SystemSsh.TerminalCommand(new HostProfile("x", "10.0.0.5", 2200, "me", null, true, "bastion")));
     }
 
+    private static async Task<string> ReadUntil(Stream output, string expected)
+    {
+        var seen = new System.Text.StringBuilder(); var buffer = new byte[4096];
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (!seen.ToString().Contains(expected))
+        {
+            int count = await output.ReadAsync(buffer, timeout.Token);
+            if (count == 0) break;
+            seen.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, count));
+        }
+        Assert.Contains(expected, seen.ToString());
+        return seen.ToString();
+    }
+
+    /// The shell starts in the project, follows the window size and ends with the session.
+    private static async Task UseTerminal(IRemoteTerminal shell)
+    {
+        async Task Type(string text) { await shell.Input.WriteAsync(System.Text.Encoding.UTF8.GetBytes(text)); await shell.Input.FlushAsync(); }
+        await Type("pwd\n"); await ReadUntil(shell.Output, "mirror term");
+        shell.Resize(100, 30);
+        await Type("stty size\n"); await ReadUntil(shell.Output, "30 100");
+        await Type("exit\n");
+        var rest = new MemoryStream(); await shell.Output.CopyToAsync(rest).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    [SystemSshFact(agent: true)]
+    public async Task ATerminalOverTheBuiltInSshLibrary()
+    {
+        var folder = Path.GetDirectoryName(Config)!;
+        var user = File.ReadLines(Config).Select(line => line.Trim()).First(line => line.StartsWith("User ")).Split(' ', 2)[1];
+        using var agent = new RemoteAgent();
+        await agent.ConnectAsync(new HostProfile("t", "127.0.0.1", ServerPort, user, Path.Combine(folder, "client_key")), "", "", Resources, _ => Task.FromResult(true));
+        await agent.RunScriptAsync("mkdir -p \"$HOME/mirror term\"");
+        using var shell = agent.OpenTerminal("~/mirror term", 80, 24);
+        await UseTerminal(shell);
+    }
+
+    [SystemSshFact]
+    public async Task ATerminalOverSystemSshInAPseudoConsole()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var link = new SystemSshLink(Host("mirror-target"), Config);
+        using (var folder = link.Run("mkdir -p \"$HOME/mirror term\"", false, CancellationToken.None)) Assert.Equal(0, await folder.Exit.WaitAsync(TimeSpan.FromSeconds(60)));
+        using var shell = link.Terminal("~/mirror term", 80, 24);
+        await UseTerminal(shell);
+    }
+
     [SystemSshFact(agent: true)]
     public async Task AnUntrustedHostKeyIsRefusedWithoutPrompting()
     {

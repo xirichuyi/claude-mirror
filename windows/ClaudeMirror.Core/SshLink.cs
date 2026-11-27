@@ -25,6 +25,8 @@ public interface ISshLink : IDisposable
     bool Connected { get; }
     IRemoteRun Run(string command, bool input, CancellationToken token);
     IForward Forward(Tunnel tunnel);
+    /// <summary>A login shell in <paramref name="directory"/>; a folder that is gone leaves it at home.</summary>
+    IRemoteTerminal Terminal(string directory, int columns, int rows);
 }
 
 internal sealed class LibraryLink(SshClient ssh) : ISshLink
@@ -43,6 +45,7 @@ internal sealed class LibraryLink(SshClient ssh) : ISshLink
         }
         return new Port(ssh, port);
     }
+    public IRemoteTerminal Terminal(string directory, int columns, int rows) => new ShellTerminal(ssh, directory, columns, rows);
     public void Dispose() => ssh.Dispose();
 
     private sealed class Command : IRemoteRun
@@ -176,6 +179,15 @@ public sealed class SystemSshLink(HostProfile profile, string? config = null) : 
         if (!run.Exit.IsCompleted) return run;
         var error = run.Error; run.Dispose();
         throw new IOException($"无法转发本地端口 {tunnel.LocalPort}：" + SystemSsh.Explain(error).Message);
+    }
+
+    public IRemoteTerminal Terminal(string directory, int columns, int rows)
+    {
+        if (closed) throw new IOException("请先连接服务器");
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        var arguments = SystemSsh.Arguments(profile, LoginShell.Command(directory), null, config);
+        arguments[arguments.IndexOf("-T")] = "-tt";
+        return new PseudoConsoleTerminal(SystemSsh.Executable(), arguments, columns, rows);
     }
 
     private static bool Listening(int port) =>

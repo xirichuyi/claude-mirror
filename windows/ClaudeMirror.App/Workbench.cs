@@ -304,7 +304,11 @@ public sealed partial class MainWindow
         root.KeyboardAccelerators.Add(quickKey); root.KeyboardAccelerators.Add(findKey);
         restartButton=ActionButton("重启更新","\uE895",InstallUpdateAsync,true);
         restartButton.Visibility=Visibility.Collapsed;
-        var headerActions = Row(restartButton,more);
+        var terminal=ActionButton("终端 · Ctrl+`","\uE756",ToggleTerminalAsync);
+        var terminalKey=new KeyboardAccelerator { Key=(VirtualKey)192, Modifiers=VirtualKeyModifiers.Control };
+        terminalKey.Invoked+=async (_,e)=>{ e.Handled=true; await RunAsync(ToggleTerminalAsync); };
+        root.KeyboardAccelerators.Add(terminalKey);
+        var headerActions = Row(restartButton,terminal,more);
         headerActions.Spacing = 2; Grid.SetColumn(headerActions,1); bar.Children.Add(headerActions);
         directory.TextChanged += (_,_) => UpdateSubtitle();
         prompt.TextChanged += (_,_) => UpdateActions();

@@ -471,6 +471,10 @@ public sealed class RemoteAgent : IDisposable
         return remote;
     }
     /// <summary>Makes a port on the server's loopback reachable at 127.0.0.1 on this computer for as long as the connection lasts.</summary>
+    /// <summary>A login shell on the connection the agent already uses. Blocks until the server has started it.</summary>
+    public IRemoteTerminal OpenTerminal(string directory, int columns, int rows) =>
+        ssh is { Connected: true } link ? link.Terminal(directory, columns, rows) : throw new IOException("请先连接服务器");
+
     public async Task ForwardAsync(Tunnel tunnel)
     {
         if (tunnel.LocalPort is < 1 or > 65535 || tunnel.RemotePort is < 1 or > 65535) throw new ArgumentException("端口需在 1–65535 之间");

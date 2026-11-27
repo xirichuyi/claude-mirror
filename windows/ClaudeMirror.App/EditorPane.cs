@@ -35,7 +35,7 @@ public sealed partial class MainWindow
         Grid.SetColumn(split,1);Grid.SetRow(split,1);split.Background=canvas;split.CornerRadius=new CornerRadius(10);root.Children.Add(split);
         editorTabs.TabCloseRequested+=async (_,e)=>await RunAsync(async ()=>{
             var file=openFiles.FirstOrDefault(x=>x.Tab==e.Tab);
-            if(file==null){editorTabs.TabItems.Remove(e.Tab);LayoutSplit();return;} // A changes, diff, search or PDF tab holds nothing to save.
+            if(file==null){CloseTerminal(e.Tab.Tag);editorTabs.TabItems.Remove(e.Tab);LayoutSplit();return;} // A changes, diff, search or PDF tab holds nothing to save.
             if(file.Saving)return;
             if(file.Dirty && !await ConfirmDiscardAsync(file)) return;
             openFiles.Remove(file);editorTabs.TabItems.Remove(file.Tab);LayoutSplit();
