@@ -75,7 +75,8 @@ class SshLauncher(
             session.allocatePTY("xterm-256color", columns, rows, 0, 0, emptyMap())
             // A folder that is gone leaves the shell at home rather than failing.
             val folder = if (directory == "~" || directory.startsWith("~/")) "\"\$HOME\"" + shellQuote(directory.drop(1)) else shellQuote(directory)
-            session.exec("cd -- $folder 2>/dev/null || cd; exec \"${'$'}{SHELL:-/bin/sh}\" -l")
+            // The login shell may be fish or csh, so the POSIX part runs under sh.
+            session.exec("sh -c " + shellQuote("cd -- $folder 2>/dev/null || cd; exec \"${'$'}{SHELL:-/bin/sh}\" -l"))
         } catch (error: Exception) {
             runCatching { session.close() }
             if (error !is IOException && error !is IllegalStateException) throw error
