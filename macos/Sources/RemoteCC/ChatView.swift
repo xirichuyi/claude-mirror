@@ -129,7 +129,6 @@ struct MessagesList: View {
     @State private var farFromBottom = false
     @State private var messageWindow = TranscriptWindow()
     @State private var followTask: Task<Void, Never>?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(session: ChatSession, model: AppModel, historyError: String?, refreshing: Bool,
          initialWindow: TranscriptWindow? = nil) {
@@ -190,16 +189,6 @@ struct MessagesList: View {
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                             .background(WorkbenchTheme.surface, in: RoundedRectangle(cornerRadius: 12))
                     }
-                    if visibleRange.upperBound < session.messages.count {
-                        Button("较新消息") {
-                            let anchor = session.messages[visibleRange.upperBound - 1].id
-                            messageWindow.later(in: session.messages)
-                            Task { @MainActor in
-                                await Task.yield()
-                                proxy.scrollTo(anchor, anchor: .bottom)
-                            }
-                        }.font(.caption)
-                    }
                     Color.clear.frame(height: 1).id("bottom")
                         .onAppear { if #unavailable(macOS 15) { farFromBottom = false } }
                         .onDisappear { if #unavailable(macOS 15) { farFromBottom = true } }
@@ -221,6 +210,16 @@ struct MessagesList: View {
                     messageWindow.pin(in: session.messages)
                 } else if messageWindow.range(in: session.messages).upperBound == session.messages.count {
                     messageWindow.latest()
+                } else {
+                    // Reaching the end of an older page shows the next one in place, like reaching the bottom of any feed.
+                    let anchor = session.messages[messageWindow.range(in: session.messages).upperBound - 1].id
+                    messageWindow.later(in: session.messages)
+                    // The view stays on the previous page's last message, so it is not at the bottom yet.
+                    followsReply = false
+                    Task { @MainActor in
+                        await Task.yield()
+                        proxy.scrollTo(anchor, anchor: .bottom)
+                    }
                 }
             }
             .onChange(of: messageWindow) { viewportState.window = messageWindow }
@@ -235,14 +234,7 @@ struct MessagesList: View {
                 // AX scrolling does not necessarily emit wheel events. The return
                 // control is available whenever the latest message is off screen.
                 if farFromBottom || visibleRange.upperBound < session.messages.count {
-                    Button {
-                        messageWindow.latest()
-                        followsReply = true
-                        Task { @MainActor in
-                        await Task.yield()
-                        withAnimation(Motion.animation(Motion.scroll, reduce: reduceMotion)) { proxy.scrollTo("bottom", anchor: .bottom) }
-                        }
-                    } label: {
+                    Button { scrollToLatest(proxy) } label: {
                         Image(systemName: "arrow.down").font(.system(size: 14, weight: .medium))
                             .frame(width: 34, height: 34)
                             .background(WorkbenchTheme.surface, in: Circle())
@@ -259,6 +251,25 @@ struct MessagesList: View {
     private func cancelFollow() {
         followTask?.cancel()
         followTask = nil
+    }
+
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        cancelFollow()
+        messageWindow.latest()
+        followsReply = true
+        followTask = Task { @MainActor in
+            // The newly shown rows may still be laying out, so one scroll can stop short; repeat until the bottom is on screen.
+            for attempt in 0..<8 {
+                if attempt == 0 { await Task.yield() } else {
+                    do { try await Task.sleep(for: .milliseconds(30)) } catch { return }
+                }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { proxy.scrollTo("bottom", anchor: .bottom) }
+                if attempt > 0 && !farFromBottom { break }
+            }
+            followTask = nil
+        }
     }
 
     private func scheduleFollow(_ proxy: ScrollViewProxy) {
