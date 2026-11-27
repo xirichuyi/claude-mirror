@@ -105,7 +105,7 @@ fun FilesScreen(model: AppModel, hostId: String, start: String, onBack: () -> Un
 /** The changed files of the repository holding [directory]; one opens on its diff. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> Unit) {
+fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> Unit, onFolder: (String) -> Unit) {
     val host = model.hosts.collectAsStateWithLifecycle().value.firstOrNull { it.id == hostId }
     if (host == null) { LaunchedEffect(Unit) { onBack() }; return }
     var attempt by remember { mutableIntStateOf(0) }
@@ -139,7 +139,8 @@ fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> 
                             supportingContent = {
                                 change.relative.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }?.let { Text(it, maxLines = 1, overflow = TextOverflow.StartEllipsis, style = CodeStyle, color = palette.muted) }
                             },
-                            modifier = Modifier.clickable { opened = change },
+                            // Git lists a new folder once, not its files: it opens as a folder.
+                            modifier = Modifier.clickable { if (change.relative.endsWith("/")) onFolder(change.path) else opened = change },
                         )
                     }
                 }
