@@ -43,6 +43,8 @@ while [ "$#" -gt 0 ]; do
 done
 if [ "$node_only" = yes ] && { [ -n "$runner$project" ] || [ "$copy_login" = yes ]; }; then usage '--node-only goes alone.'; fi
 MEMBERS=/etc/claude-mirror/members
+# A marker holds the uid it was created with, so an account recreated elsewhere under the same name is not managed.
+managed() { [ -f "$MEMBERS/$1" ] && getent passwd "$1" >/dev/null && [ "$(cat -- "$MEMBERS/$1")" = "$(id -u -- "$1")" ]; }
 [ -z "$key" ] || [ "$members" = add ] || usage '--key only goes with --add-user.'
 if [ -n "$members" ]; then
   [ "$node_only" = no ] && [ -z "$runner$project" ] && [ "$copy_login" = no ] || usage 'Member options go alone.'
@@ -50,7 +52,7 @@ if [ -n "$members" ]; then
   command -v useradd >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1 || usage 'This server has no useradd or runuser.'
   if [ "$members" != list ]; then
     [[ "$member" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$member" != root ] || usage "Invalid account name: $member"
-    if [ -f "$MEMBERS/$member" ]; then :
+    if managed "$member"; then :
     elif [ "$members" = remove ]; then usage "$member is not a member added by Claude Mirror."
     elif getent passwd "$member" >/dev/null; then usage "Account $member already exists. Choose another name; existing accounts are never modified."
     fi
@@ -95,7 +97,7 @@ list_members() {
   for marker in "$MEMBERS"/*; do
     [ -f "$marker" ] || continue
     name=${marker##*/}
-    getent passwd "$name" >/dev/null || continue
+    managed "$name" || continue
     fingerprint=$(ssh-keygen -lf "$(member_home "$name")/.ssh/authorized_keys" 2>/dev/null | awk 'NR==1{print $2}')
     echo "member $name ${fingerprint:--}"
   done
@@ -106,7 +108,7 @@ add_member() {
   if getent passwd "$member" >/dev/null; then echo "Adding the key to $member."
   else
     useradd --create-home --shell /bin/bash -- "$member"
-    mkdir -p "$MEMBERS" && : > "$MEMBERS/$member"
+    mkdir -p "$MEMBERS" && id -u -- "$member" > "$MEMBERS/$member"
     echo "Created account $member."
   fi
   usable_home || { echo "Account $member is not usable." >&2; return 1; }
