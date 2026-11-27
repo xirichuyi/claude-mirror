@@ -491,7 +491,7 @@ async function hello() {
   const version = process.versions.node.split('.').map(Number);
   return { home: HOME, hostname: os.hostname(), platform: process.platform, arch: process.arch, node: process.versions.node,
     nodeSupported: version[0] > 18 || (version[0] === 18 && version[1] >= 14), nodePath: process.execPath, agentPath: __filename,
-    claude: located.code ? null : located.stdout.trim(), persistenceWarning: persistenceWarning(), uid: process.getuid?.() ?? null };
+    claude: located.code ? null : located.stdout.trim(), persistenceWarning: persistenceWarning(), uid: process.getuid?.() ?? null, accountAttachments: true };
 }
 
 // Classifies `claude auth status`. Older Claude builds lack the command; that is "unknown",
@@ -544,7 +544,36 @@ async function matchingAttachment(destination, digest) {
 
 async function attachmentLookup(request) {
   const destination = await attachmentLocation(request);
-  return { file: await matchingAttachment(destination, request.digest) };
+  const file = await matchingAttachment(destination, request.digest);
+  return { file: file && request.account ? await storeAsAccount(request, file) : file };
+}
+
+// Copies a received attachment into the execution account's home, as that account (request.account), through runuser
+// like Claude itself, so the account's supplementary groups apply. The account cannot read the agent's own cache, and writing
+// as root into a folder the account controls would follow its links. A copy cut short (the agent died mid-pipe) is never kept.
+// The modes are set outright: a default ACL on the home overrides umask. A login that is not root keeps it in its own home.
+const STORE_AS_ACCOUNT = `umask 077; mkdir -p "$1" && chmod 700 "$1" && : > "$1/$3" && chmod 600 "$1/$3" && cat >> "$1/$3" &&
+{ [ "$(wc -c < "$1/$3")" -eq "$4" ] || { rm -f "$1/$3"; exit 1; }; } && mv "$1/$3" "$1/$2" && printf %s "$1/$2"`;
+function storeAsAccount(request, file) {
+  if (request.account === os.userInfo().username) return file;
+  const root = process.getuid?.() === 0;
+  const home = root ? accountHistory(request.account).home : HOME;
+  const launcher = ['/usr/sbin/runuser', '/sbin/runuser'].find(candidate => fs.existsSync(candidate));
+  if (root && !launcher) throw new Error('服务器缺少 runuser');
+  const folder = path.join(home, '.cache/claude-mirror/attachments', request.digest);
+  const name = path.basename(file.path);
+  const script = ['/bin/sh', '-c', STORE_AS_ACCOUNT, 'sh', folder, name, name + '.' + crypto.randomUUID() + '.tmp', String(file.size)];
+  return new Promise<any>((resolve, reject) => {
+    const child = root ? spawn(launcher, ['-u', request.account, '--', ...script], { cwd: '/', env: { PATH: '/usr/bin:/bin' }, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(script[0], script.slice(1), { cwd: '/', env: { PATH: '/usr/bin:/bin' }, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stored = '', problem = '';
+    child.stdout.on('data', data => { stored += data; });
+    child.stderr.on('data', data => { problem = (problem + data).slice(-2000); });
+    child.stdin.on('error', () => {});
+    child.on('error', reject);
+    child.on('close', code => code === 0 && stored ? resolve({ ...file, path: stored }) : reject(new Error(problem.trim() || `无法把附件交给执行账号 ${request.account}`)));
+    fs.createReadStream(file.path).on('error', reject).pipe(child.stdin);
+  });
 }
 
 const fileOperations = {
@@ -579,10 +608,9 @@ async function upload(request) {
     await target.close();
     // Atomic and non-overwriting: a name created while uploading still fails here.
     if (cached) {
-      const existing = await matchingAttachment(destination, request.digest);
-      if (existing) return existing;
-      await fsp.rename(temporary, destination);
-      return await metadata(destination);
+      let stored = await matchingAttachment(destination, request.digest);
+      if (!stored) { await fsp.rename(temporary, destination); stored = await metadata(destination); }
+      return request.account ? await storeAsAccount(request, stored) : stored;
     }
     try { await fsp.link(temporary, destination); }
     catch (error) { if (error.code === 'EEXIST') throw new Error('同名文件已存在：' + name); throw error; }
@@ -1433,10 +1461,9 @@ async function framedWrite(id, request, token, wire) {
     if (!cached) await target.chmod(0o666 & ~process.umask());
     await target.close();
     if (cached) {
-      const existing = await matchingAttachment(destination, request.digest);
-      if (existing) return existing;
-      await fsp.rename(temporary, destination);
-      return await metadata(destination);
+      let stored = await matchingAttachment(destination, request.digest);
+      if (!stored) { await fsp.rename(temporary, destination); stored = await metadata(destination); }
+      return request.account ? await storeAsAccount(request, stored) : stored;
     }
     try { await fsp.link(temporary, destination); }
     catch (error) { if (error.code === 'EEXIST') throw new Error('同名文件已存在：' + path.basename(destination)); throw error; }

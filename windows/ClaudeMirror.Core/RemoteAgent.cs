@@ -429,11 +429,33 @@ public sealed class RemoteAgent : IDisposable
         await download.Output.CopyToAsync(file, lifetime.Token);
         if (await download.Exit != 0) throw new IOException(download.Error);
     }
-    /// <summary>Streams a file over the agent channel; the agent sends no more than the credit granted back as bytes are written.</summary>
+    /// <summary>Where a broken download of one version of a remote file waits to be resumed.</summary>
+    public static string PartialDirectory { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeMirror", "partial");
+
+    /// <summary>
+    /// Streams a file over the agent channel; the agent sends no more than the credit granted back as bytes are written.
+    /// Bytes land in a partial file named by host, path and version, so a broken download continues from where it stopped.
+    /// </summary>
     private async Task ReadAsync(string remotePath, string localPath)
     {
+        var info = await CallAsync("file", new { operation = "stat", path = remotePath });
+        var size = info["size"]!.GetValue<long>(); var version = info["version"]!.GetValue<string>();
+        Directory.CreateDirectory(PartialDirectory);
+        var partial = PartialPath(remotePath, version);
+        try { await ReceiveAsync(remotePath, partial, size, version); }
+        catch (IOException e) when (e.Message.Contains("已变化")) { File.Delete(partial); throw; }
+        File.Move(partial, localPath, true);
+    }
+
+    public string PartialPath(string remotePath, string version) => Path.Combine(PartialDirectory,
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes($"{Profile?.User}@{Profile?.Host}:{Profile?.Port}|{remotePath}|{version}"))).ToLowerInvariant() + ".partial");
+
+    private async Task ReceiveAsync(string remotePath, string partial, long size, string version)
+    {
         var id = Interlocked.Increment(ref sequence);
-        await using var file = File.Create(localPath);
+        await using var file = new FileStream(partial, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
+        if (file.Length > size) file.SetLength(0);
+        var offset = file.Length; file.Position = offset;
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         reads[id] = async (data, error) =>
         {
@@ -447,9 +469,9 @@ public sealed class RemoteAgent : IDisposable
         };
         try
         {
-            var reply = await CallAsync(id, "file", new { operation = "read", path = remotePath, window = 1024 * 1024 }, TimeSpan.FromSeconds(60));
+            await CallAsync(id, "file", new { operation = "read", path = remotePath, version, offset, window = 1024 * 1024 }, TimeSpan.FromSeconds(60));
             await done.Task.WaitAsync(lifetime.Token);
-            if (file.Length != reply["size"]!.GetValue<long>()) throw new IOException("下载未完成，可重试");
+            if (file.Length != size) throw new IOException("下载未完成，可重试");
         }
         catch
         {
@@ -459,16 +481,16 @@ public sealed class RemoteAgent : IDisposable
     }
 
     /// <summary>Sends an attachment over the agent channel. The agent keeps a broken upload and asks for the rest next time.</summary>
-    private async Task<string> WriteAsync(FileStream file, string hash, string name)
+    private async Task<string> WriteAsync(FileStream file, string hash, string name, string? account)
     {
-        var lookup = await CallAsync("file", new { operation = "attachmentLookup", name, digest = hash });
+        var lookup = await CallAsync("file", new { operation = "attachmentLookup", name, digest = hash, account });
         if (lookup["file"] is JsonObject stored) return stored["path"]!.GetValue<string>();
         var id = Interlocked.Increment(ref sequence);
         var upload = new Upload();
         uploads[id] = upload;
         try
         {
-            var reply = CallAsync(id, "file", new { operation = "write", attachment = true, digest = hash, name, size = file.Length }, TimeSpan.FromHours(24));
+            var reply = CallAsync(id, "file", new { operation = "write", attachment = true, digest = hash, name, size = file.Length, account }, TimeSpan.FromHours(24));
             if (await Task.WhenAny(upload.Offset.Task, reply) == reply) await reply;
             file.Position = await upload.Offset.Task;
             var chunk = new byte[128 * 1024];
@@ -511,6 +533,9 @@ public sealed class RemoteAgent : IDisposable
     {
         await using var file = File.OpenRead(localPath);
         var hash = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(file)).ToLowerInvariant(); file.Position = 0;
+        // An agent that copies attachments into the execution account's home takes them over the channel too, resumable.
+        if (framed && (account.Length == 0 || Hello?["accountAttachments"]?.GetValue<bool>() == true))
+            return await WriteAsync(file, hash, Path.GetFileName(localPath), account.Length > 0 ? account : null);
         if (account.Length > 0)
         {
             using var stored = ssh!.Run(UploadForAccountCommand(account, hash, Path.GetFileName(localPath)), true, lifetime.Token);
@@ -519,7 +544,6 @@ public sealed class RemoteAgent : IDisposable
             if (await stored.Exit != 0 || (await path).Length == 0) throw new IOException(stored.Error.Trim().Length > 0 ? stored.Error.Trim() : $"无法把附件交给执行账号 {account}");
             return await path;
         }
-        if (framed) return await WriteAsync(file, hash, Path.GetFileName(localPath));
         var folder = Home + "/.cache/claude-mirror/attachments/" + hash;
         var remote = folder + "/" + Path.GetFileName(localPath);
         using (var existing = ssh!.Run("test -f " + Protocol.Quote(remote), false, lifetime.Token))

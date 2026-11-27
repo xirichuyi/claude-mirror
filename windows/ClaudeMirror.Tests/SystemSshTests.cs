@@ -225,6 +225,15 @@ public class SystemSshTests
         var remote = await agent.UploadAsync(source);
         await agent.DownloadAsync(remote, copy);
         Assert.Equal(bytes, await File.ReadAllBytesAsync(copy));
+
+        // A partial download of the same version continues from its end instead of starting over: the kept bytes stay as they were.
+        var version = (await agent.CallAsync("file", new { operation = "stat", path = remote }))["version"]!.GetValue<string>();
+        Directory.CreateDirectory(RemoteAgent.PartialDirectory);
+        await File.WriteAllBytesAsync(agent.PartialPath(remote, version), new byte[100_000]);
+        await agent.DownloadAsync(remote, copy);
+        var resumed = await File.ReadAllBytesAsync(copy);
+        Assert.Equal(new byte[100_000], resumed[..100_000]); Assert.Equal(bytes[100_000..], resumed[100_000..]);
+        Assert.False(File.Exists(agent.PartialPath(remote, version)));
         await Assert.ThrowsAsync<IOException>(() => agent.DownloadAsync("/nonexistent/file", copy));
 
         // A forwarded port reaches the server's loopback: here, the test sshd itself.
