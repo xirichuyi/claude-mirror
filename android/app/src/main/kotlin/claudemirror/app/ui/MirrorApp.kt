@@ -1,6 +1,17 @@
 package claudemirror.app.ui
 
 import android.Manifest
+import android.graphics.Bitmap
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
+import claudemirror.core.Attachment
 import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
@@ -86,8 +97,38 @@ fun MirrorApp(model: AppModel) {
                 TerminalScreen(model, entry.arguments?.getString("id").orEmpty(), entry.arguments?.getString("path").orEmpty(), onBack = { navigation.popBackStack() })
             }
             composable("chat/{id}") { entry ->
-                ChatScreen(model, entry.arguments?.getString("id").orEmpty(), snackbar, onBack = { navigation.popBackStack() })
+                val id = entry.arguments?.getString("id").orEmpty()
+                val host = remember(id) { model.sessions.value.firstOrNull { it.id == id }?.hostId }
+                val load: (suspend (Attachment) -> Bitmap?)? = remember(host) { host?.let { server -> { file: Attachment -> model.thumbnail(server, file) } } }
+                CompositionLocalProvider(LocalThumbnails provides load) {
+                    ChatScreen(model, id, snackbar, onBack = { navigation.popBackStack() })
+                }
             }
+        }
+
+        val shared by model.shared.collectAsStateWithLifecycle()
+        shared?.let { item ->
+            val sessions by model.sessions.collectAsStateWithLifecycle()
+            val recent = remember(sessions) { sessions.sortedByDescending { it.updatedAt }.take(20) }
+            AlertDialog(
+                onDismissRequest = { model.shared.value = null },
+                title = { Text(if (item.files.isEmpty()) "发到" else "发到 · ${item.files.size}") },
+                text = {
+                    if (recent.isEmpty()) Text("没有对话")
+                    else LazyColumn {
+                        items(recent, key = { it.id }) { session ->
+                            ListItem(
+                                headlineContent = { Text(session.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = { Text(session.directory, maxLines = 1, overflow = TextOverflow.MiddleEllipsis) },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                modifier = Modifier.clickable { model.share(session.id) },
+                            )
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = { TextButton(onClick = { model.shared.value = null }) { Text("取消") } },
+            )
         }
 
         trust?.let { request ->

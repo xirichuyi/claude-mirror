@@ -1,5 +1,18 @@
 package claudemirror.app.ui
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import claudemirror.app.isImageName
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -97,7 +110,12 @@ fun UserBubble(text: String, files: List<Attachment> = emptyList(), caption: Str
                 Column(Modifier.widthIn(max = 520.dp).padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     // The words a message of only files is given say nothing its files do not.
                     if (files.isEmpty() || text != ATTACHMENTS_ONLY) SelectionContainer { Text(text, color = tint) }
-                    for (file in files) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val load = LocalThumbnails.current
+                    val (images, others) = files.partition { load != null && isImageName(it.name) }
+                    if (images.isNotEmpty() && load != null) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (file in images) Thumbnail(file, load)
+                    }
+                    for (file in others) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(fileIcon(file.name), null, Modifier.size(16.dp), tint = palette.muted)
                         Text(file.name, style = MaterialTheme.typography.bodyMedium, color = tint, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
                     }
@@ -105,6 +123,18 @@ fun UserBubble(text: String, files: List<Attachment> = emptyList(), caption: Str
             }
             if (caption != null) Text(caption, style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = Modifier.padding(top = 3.dp, end = 4.dp))
         }
+    }
+}
+
+/** Loads an image attachment's thumbnail; provided where the conversation's server is known. */
+val LocalThumbnails = staticCompositionLocalOf<(suspend (Attachment) -> Bitmap?)?> { null }
+
+@Composable
+private fun Thumbnail(file: Attachment, load: suspend (Attachment) -> Bitmap?) {
+    val image by produceState<ImageBitmap?>(null, file.path) { value = load(file)?.asImageBitmap() }
+    Box(Modifier.size(112.dp).clip(RoundedCornerShape(12.dp)).background(palette.muted.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+        image?.let { Image(it, file.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+            ?: Icon(Icons.Filled.Image, file.name, Modifier.size(24.dp), tint = palette.muted)
     }
 }
 

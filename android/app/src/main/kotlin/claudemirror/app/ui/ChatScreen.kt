@@ -137,6 +137,13 @@ fun ChatScreen(model: AppModel, sessionId: String, snackbar: SnackbarHostState, 
     }
     val connections by model.connections.collectAsStateWithLifecycle()
     var draft by rememberSaveable(sessionId) { mutableStateOf("") }
+    val sharedText by model.sharedText.collectAsStateWithLifecycle()
+    LaunchedEffect(sharedText) {
+        val (target, text) = sharedText ?: return@LaunchedEffect
+        if (target != sessionId) return@LaunchedEffect
+        draft = if (draft.isBlank()) text else draft.trimEnd() + "\n" + text
+        model.sharedText.value = null
+    }
     val picked by model.picked.collectAsStateWithLifecycle()
     val files = picked[sessionId].orEmpty()
     val online = connections[session.hostId] is ConnectionState.Connected

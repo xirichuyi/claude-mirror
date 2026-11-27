@@ -1,5 +1,9 @@
 package claudemirror.app
 
+import android.util.LruCache
+import android.util.Base64
+import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import claudemirror.core.ConnectionCode
 import claudemirror.core.LoginKey
 import claudemirror.core.RemoteException
@@ -62,6 +66,12 @@ data class Picked(
     val file: Attachment? = null, val error: String? = null,
 )
 
+/** Files and words another app shared, waiting for the user to choose a conversation. */
+data class Shared(val files: List<Uri>, val text: String?)
+
+private val imageName = Regex("""(?i)\.(png|jpe?g|gif|webp|heic|heif|bmp)$""")
+fun isImageName(name: String) = imageName.containsMatchIn(name)
+
 /** Lives as long as the process, so that a reply can be followed while no screen is open. */
 class AppModel(private val application: Application) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -89,6 +99,9 @@ class AppModel(private val application: Application) {
 
     /** The conversation to show, asked for from a notification. */
     val target = MutableStateFlow<String?>(null)
+    val shared = MutableStateFlow<Shared?>(null)
+    /** Shared words for a conversation's composer: (conversation, text). */
+    val sharedText = MutableStateFlow<Pair<String, String>?>(null)
 
     internal val notices = Notices(application)
     private var foreground = false
@@ -333,6 +346,49 @@ class AppModel(private val application: Application) {
 
     private fun pick(id: String, item: String, change: (Picked) -> Picked) = pick(id) { files -> files.map { if (it.id == item) change(it) else it } }
 
+    /** Puts what was shared into [id]'s composer and opens it. */
+    fun share(id: String) {
+        val item = shared.value ?: return
+        shared.value = null
+        if (item.files.isNotEmpty()) attach(id, item.files)
+        item.text?.let { sharedText.value = id to it }
+        target.value = id
+    }
+
+    private val thumbs = File(files, "thumbs")
+    private val thumbMemory = LruCache<String, Bitmap>(64)
+    private fun thumbFile(host: String, path: String) =
+        File(thumbs, MessageDigest.getInstance("SHA-256").digest("$host\n$path".toByteArray()).joinToString("") { "%02x".format(it) } + ".jpg")
+
+    /** A small picture of an image attachment: made from the phone's own copy when it was sent from here, else from the server's preview, once. */
+    suspend fun thumbnail(host: String, file: Attachment): Bitmap? {
+        val key = "$host\n${file.path}"
+        thumbMemory.get(key)?.let { return it }
+        val cached = thumbFile(host, file.path)
+        val bitmap = withContext(Dispatchers.IO) { if (cached.exists()) BitmapFactory.decodeFile(cached.path) else null }
+            ?: run {
+                val config = host(host) ?: return null
+                val preview = runCatching { engine.preview(config, file.path) }.getOrNull() ?: return null
+                val bytes = preview.inlineData?.takeIf { preview.kind == "image" }?.let { runCatching { Base64.decode(it, Base64.DEFAULT) }.getOrNull() } ?: return null
+                withContext(Dispatchers.IO) { saveThumbnail(cached) { bytes.inputStream() } }
+            }
+            ?: return null
+        thumbMemory.put(key, bitmap)
+        return bitmap
+    }
+
+    private fun saveThumbnail(target: File, open: () -> java.io.InputStream?): Bitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        open()?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= THUMB_EDGE) sample *= 2
+        val bitmap = open()?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) } ?: return null
+        thumbs.mkdirs()
+        target.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+        bitmap
+    }.getOrNull()
+
     /** Starts sending the chosen files to the conversation's server. */
     fun attach(id: String, sources: List<Uri>) {
         val room = MAX_FILES - picked.value[id].orEmpty().size
@@ -410,6 +466,7 @@ class AppModel(private val application: Application) {
                     if (sent - shown >= size / 20) { shown = sent; pick(id, item.id) { it.copy(sent = sent) } }
                 }
                 pick(id, item.id) { it.copy(sent = size, file = file) }
+                if (isImageName(item.name)) withContext(Dispatchers.IO) { saveThumbnail(thumbFile(host.id, file.path)) { content.openInputStream(source) } }
             } catch (error: CancellationException) { throw error } catch (error: Exception) {
                 // Taken back or cut off meanwhile: that has been shown already.
                 ensureActive()
@@ -454,5 +511,5 @@ class AppModel(private val application: Application) {
     suspend fun fetchModels(id: String): Boolean =
         try { engine.loadModels(id); true } catch (error: CancellationException) { throw error } catch (error: Exception) { false }
 
-    private companion object { const val MAX_FILES = 10; const val INTERRUPTED = "上传中断" }
+    private companion object { const val MAX_FILES = 10; const val THUMB_EDGE = 480; const val INTERRUPTED = "上传中断" }
 }
