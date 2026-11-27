@@ -16,6 +16,7 @@ enum AppPresentation: Identifiable {
     case editMachine(ConnectionConfig)
     case remoteSetup(ConnectionConfig)
     case keyLogin(ConnectionConfig)
+    case members(ConnectionConfig)
     case projectPicker
     case settings
     case preferences
@@ -38,6 +39,7 @@ enum AppPresentation: Identifiable {
         case .connect: return "connect"
         case .remoteSetup(let config): return "remoteSetup:" + config.key
         case .keyLogin(let config): return "keyLogin:" + config.key
+        case .members(let config): return "members:" + config.key
         case .projectPicker: return "projectPicker"
         case .settings: return "settings"
         case .preferences: return "preferences"
@@ -163,6 +165,7 @@ struct AppSheet: View {
             case .editMachine(let config): ConnectSheet(machine: config)
             case .remoteSetup(let config): RemoteSetupSheet(machine: config)
             case .keyLogin(let config): KeyLoginSheet(machine: config)
+            case .members(let config): MembersSheet(machine: config)
             case .projectPicker: ProjectPickerSheet()
             case .settings: SettingsSheet()
             case .preferences: PreferencesSheet()

@@ -151,9 +151,11 @@ public enum LoginKeySetup {
 /// Runs the bundled install-claude-remote.sh over an existing SSH connection, streaming its output.
 public enum RemoteInstaller {
     public static let command = "sh -c " + shellQuote("command -v bash >/dev/null 2>&1 || { echo '服务器缺少 bash，无法自动安装。'; exit 1; }; exec bash -s 2>&1")
+    /// Only puts Node.js on the server; the agent channel runs this by itself when Node.js is missing or too old.
+    public static let nodeCommand = "sh -c " + shellQuote("command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- --node-only 2>&1")
 
     /// Returns the installer's exit status: 0 ready, 3 Node.js could not be installed.
-    public static func run(launcher: RemoteLauncher, config: ConnectionConfig, script: Data,
+    public static func run(launcher: RemoteLauncher, config: ConnectionConfig, script: Data, command: String = command,
                            output: @escaping @Sendable (String) -> Void) async throws -> Int32 {
         let process = try launcher.spawn(config, command: command)
         return await withTaskCancellationHandler {
@@ -182,6 +184,47 @@ public enum RemoteInstaller {
         case 3: return "Node.js 未能安装，请手动安装 18.14+"
         default: return "安装失败（退出码 \(code)）"
         }
+    }
+}
+
+public struct RemoteMember: Hashable, Sendable, Identifiable {
+    public var name: String
+    public var fingerprint: String
+    public var id: String { name }
+}
+
+/// Accounts on a shared server, managed through install-claude-remote.sh from a root login.
+public enum RemoteMembers {
+    static func command(_ arguments: [String]) -> String {
+        "sh -c " + shellQuote("command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- " + arguments.map(shellQuote).joined(separator: " ") + " 2>&1")
+    }
+
+    public static func parse(_ lines: [String]) -> [RemoteMember] {
+        lines.compactMap { line in
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard parts.count >= 3, parts[0] == "member" else { return nil }
+            return RemoteMember(name: String(parts[1]), fingerprint: parts[2] == "-" ? "" : String(parts[2]))
+        }
+    }
+
+    /// Output lines of a successful run; a failure throws its last line.
+    public static func run(launcher: RemoteLauncher, config: ConnectionConfig, script: Data, arguments: [String]) async throws -> [String] {
+        let lines = Lines()
+        let code = try await RemoteInstaller.run(launcher: launcher, config: config, script: script, command: command(arguments)) { lines.append($0) }
+        let output = lines.all
+        guard code == 0 else { throw RemoteError(output.last(where: { !$0.isEmpty }) ?? "操作失败") }
+        return output
+    }
+
+    public static func list(launcher: RemoteLauncher, config: ConnectionConfig, script: Data) async throws -> [RemoteMember] {
+        parse(try await run(launcher: launcher, config: config, script: script, arguments: ["--list-users"]))
+    }
+
+    private final class Lines: @unchecked Sendable {
+        private let lock = NSLock()
+        private var lines: [String] = []
+        func append(_ line: String) { lock.withLock { lines.append(line) } }
+        var all: [String] { lock.withLock { lines } }
     }
 }
 

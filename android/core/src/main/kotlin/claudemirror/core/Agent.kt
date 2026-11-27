@@ -62,7 +62,14 @@ interface Launcher {
 }
 
 /** The server program this app carries: built by `npm run prepare-server`. */
-class ServerResources(val agentSource: ByteArray, val agentDigest: String, val bundleDigest: String, val bundlePayload: String) {
+class ServerResources(
+    val agentSource: ByteArray,
+    val agentDigest: String,
+    val bundleDigest: String,
+    val bundlePayload: String,
+    /** scripts/install-claude-remote.sh; with `--node-only` it puts Node.js on a server that lacks it. */
+    val installScript: ByteArray? = null,
+) {
     companion object {
         fun read(open: (String) -> InputStream): ServerResources {
             val manifest = open("manifest.json").use { MirrorJson.parseToJsonElement(it.readBytes().decodeToString()) }.obj()
@@ -70,7 +77,8 @@ class ServerResources(val agentSource: ByteArray, val agentDigest: String, val b
             val bundle = manifest?.get("bundleDigest").string()
             val payload = manifest?.get("bundlePayload").string()
             if (agent == null || bundle == null || payload == null) throw RemoteException("应用内的服务端程序不完整，请重新构建")
-            return ServerResources(open("remote-agent.cjs").use { it.readBytes() }, agent, bundle, payload)
+            val installer = runCatching { open("install-claude-remote.sh").use { it.readBytes() } }.getOrNull()
+            return ServerResources(open("remote-agent.cjs").use { it.readBytes() }, agent, bundle, payload, installer)
         }
     }
 }
@@ -117,7 +125,7 @@ class AgentChannel internal constructor(
         get() = "sh -c " + shellQuote(script("install.sh").trim().replace("@AGENT@", agentFile).replace("@SIZE@", resources.agentSource.size.toString()))
 
     internal suspend fun start() = withContext(Dispatchers.IO) {
-        if (!launch()) {
+        if (!launchInstallingNode()) {
             install()
             if (!launch()) throw RemoteException("远端代理启动失败", confirmed = false)
         }
@@ -129,6 +137,25 @@ class AgentChannel internal constructor(
             throw NodeOutdatedException(server.node ?: "未知版本")
         }
         info = server
+    }
+
+    /** A server without a usable Node.js gets the app's own copy, then the agent starts as usual. */
+    private fun launchInstallingNode(): Boolean = try {
+        launch()
+    } catch (error: Exception) {
+        if (error !is NodeMissingException && error !is NodeOutdatedException) throw error
+        if (!installNode()) throw error
+        launch()
+    }
+
+    private fun installNode(): Boolean {
+        val script = resources.installScript ?: return false
+        val child = launcher.start(host, "sh -c " + shellQuote("command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- --node-only 2>&1"))
+        return try {
+            child.stdin.use { it.write(script) }
+            child.stdout.readBytes()
+            child.waitForExit() == 0
+        } catch (error: IOException) { false } finally { child.kill() }
     }
 
     /** True once the agent answers, false when its program still has to be uploaded. */
@@ -386,11 +413,38 @@ sealed interface ConnectionState {
     data class Failed(val error: Throwable) : ConnectionState
 }
 
+data class RemoteMember(val name: String, val fingerprint: String)
+
+/** Accounts on a shared server, managed through install-claude-remote.sh from a root login. */
+object RemoteMembers {
+    fun command(arguments: List<String>): String =
+        "sh -c " + shellQuote("command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- " + arguments.joinToString(" ") { shellQuote(it) } + " 2>&1")
+
+    fun parse(lines: List<String>): List<RemoteMember> = lines.mapNotNull { line ->
+        val parts = line.split(' ').filter { it.isNotEmpty() }
+        if (parts.size >= 3 && parts[0] == "member") RemoteMember(parts[1], if (parts[2] == "-") "" else parts[2]) else null
+    }
+}
+
 /** One agent per server, started on first use and shared by every conversation on that server. */
 class AgentPool(private val launcher: Launcher, val resources: ServerResources) {
     private companion object { const val MAX_UPLOAD = 1L shl 30 }
     // Each upload can have a window of bytes queued ahead of a stop or an approval; two keep that short.
     private val transfers = Semaphore(2)
+
+    /** Output lines of a successful member command; a failure throws its last line. */
+    suspend fun members(host: HostConfig, vararg arguments: String): List<String> = withContext(Dispatchers.IO) {
+        val script = resources.installScript ?: throw RemoteException("缺少安装脚本")
+        val child = launcher.start(host, RemoteMembers.command(arguments.toList()))
+        try {
+            child.stdin.use { it.write(script) }
+            val lines = child.stdout.readBytes().decodeToString().lines()
+            if (child.waitForExit() != 0) throw RemoteException(lines.lastOrNull { it.isNotBlank() } ?: "操作失败")
+            lines
+        } catch (error: IOException) {
+            throw RemoteException(error.message ?: "操作失败")
+        } finally { child.kill() }
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val channels = HashMap<String, Deferred<AgentChannel>>()

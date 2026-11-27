@@ -5,6 +5,7 @@ struct HostSettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var removingHost: String?
     @State private var deletingHost = false
+    @State private var rootMachines: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -26,6 +27,16 @@ struct HostSettingsView: View {
                 Text("尚未添加主机").foregroundStyle(WorkbenchTheme.inkMuted).padding(.vertical, 16)
             }
         }
+        .task(id: model.savedMachines.map(\.key).joined() + "\(model.isConnected)") { await findRootMachines() }
+    }
+
+    private func findRootMachines() async {
+        guard let engine = model.engine else { return }
+        var found: Set<String> = []
+        for machine in model.savedMachines where engine.connectionState(machine).status == .connected {
+            if (try? await engine.agents.info(machine))?.managesMembers == true { found.insert(machine.key) }
+        }
+        rootMachines = found
     }
 
     private func hostRow(_ machine: ConnectionConfig) -> some View {
@@ -50,6 +61,14 @@ struct HostSettingsView: View {
                     WorkbenchIcon(symbol: "square.and.pencil")
                 }
                 .buttonStyle(WorkbenchIconButtonStyle()).help("编辑服务器").accessibilityLabel("编辑 " + machine.displayName)
+                if rootMachines.contains(machine.key) {
+                    Button {
+                        model.presentation = .members(machine)
+                    } label: {
+                        WorkbenchIcon(symbol: "person.2")
+                    }
+                    .buttonStyle(WorkbenchIconButtonStyle()).help("成员").accessibilityLabel("成员 " + machine.displayName)
+                }
                 if model.currentConfig?.key == machine.key && model.isConnected {
                     Button("断开") { model.disconnect() }.buttonStyle(QuietButtonStyle())
                 } else {

@@ -87,4 +87,21 @@ final class RemoteSetupTests: XCTestCase {
         XCTAssertEqual(lines.values, ["==> Claude Code", "to-stderr", "no-newline"])
         XCTAssertTrue(RemoteInstaller.summary(3).contains("Node.js"))
     }
+
+    func testMembersPassArgumentsAndReportFailures() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("rcc-members-" + UUID().uuidString).path
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let launcher = LocalLauncher(home: home), config = ConnectionConfig(host: "local", directory: "~")
+        let script = Data("""
+        [ "$1" = --list-users ] && { echo 'member alice SHA256:abc'; echo 'member bob -'; echo noise; exit 0; }
+        echo "args:$2|$4"; echo 'Not an SSH public key.' >&2; exit 2
+        """.utf8)
+        let members = try await RemoteMembers.list(launcher: launcher, config: config, script: script)
+        XCTAssertEqual(members, [RemoteMember(name: "alice", fingerprint: "SHA256:abc"), RemoteMember(name: "bob", fingerprint: "")])
+        do {
+            _ = try await RemoteMembers.run(launcher: launcher, config: config, script: script, arguments: ["--add-user", "carol", "--key", "ssh-ed25519 A b c"])
+            XCTFail("expected failure")
+        } catch { XCTAssertEqual(error.localizedDescription, "Not an SSH public key.") }
+    }
 }

@@ -15,6 +15,8 @@ import claudemirror.core.HostConfig
 import claudemirror.core.Preferences
 import claudemirror.core.RemoteConversation
 import claudemirror.core.RemoteListing
+import claudemirror.core.RemoteMember
+import claudemirror.core.RemoteMembers
 import claudemirror.core.ServerResources
 import claudemirror.core.SshLauncher
 import claudemirror.core.SshSecret
@@ -276,6 +278,9 @@ class AppModel(private val application: Application) {
         _hosts.value = _hosts.value.map { if (it.id == id) it.copy(projects = change(it.projects)) else it }
         hostStore.save(_hosts.value)
     }
+    suspend fun listMembers(host: HostConfig): List<RemoteMember> = RemoteMembers.parse(pool.members(host, "--list-users"))
+    suspend fun addMember(host: HostConfig, name: String, key: String) { pool.members(host, "--add-user", name, "--key", key) }
+    suspend fun removeMember(host: HostConfig, name: String) { pool.members(host, "--remove-user", name) }
     fun removeSession(id: String) {
         picked.value[id].orEmpty().forEach { uploads.remove(it.id)?.cancel() }
         picked.update { it - id }

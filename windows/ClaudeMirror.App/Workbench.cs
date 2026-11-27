@@ -36,7 +36,7 @@ public sealed partial class MainWindow
     private bool sidebarOpen = true;
     private readonly Border hostDot = new() { Width=7, Height=7, CornerRadius=new CornerRadius(3.5), VerticalAlignment=VerticalAlignment.Center };
     private readonly Border inputCard = new();
-    private Button commandMenu = null!, modelMenu = null!, connectHost = null!;
+    private Button commandMenu = null!, modelMenu = null!, connectHost = null!, membersButton = null!;
 
     private static string ShortDirectory(string path)
     {
@@ -48,6 +48,7 @@ public sealed partial class MainWindow
     {
         bool current=agent?.Connected==true && host!=null && Equals(hosts.SelectedItem,host);
         connectHost.Visibility=current?Visibility.Collapsed:Visibility.Visible;
+        membersButton.Visibility=current && agent?.Hello?["uid"]?.GetValue<int>()==0 && agent.Hello["platform"]?.GetValue<string>()=="linux"?Visibility.Visible:Visibility.Collapsed;
         ToolTipService.SetToolTip(hosts,(hosts.SelectedItem as HostProfile)?.Name ?? "选择主机");
     }
 
@@ -198,7 +199,8 @@ public sealed partial class MainWindow
         files = ActionButton("文件","\uE8B7",BrowseAsync);
         var changes = ActionButton("Git","\uE8F1",ChangesAsync);
         var findInFiles = ActionButton("搜索文件 · Ctrl+Shift+F","\uE721",SearchFilesAsync);
-        var tools = Row(connectHost,chatMode,files,changes,findInFiles);
+        membersButton=ActionButton("成员","\uE716",MembersDialogAsync); membersButton.Visibility=Visibility.Collapsed;
+        var tools = Row(connectHost,membersButton,chatMode,files,changes,findInFiles);
         tools.Spacing = 0; Grid.SetColumn(tools,1); switcher.Children.Add(tools); sidebar.Children.Add(switcher);
         fresh = ActionButton("新建对话","\uE70F",NewConversationAsync);
         fresh.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.N, Modifiers = VirtualKeyModifiers.Control });

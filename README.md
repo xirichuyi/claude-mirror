@@ -32,7 +32,7 @@
 
 第一次使用请看 **[入门指南](docs/getting-started.md)**：从准备服务器、首次打开被 macOS 拦截，到登录 Claude，每一步都有说明。
 
-本机使用 DMG 无需安装 Node.js、Swift 或 Xcode。服务器只需要能用 SSH 登录：连接后应用会检查环境，缺少 Claude Code 或 Node.js 时可以一键安装（装在用户目录，不需要管理员权限），Claude 未登录时会引导你在终端完成登录。发布页附 SHA-256 校验文件。
+本机使用 DMG 无需安装 Node.js、Swift 或 Xcode。服务器只需要能用 SSH 登录：连接后应用会检查环境，缺少 Node.js 时连接会自动装到用户目录（不需要管理员权限，服务器只需 curl 或 wget），缺少 Claude Code 时可以一键安装，Claude 未登录时会引导你在终端完成登录。发布页附 SHA-256 校验文件。
 
 **应用内更新**：从 v0.21.0 起接入 Sparkle，每次启动检查新版，也可在“账号 → 设置 → 关于”检查更新。确认后在应用内下载、验证签名、安装并重启，不用手动替换 DMG。退出前保存输入草稿和已上传附件，远端任务继续运行；未保存的文件编辑会先提示。v0.20.0 及更早版本需要最后手动安装一次 v0.21.0。更新包及更新源使用 Ed25519 签名；当前应用仍未经过 Apple 公证。
 
@@ -120,7 +120,7 @@ macOS 文件预览优先显示本地缓存，再校验远端版本；同时打�
 ### 环境要求
 
 - 本机：macOS 14+，Xcode 15.3+ 或兼容 Swift 5.10 的工具链，Node.js 和 npm。
-- 远端：可用的 SSH 服务、Node.js 18.14+、已安装并配置好认证的 Claude Code。
+- 远端：可用的 SSH 服务、已安装并配置好认证的 Claude Code。没有 Node.js 18.14+ 时连接会自动装到用户目录。
 - 远端用户必须有权限访问对应项目及 Claude 历史。客户端不能绕过服务器权限。
 
 ```sh
@@ -204,7 +204,7 @@ sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
 - 使用系统 OpenSSH，支持 SSH config 别名、密码和密钥；保留主机指纹检查。
 - **已有 Claude：** 只验证能否运行，不覆盖、不升级、不改认证配置。
 - **没有 Claude：** 下载 [Claude 官方安装器](https://github.com/anthropics/claude-code#installation)并安装 stable 版本，由官方安装器选择平台和架构。
-- 远端 Node.js 低于 18.14 或不存在时，把官方 Node.js 装到用户目录，不改系统包。
+- 远端 Node.js 低于 18.14 或不存在时，把固定版本、校验过 SHA-256 的 Node.js 装到用户目录，不改系统包（nodejs.org 不通时换 npmmirror；Alpine、CentOS 7 用非官方构建）。唯一例外：Alpine 上以 root 连接时会 `apk add libstdc++`，Node.js 的 musl 构建依赖它。
 - SSH 断开会杀后台进程的服务器上自动开启 `loginctl enable-linger`；需要管理员权限时先试免密 `sudo`，不行再给出要运行的命令。
 
 **想让 Claude 以普通账号运行**（root 登录的服务器也可以直接用 Full Access，见下文）再加三个选项，一条命令配好执行账号：
@@ -220,6 +220,18 @@ sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app
 | `--copy-login` | 把 root 的 `~/.claude/.credentials.json` 复制给该账号（仅此一个文件，权限 600）。不加则按脚本最后打印的命令登录一次 |
 
 选项在安装任何东西之前检查，重复运行不会重复创建。完成后在新对话选择 Full Access，执行账号填 `claude-runner`。
+
+### 多人共用一台服务器
+
+每人一个 Linux 账号、自己的 SSH 密钥和 Claude 登录；家目录为 `700`，对话、文件、附件、任务和用量互相看不到。以 root 连接时，服务器旁出现「成员」，可添加（账号 + 公钥）和删除。也可以在终端运行：
+
+```bash
+sudo bash scripts/install-claude-remote.sh --add-user alice --key 'ssh-ed25519 AAAA… alice@laptop'
+sudo bash scripts/install-claude-remote.sh --list-users
+sudo bash scripts/install-claude-remote.sh --remove-user alice   # 删除账号和家目录
+```
+
+只管理本脚本创建的账号（记录在 `/etc/claude-mirror/members`），已有账号不会被修改或删除。成员用 `alice@服务器` 添加服务器，首次连接后自己登录 Claude。
 - 不会自动登录、索取 API Key，也不会把本机 Claude 凭据传到服务器。
 
 如需登录，请在服务器交互式终端运行 `claude auth login`；新安装通常位于 `~/.local/bin/claude`。完成后回到客户端连接同一主机。安装器要求远端能访问官方站点；发行地区、网络或系统依赖问题会按实际错误显示。
