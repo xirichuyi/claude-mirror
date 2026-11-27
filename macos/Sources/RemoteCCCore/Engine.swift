@@ -337,7 +337,7 @@ public final class ChatEngine {
             changed(id)
             if !running.contains(id), sessions[current].queuePaused != true { return drainQueue(id) }
             // A worker started by an older app version does not know the request.
-            throw error.localizedDescription == "未知会话请求" ? RemoteError("这个远端会话启动于旧版本，暂不支持插队；消息已排在队首") : error
+            throw error.localizedDescription == "未知会话请求" ? RemoteError("旧版本会话不支持插队，已排到队首") : error
         }
     }
 
@@ -552,7 +552,7 @@ public final class ChatEngine {
                     return
                 }
                 if let target = sessions[position].messages.firstIndex(where: { $0.id == task.messageId }) {
-                    sessions[position].messages[target].error = "远端会话已退出，新消息未执行。请重新发送。"
+                    sessions[position].messages[target].error = "远端会话已退出，请重新发送"
                 }
                 sessions[position].status = "error"; sessions[position].queuePaused = true
                 sessions[position].remoteTask = nil; sessions[position].remoteOwner = nil
@@ -691,7 +691,7 @@ public final class ChatEngine {
         // turn. Close only that owner; never kill unrelated Claude processes.
         _ = try await command(id, kind: "close")
         guard try await waitForStop(id, owner: owner, message: message) else {
-            throw RemoteError("远端尚未确认停止，请重新连接后检查任务状态")
+            throw RemoteError("远端未确认停止")
         }
     }
 
@@ -815,11 +815,11 @@ public final class ChatEngine {
         let session = sessions[position]
         let current = session.preferences ?? Preferences()
         for folder in next.additionalDirectories ?? [] where !folder.hasPrefix("/") { throw RemoteError("额外目录必须为远端绝对路径") }
-        if (next.agent ?? "") != (current.agent ?? ""), !session.messages.isEmpty { throw RemoteError("请在新对话中选择 Agent，已有会话保留原生上下文") }
+        if (next.agent ?? "") != (current.agent ?? ""), !session.messages.isEmpty { throw RemoteError("请在新对话中选择 Agent") }
         let model = session.capabilities?.models.first { $0.value == (next.selectedModel.flatMap { $0.isEmpty ? nil : $0 } ?? "default") || $0.resolvedModel == next.selectedModel }
         if let model {
-            if let effort = next.effort, !effort.isEmpty, model.supportedEffortLevels?.contains(effort) != true { throw RemoteError("此模型不支持选定的思考强度，请先设为自动") }
-            if next.fastMode == true, model.supportsFastMode != true { throw RemoteError("此模型不支持快速模式，请先关闭快速模式") }
+            if let effort = next.effort, !effort.isEmpty, model.supportedEffortLevels?.contains(effort) != true { throw RemoteError("此模型不支持该思考强度") }
+            if next.fastMode == true, model.supportsFastMode != true { throw RemoteError("此模型不支持快速模式") }
             if next.permissionMode == "auto", model.supportsAutoMode != true { throw RemoteError("此模型不支持自动权限模式") }
         }
         guard ["default", "plan", "acceptEdits", "dontAsk", "auto", "bypassPermissions"].contains(next.permissionMode ?? "default") else { throw RemoteError("无效权限模式") }
@@ -837,7 +837,7 @@ public final class ChatEngine {
             guard ["5m", "1h"].contains(ttl) else { throw RemoteError("无效缓存时长") }
             guard let version = session.capabilities?.version,
                   version.compare("2.1.242", options: .numeric) != .orderedAscending else {
-                throw RemoteError("缓存时长需要 Claude Code 2.1.242 或更新版本，请刷新远端能力")
+                throw RemoteError("需要 Claude Code 2.1.242+")
             }
         }
         var patch: [String: JSON] = [:]
@@ -863,7 +863,7 @@ public final class ChatEngine {
     }
 
     public func manageRuntime(_ id: String, action: String, name: String? = nil, enabled: Bool? = nil) async throws -> JSON {
-        guard sessions[try index(id)].remoteOwner != nil else { throw RemoteError("此操作需要已建立的实时会话，请先正常发送一条消息。") }
+        guard sessions[try index(id)].remoteOwner != nil else { throw RemoteError("请先发送一条消息") }
         guard ["reconnectMcp", "toggleMcp", "reloadSkills", "reloadOutputStyles", "reloadPlugins"].contains(action) else { throw RemoteError("未知运行环境操作") }
         var request: JSON = ["action": .string(action)]
         if let name { request["name"] = .string(name) }
@@ -885,7 +885,7 @@ public final class ChatEngine {
         case "cost": return session.usage ?? ["message": "尚无用量数据"]
         case "tasks": return session.tasks ?? []
         case "context":
-            guard session.remoteOwner != nil else { throw RemoteError("此历史会话尚未建立实时运行环境，无法获取准确的上下文占用。") }
+            guard session.remoteOwner != nil else { throw RemoteError("历史会话没有实时上下文") }
             return try await control(id, action: "context")
         case "commands": return try JSON.from(try await capabilities(id).commands)
         case "models": return try JSON.from(try await capabilities(id).models)
@@ -941,13 +941,13 @@ public final class ChatEngine {
            let anchor = original.messages.firstIndex(where: { $0.id == incoming[first].id }) {
             let incomingIDs = Set(incoming.map(\.id))
             guard original.messages[anchor...].allSatisfy({ incomingIDs.contains($0.id) }) else {
-                throw RemoteError("远端历史分支已变化，已保留本地消息；请重新打开远端分支后继续。")
+                throw RemoteError("远端历史分支已变化，已保留本地消息")
             }
             sessions[position].messages = Array(original.messages[..<anchor]) + Array(incoming[first...])
         } else if original.messages.isEmpty {
             sessions[position].messages = incoming
         } else if !incoming.isEmpty {
-            throw RemoteError("远端历史已重置或发生分支变化，已保留本地记录。")
+            throw RemoteError("远端历史已重置或分支已变化，已保留本地记录")
         }
         if sessions[position].messages != original.messages {
             sessions[position].updatedAt = max(original.updatedAt, incoming.last?.createdAt ?? 0)
@@ -1012,7 +1012,7 @@ public final class ChatEngine {
         var request: JSON = ["operation": "messages", "reference": .string(reference)]
         if older, let before = session.historyBefore { request["before"] = .string(before) }
         let page = try await agents.call(session.config, "history", request)
-        guard let directory = page["directory"]?.string, directory.hasPrefix("/") else { throw RemoteError("历史中缺少工作目录，无法安全续接此会话") }
+        guard let directory = page["directory"]?.string, directory.hasPrefix("/") else { throw RemoteError("历史缺少工作目录，无法续接") }
         let position = try index(id)
         // A response arriving over a slow network must not replace a newly started local turn.
         guard !sessions[position].isBusy, sessions[position].remoteOwner == nil,

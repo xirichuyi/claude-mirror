@@ -20,9 +20,9 @@ struct ConnectSheet: View {
 
     private var authenticationNote: String {
         switch authentication {
-        case .password: return "密码只用于这次连接，不会保存。连接成功后可以一键设置免密登录。"
-        case .keyFile: return "使用所选私钥登录，私钥不会上传。"
-        case .automatic: return "使用这台 Mac 的 ~/.ssh/config、默认密钥和 SSH Agent，适合已经能在终端里 ssh 登录的服务器。"
+        case .password: return "密码不保存"
+        case .keyFile: return "私钥不上传"
+        case .automatic: return "使用 ~/.ssh/config 和 SSH Agent"
         }
     }
 
@@ -126,7 +126,7 @@ struct ConnectSheet: View {
             do {
                 let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
                 let user = username.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard user.isEmpty || !address.contains("@") else { throw RemoteError("地址里已经写了用户名，请清空“高级选项”里的用户名") }
+                guard user.isEmpty || !address.contains("@") else { throw RemoteError("地址已含用户名，请清空高级选项里的用户名") }
                 guard user.isEmpty || (!user.contains("@") && !user.contains(":")) else {
                     throw RemoteError("用户名不能包含 @ 或冒号")
                 }

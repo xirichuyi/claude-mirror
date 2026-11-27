@@ -38,7 +38,7 @@ public struct ConnectionConfig: Codable, Hashable, Sendable {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_.@:-"))
         guard let first = name.unicodeScalars.first, first != "-", first != ".", first != "@", first != ":",
               name.count <= 200, name.unicodeScalars.allSatisfy({ $0.isASCII && allowed.contains($0) }) else {
-            throw RemoteError("请输入 SSH 别名或 user@host，或填写服务器地址和用户名")
+            throw RemoteError("请输入 SSH 别名或 user@host")
         }
         result.host = name
         if let label = self.name {

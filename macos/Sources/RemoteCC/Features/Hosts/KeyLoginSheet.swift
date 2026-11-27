@@ -10,12 +10,9 @@ struct KeyLoginSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             SheetHeading(title: "为 \(machine.displayName) 设置免密登录？") { model.presentation = nil }.disabled(working)
-            Text("以后打开应用会自动连接，不用每次输入密码。")
-                .font(.body).fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 6) {
-                Label("在这台 Mac 上生成专用密钥 ~/.ssh/claude_mirror_ed25519", systemImage: "key")
-                Label("把它的公钥加入服务器的 ~/.ssh/authorized_keys，已有内容保持不变", systemImage: "server.rack")
-                Label("确认密钥能登录后才切换；以后可在服务器设置里改回密码", systemImage: "checkmark.shield")
+                Label("~/.ssh/claude_mirror_ed25519", systemImage: "key")
+                Label("~/.ssh/authorized_keys", systemImage: "server.rack")
             }.font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
             if !error.isEmpty {
                 Label(error, systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(WorkbenchTheme.error)

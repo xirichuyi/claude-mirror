@@ -75,7 +75,7 @@ struct PreferencesSheet: View {
                 WorkbenchSelect(title: "上下文缓存", selection: $promptCacheTtl, options:
                     [WorkbenchOption("", "远端默认"), WorkbenchOption("5m", "5 分钟"), WorkbenchOption("1h", "1 小时")])
                 .disabled(session?.isBusy == true)
-                .help("需要 Claude Code 2.1.242+。1 小时适合间歇工作，缓存写入费率更高；远端环境变量优先。不会发送保活请求。")
+                .help("需要 Claude Code 2.1.242+")
                 VStack(alignment: .leading) {
                     Text("额外目录").help("每行一个远端绝对路径")
                     TextEditor(text: $directories).scrollContentBackground(.hidden).background(WorkbenchTheme.surface).font(.system(size: 12, design: .monospaced)).frame(height: 54).disabled(session?.isBusy == true)

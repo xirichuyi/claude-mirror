@@ -54,10 +54,9 @@ struct QuotaOverview: View {
                         .help(window["resetsAt"]?.string.map { "重置时间：" + $0 } ?? "")
                     }
                 }
-                DisclosureGroup(report["blocked"]?.isTruthy == true ? "已触发额度保护" : "额度保护 · 95% 停止线") {
-                    Text("同一远端登录已用达到 90% 后限制并行任务；检测到任一周期已用 95% 时停止。用量反馈有延迟，无法保证精确保留 5%。")
-                        .font(.caption2).foregroundStyle(WorkbenchTheme.inkMuted).fixedSize(horizontal: false, vertical: true)
-                }.font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                if report["blocked"]?.isTruthy == true {
+                    Text("已触发额度保护").font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
+                }
             } else {
                 Text(refreshing ? "正在读取…" : model.isConnected ? "正在读取账户额度…" : "连接后显示远端额度")
                     .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)

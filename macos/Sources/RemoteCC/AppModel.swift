@@ -280,7 +280,7 @@ final class AppModel: ObservableObject {
         guard let engine, let connections else { throw RemoteError("连接服务尚未就绪") }
         let config = try input.validated()
         guard !syncingMachines.contains(original.key), !syncingMachines.contains(config.key) else { throw RemoteError("正在同步机器，请稍后再试") }
-        guard !engine.sessions.contains(where: { $0.config.key == original.key && $0.isBusy && $0.status != "detached" }) else { throw RemoteError("请等待这台机器的任务结束后再修改连接") }
+        guard !engine.sessions.contains(where: { $0.config.key == original.key && $0.isBusy && $0.status != "detached" }) else { throw RemoteError("请先等待任务结束") }
         guard !engine.sessions.contains(where: { $0.config.key == original.key && workspaces[$0.id]?.hasUnsavedEdits == true }) else { throw RemoteError("请先保存这台机器上正在编辑的文件") }
         guard original.key == config.key || !savedMachines.contains(where: { $0.key == config.key }) else { throw RemoteError("该主机和端口已存在") }
         syncingMachines.insert(original.key)
@@ -343,7 +343,7 @@ final class AppModel: ObservableObject {
         if enabled {
             presentation = .confirmation(WorkbenchConfirmation(
                 title: "允许 \(machine.displayName) 登录这台 Mac？",
-                detail: "开启后，服务器上的程序可以通过本应用的连接，以你的身份登录这台 Mac 并执行命令。只在你完全信任这台服务器、并且确实需要从服务器访问本机时开启。关闭后立即撤销。",
+                detail: "服务器可以以你的身份登录这台 Mac。只对信任的服务器开启。",
                 actionTitle: "仍要开启",
                 action: { self.applyReverseAccess(machine, enabled: true) }))
             return
@@ -566,7 +566,7 @@ final class AppModel: ObservableObject {
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
             NSWorkspace.shared.open(file)
-        } catch { copyCommand(line, note: "无法打开终端，已复制命令，请粘贴到终端运行") }
+        } catch { copyCommand(line, note: "已复制命令") }
     }
 
     func copyCommand(_ command: String, note: String = "已复制命令") {
@@ -603,7 +603,7 @@ final class AppModel: ObservableObject {
         updated.authentication = .keyFile
         updated.identityFile = path
         do { try await connections.verifyLogin(updated) }
-        catch { throw RemoteError("密钥已添加，但服务器不接受密钥登录（可能禁用了公钥认证）。仍可继续使用密码。\n" + error.localizedDescription) }
+        catch { throw RemoteError("服务器不接受密钥登录，仍使用密码。\n" + error.localizedDescription) }
         rememberMachine(updated)
         connections.updateConfig(updated)
         if selectedMachine?.key == updated.key { selectedMachine = updated; lastConnection = updated }
@@ -892,7 +892,7 @@ final class AppModel: ObservableObject {
         }
         if archived && !confirmed {
             presentation = .confirmation(WorkbenchConfirmation(title: "从侧栏移除项目？",
-                detail: "\(project.directory)\n将归档该项目的 \(sessions.count) 条对话，可从已归档列表恢复。远端文件夹和聊天历史不会删除。",
+                detail: "\(project.directory)\n\(sessions.count) 条对话将归档，可恢复。",
                 actionTitle: "移除项目") { [weak self] in self?.archiveProject(project, archived: true, confirmed: true) })
             return
         }
@@ -906,7 +906,7 @@ final class AppModel: ObservableObject {
         guard let engine else { return }
         if !confirmed {
             presentation = .confirmation(WorkbenchConfirmation(title: "删除此项目的远端聊天记录？",
-                detail: project.directory + "\n所有匹配此目录的聊天记录将移入远端回收目录，本地列表同步移除。项目文件不受影响。请先关闭其他客户端中此目录的 Claude 会话。",
+                detail: project.directory + "\n聊天记录移入远端回收目录，仅在本机的对话直接删除；项目文件不受影响。",
                 actionTitle: "移入远端回收目录", destructive: true) { [weak self] in self?.deleteProjectHistory(project, confirmed: true) })
             return
         }
@@ -1070,7 +1070,7 @@ final class AppModel: ObservableObject {
                 try await postNotification(id: id, title: "RemoteCC 通知测试", body: "任务通知已送达。", sessionId: activeId)
                 try await Task.sleep(nanoseconds: 2_000_000_000)
                 let delivered = await center.deliveredNotifications()
-                notificationTestStatus = delivered.contains { $0.request.identifier == id } ? "已在系统通知中心确认送达" : "已提交，但未确认送达；请检查专注模式与系统通知设置。"
+                notificationTestStatus = delivered.contains { $0.request.identifier == id } ? "已在系统通知中心确认送达" : "未确认送达"
             } catch { notificationTestStatus = "通知测试失败：" + error.localizedDescription }
         }
     }
@@ -1088,7 +1088,7 @@ final class AppModel: ObservableObject {
             guard let self, self.notificationRequestID == request, self.notificationsAuthorizing else { return }
             self.notificationRequestID = UUID()
             self.notificationsAuthorizing = false
-            self.notificationTestStatus = "系统通知授权未响应，请检查系统权限提示后重试。"
+            self.notificationTestStatus = "授权无响应"
         }
         Task {
             defer { if notificationRequestID == request { notificationsAuthorizing = false } }
@@ -1097,7 +1097,7 @@ final class AppModel: ObservableObject {
                 guard notificationRequestID == request else { return }
                 notificationsEnabled = allowed
                 UserDefaults.standard.set(allowed, forKey: "task-notifications")
-                notificationTestStatus = allowed ? "系统通知已允许，可发送测试通知。" : "系统未允许通知，请在系统设置中允许 RemoteCC 通知。"
+                notificationTestStatus = allowed ? "已允许" : "未允许，请在系统设置中开启"
             } catch {
                 if notificationRequestID == request { notificationTestStatus = "通知权限请求失败：" + error.localizedDescription }
             }

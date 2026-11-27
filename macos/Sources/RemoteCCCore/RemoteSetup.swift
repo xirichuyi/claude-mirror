@@ -54,7 +54,7 @@ public enum MachineHealth {
     public static func issues(startError: Error?, info: ServerInfo?, status: ClaudeStatus?) -> [HealthIssue] {
         var result: [HealthIssue] = []
         if let setup = startError as? RemoteSetupError {
-            let detail = "镜像 Claude 在服务器上运行一个小程序来管理对话，它需要 Node.js。一键安装会把官方 Node.js 装到你的用户目录，不需要管理员权限，也不影响系统里已有的版本。"
+            let detail = "安装到用户目录，不需要管理员权限"
             switch setup {
             case .nodeMissing: result.append(HealthIssue(kind: .node, title: "服务器缺少 Node.js", detail: detail, action: .install, blocking: true))
             case .nodeOutdated(let version): result.append(HealthIssue(kind: .node, title: "服务器的 Node.js \(version) 太旧", detail: detail, action: .install, blocking: true))
@@ -65,12 +65,12 @@ public enum MachineHealth {
         let claudePath = status.map(\.claude) ?? info.claude
         if claudePath == nil {
             result.append(HealthIssue(kind: .claude, title: "服务器还没有安装 Claude Code",
-                                      detail: "一键安装会使用 Anthropic 官方安装程序，把 Claude Code 装到你的用户目录。",
+                                      detail: "安装到用户目录",
                                       action: .install, blocking: true))
         } else if let status, status.auth == .loggedOut {
             let command = status.loginCommand ?? "claude auth login"
             result.append(HealthIssue(kind: .login, title: "服务器上的 Claude Code 还没有登录",
-                                      detail: "点击“在终端登录”，按提示用浏览器完成授权；登录信息只保存在服务器上。完成后点“重新检查”。",
+                                      detail: "在终端登录后重新检查",
                                       action: .login(command: command), blocking: true))
         }
         if let warning = info.persistenceWarning {
@@ -84,14 +84,14 @@ public enum MachineHealth {
 /// Turns OpenSSH's terse failures into what a new user can act on. Unknown messages pass through.
 public enum ConnectionAdvice {
     private static let rules: [(patterns: [String], advice: String)] = [
-        (["permission denied", "authentication failed"], "服务器拒绝了登录：用户名、密码或密钥不正确。请检查用户名，或在“登录方式”里改用密码。"),
-        (["too many authentication failures"], "本机尝试了太多把密钥，被服务器拒绝。请在“登录方式”里选择具体的私钥文件，或改用密码。"),
-        (["could not resolve hostname", "nodename nor servname", "name or service not known", "temporary failure in name resolution"], "找不到这个服务器地址。请检查地址是否拼写正确，或确认网络、VPN 已连接。"),
-        (["connection refused"], "服务器拒绝连接：SSH 服务可能没有运行，或端口不对（通常是 22）。"),
-        (["operation timed out", "connection timed out", "ssh 操作超时"], "连接超时：服务器可能已关机，或被防火墙、网络拦截。请确认这台电脑能访问它。"),
+        (["permission denied", "authentication failed"], "服务器拒绝了登录：用户名、密码或密钥不正确"),
+        (["too many authentication failures"], "密钥尝试次数过多，请指定私钥或改用密码"),
+        (["could not resolve hostname", "nodename nor servname", "name or service not known", "temporary failure in name resolution"], "找不到这个服务器地址"),
+        (["connection refused"], "服务器拒绝连接，检查 SSH 端口"),
+        (["operation timed out", "connection timed out", "ssh 操作超时"], "连接超时"),
         (["no route to host", "network is unreachable", "network unreachable"], "网络不通：请检查网络连接或 VPN。"),
-        (["host key verification failed", "remote host identification has changed"], "服务器的身份指纹和上次不同。如果服务器刚重装过，请在终端运行 ssh-keygen -R 加上服务器地址，然后重试；否则请先确认没有连到冒充的服务器。"),
-        (["connection closed by", "kex_exchange_identification", "connection reset"], "服务器在登录前断开了连接：可能限制了来源 IP，或 SSH 服务异常。"),
+        (["host key verification failed", "remote host identification has changed"], "服务器的身份指纹已变化。确认服务器重装过后，运行 ssh-keygen -R <地址> 再重试"),
+        (["connection closed by", "kex_exchange_identification", "connection reset"], "服务器在登录前断开"),
     ]
 
     public static func explain(_ message: String) -> String {
@@ -179,8 +179,8 @@ public enum RemoteInstaller {
     public static func summary(_ code: Int32) -> String {
         switch code {
         case 0: return "安装完成，正在重新检查服务器…"
-        case 3: return "Claude Code 已就绪，但 Node.js 没能自动安装。请按上面的提示用系统包管理器安装 Node.js 18.14 或更新版本。"
-        default: return "安装没有完成（退出码 \(code)）。请查看上面的输出；常见原因是服务器无法访问外网。"
+        case 3: return "Node.js 未能安装，请手动安装 18.14+"
+        default: return "安装失败（退出码 \(code)）"
         }
     }
 }

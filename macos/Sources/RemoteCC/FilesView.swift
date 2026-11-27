@@ -524,7 +524,7 @@ struct EditorPane: View {
             if let tab = workspace.activeTab {
                 header(tab)
                 if tab.conflict {
-                    Text("服务器上的文件已被修改。保存会被拒绝，请先复制你的修改再重新打开。")
+                    Text("服务器上的文件已变更，无法保存")
                         .font(.caption).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(WorkbenchTheme.warning.opacity(0.15))
                 }
                 EditorContentDeck(workspace: workspace).id(ObjectIdentifier(workspace)).clipped()

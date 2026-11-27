@@ -31,6 +31,6 @@ final class ReplyFailureTests: XCTestCase {
 
     func testGenericErrorSummaryUsesFirstNonemptyLine() {
         XCTAssertEqual(ReplyFailure("\nConnection closed\nDetails").summary, "Connection closed")
-        XCTAssertEqual(ReplyFailure("").summary, "查看详情以了解原因。")
+        XCTAssertEqual(ReplyFailure("").summary, "查看详情")
     }
 }

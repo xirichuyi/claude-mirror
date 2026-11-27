@@ -96,7 +96,7 @@ struct ProjectPickerSheet: View {
                     }.buttonStyle(QuietButtonStyle(height: 30)).help(folder.path).disabled(busy || loading)
                 }
                 if listing?.truncated == true {
-                    Text("目录较多，未全部显示；可输入完整路径前往。")
+                    Text("未全部显示，可输入路径")
                         .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted).padding(8)
                 }
             }.padding(6)

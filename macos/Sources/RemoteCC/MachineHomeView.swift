@@ -80,40 +80,19 @@ struct MachineHomeView: View {
 
 }
 
-/// First launch: what the app needs and the three steps to a working conversation.
+/// First launch: a heading and the way to add a server.
 struct GettingStartedView: View {
     @EnvironmentObject private var model: AppModel
     static let helpURL = URL(string: "https://github.com/xirichuyi/claude-mirror/blob/HEAD/docs/getting-started.md")!
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("开始使用").font(.system(size: 22, weight: .semibold)).foregroundStyle(WorkbenchTheme.ink)
-                Text("镜像 Claude 让你在这台 Mac 上使用服务器里的 Claude Code：代码和 Claude 都在服务器上运行，这里负责对话、审批和查看文件。")
-                    .font(.body).foregroundStyle(WorkbenchTheme.inkMuted).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                step(1, "准备一台服务器", "Linux 或 macOS，能用 SSH 登录即可，比如云服务器、公司开发机或家里的电脑。")
-                step(2, "添加服务器", "填写地址和密码。连接成功后可以一键设置免密登录。")
-                step(3, "自动检查环境", "缺少 Claude Code 或 Node.js 时一键安装；第一次使用需要在服务器上登录 Claude。")
-            }
+            Text("开始使用").font(.system(size: 22, weight: .semibold)).foregroundStyle(WorkbenchTheme.ink)
             HStack(spacing: 12) {
                 Button { model.showConnect = true } label: { Label("添加服务器", systemImage: "plus") }
                     .buttonStyle(WorkbenchButtonStyle(prominent: true))
-                Link("没有服务器？查看入门指南", destination: Self.helpURL).font(.callout)
+                Link("入门指南", destination: Self.helpURL).font(.callout)
             }.padding(.top, 4)
-        }
-    }
-
-    private func step(_ number: Int, _ title: String, _ detail: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(number)").font(.callout.weight(.semibold)).frame(width: 24, height: 24)
-                .background(WorkbenchTheme.surface, in: Circle())
-                .overlay(Circle().strokeBorder(WorkbenchTheme.border))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.callout.weight(.semibold))
-                Text(detail).font(.callout).foregroundStyle(WorkbenchTheme.inkMuted).fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 }

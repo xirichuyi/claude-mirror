@@ -16,9 +16,9 @@ public struct ReplyFailure: Sendable {
         return "回复未完成"
     }
     public var summary: String {
-        if isSafetyBlock { return "Claude 拒绝了本次请求。可查看详情或修改请求。" }
-        if isQuotaProtection { return "请求已暂停，展开详情查看额度及重置时间。" }
-        return raw.components(separatedBy: .newlines).first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? "查看详情以了解原因。"
+        if isSafetyBlock { return "Claude 拒绝了本次请求" }
+        if isQuotaProtection { return "已触发额度保护" }
+        return raw.components(separatedBy: .newlines).first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? "查看详情"
     }
     public func duplicates(_ block: Block) -> Bool {
         guard ["text", "notice"].contains(block.type), let text = block.text else { return false }
