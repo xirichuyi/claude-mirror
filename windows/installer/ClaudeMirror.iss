@@ -19,7 +19,7 @@ DisableDirPage=yes
 DisableProgramGroupPage=yes
 WizardStyle=modern
 SetupIconFile=..\ClaudeMirror.App\Assets\AppIcon.ico
-UninstallDisplayIcon={app}\Tether.exe
+UninstallDisplayIcon={app}\claude-mirror.exe
 OutputDir=..\dist
 OutputBaseFilename=Claude-Mirror-Setup-x64
 Compression=lzma2/fast
@@ -35,17 +35,16 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "{#Payload}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "*.pdb"
 
-; Installs from before the rename used these names; upgrades keep the old directory.
+; The executable keeps its old name so pinned and desktop shortcuts keep working; only the old Start menu entry is replaced.
 [InstallDelete]
-Type: files; Name: "{app}\claude-mirror.*"
 Type: files; Name: "{userprograms}\Claude Mirror.lnk"
 
 [Icons]
-Name: "{userprograms}\Tether"; Filename: "{app}\Tether.exe"; WorkingDir: "{app}"
+Name: "{userprograms}\Tether"; Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\Tether.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,Tether}"; Flags: postinstall nowait skipifsilent
-Filename: "{app}\Tether.exe"; WorkingDir: "{app}"; Flags: nowait; Check: IsUpdateRestart
+Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,Tether}"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\claude-mirror.exe"; WorkingDir: "{app}"; Flags: nowait; Check: IsUpdateRestart
 
 [Code]
 function IsUpdateRestart: Boolean;

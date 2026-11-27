@@ -86,16 +86,16 @@ jobs:
         run: |
           $marker = Join-Path $env:TEMP 'tether-smoke.txt'
           Remove-Item $marker -ErrorAction SilentlyContinue
-          $app = Start-Process windows/dist/tether/Tether.exe -ArgumentList '--smoke-test' -PassThru
+          $app = Start-Process windows/dist/tether/claude-mirror.exe -ArgumentList '--smoke-test' -PassThru
           if (-not $app.WaitForExit(90000)) { $app.Kill(); throw "WinUI startup timed out (window loaded: $(Test-Path $marker))" }
           if ($app.ExitCode -ne 0 -or -not (Test-Path $marker)) { throw "WinUI startup failed: $($app.ExitCode)" }
           Get-Content $marker
       - name: Verify SSH setup buttons in the published client
         shell: pwsh
-        run: ./windows/test-host-dialog.ps1 windows/dist/tether/Tether.exe
+        run: ./windows/test-host-dialog.ps1 windows/dist/tether/claude-mirror.exe
       - name: Render demo scenes
         shell: pwsh
-        run: ./windows/capture-screenshots.ps1 windows/dist/tether/Tether.exe windows/dist/screenshots
+        run: ./windows/capture-screenshots.ps1 windows/dist/tether/claude-mirror.exe windows/dist/screenshots
       - uses: actions/upload-artifact@v4
         if: always()
         with:
