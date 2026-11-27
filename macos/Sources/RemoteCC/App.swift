@@ -55,6 +55,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     weak var model: AppModel?
     private let networkMonitor = NWPathMonitor()
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        #if !DEBUG
+        moveToCurrentName()
+        #endif
+    }
+
+    /// Renames an install from before the rename to Tether.app once, then relaunches from there.
+    private func moveToCurrentName() {
+        let original = Bundle.main.bundleURL
+        guard let target = BundleRename.target(for: original),
+              !FileManager.default.fileExists(atPath: target.path),
+              (try? FileManager.default.moveItem(at: original, to: target)) != nil else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: target, configuration: configuration) { _, error in
+            DispatchQueue.main.async {
+                // Without a relaunch this process keeps running from the old path, so put the bundle back.
+                if error == nil { NSApp.terminate(nil) } else { try? FileManager.default.moveItem(at: target, to: original) }
+            }
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A bare SwiftPM executable starts as a background process unless told otherwise.
         UNUserNotificationCenter.current().delegate = self
