@@ -68,7 +68,7 @@ public sealed class RemoteAgent : IDisposable
     }
 
     /// <summary>Starts the remote agent over the existing SSH connection. Safe to call again after one-click setup.</summary>
-    public async Task StartAgentAsync(string resourceDirectory)
+    public async Task StartAgentAsync(string resourceDirectory, bool installNode = true)
     {
         if (ssh is null || !ssh.Connected) throw new IOException("请先连接服务器");
         command?.Dispose(); writer = null; channelClosed = false; Hello = null;
@@ -94,7 +94,14 @@ public sealed class RemoteAgent : IDisposable
         writer = new StreamWriter(command.Input, new UTF8Encoding(false)) { AutoFlush = true };
         var channel = command!;
         var ready = Listen(channel.Output, channel.Exit, () => channel == command);
-        await ready.WaitAsync(TimeSpan.FromSeconds(30));
+        try { await ready.WaitAsync(TimeSpan.FromSeconds(30)); }
+        catch (RemoteSetupException) when (installNode)
+        {
+            // A server without a usable Node.js gets the app's own copy, then the agent starts as usual.
+            if (await InstallAsync(resourceDirectory, _ => { }, lifetime.Token, RemoteInstaller.NodeCommand) != 0) throw;
+            await StartAgentAsync(resourceDirectory, false);
+            return;
+        }
         var hello = await CallAsync("file", new { operation = "hello" });
         Home = hello["home"]!.GetValue<string>();
         if (hello["nodeSupported"]?.GetValue<bool>() != true) { channelClosed = true; throw new RemoteSetupException(true, hello["node"]?.GetValue<string>()); }
@@ -166,12 +173,12 @@ public sealed class RemoteAgent : IDisposable
     public Task<JsonNode> ClaudeStatusAsync() => CallAsync("file", new { operation = "claudeStatus" });
 
     /// <summary>Runs the bundled install-claude-remote.sh over SSH, streaming merged output lines. Returns its exit status.</summary>
-    public async Task<int> InstallAsync(string resourceDirectory, Action<string> output, CancellationToken token)
+    public async Task<int> InstallAsync(string resourceDirectory, Action<string> output, CancellationToken token, string command = RemoteInstaller.Command)
     {
         if (ssh is null || !ssh.Connected) throw new IOException("请先连接服务器");
         var installer = await File.ReadAllBytesAsync(Path.Combine(resourceDirectory, "install-claude-remote.sh"), token);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
-        using var run = ssh.Run(RemoteInstaller.Command, true, linked.Token);
+        using var run = ssh.Run(command, true, linked.Token);
         using (var input = run.Input) await input.WriteAsync(installer, token);
         using (var reader = new StreamReader(run.Output))
             while (await reader.ReadLineAsync(linked.Token) is { } line) output(line);

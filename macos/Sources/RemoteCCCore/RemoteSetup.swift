@@ -151,9 +151,11 @@ public enum LoginKeySetup {
 /// Runs the bundled install-claude-remote.sh over an existing SSH connection, streaming its output.
 public enum RemoteInstaller {
     public static let command = "sh -c " + shellQuote("command -v bash >/dev/null 2>&1 || { echo '服务器缺少 bash，无法自动安装。'; exit 1; }; exec bash -s 2>&1")
+    /// Only puts Node.js on the server; the agent channel runs this by itself when Node.js is missing or too old.
+    public static let nodeCommand = "sh -c " + shellQuote("command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- --node-only 2>&1")
 
     /// Returns the installer's exit status: 0 ready, 3 Node.js could not be installed.
-    public static func run(launcher: RemoteLauncher, config: ConnectionConfig, script: Data,
+    public static func run(launcher: RemoteLauncher, config: ConnectionConfig, script: Data, command: String = command,
                            output: @escaping @Sendable (String) -> Void) async throws -> Int32 {
         let process = try launcher.spawn(config, command: command)
         return await withTaskCancellationHandler {

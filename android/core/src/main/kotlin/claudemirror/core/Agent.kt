@@ -48,7 +48,14 @@ interface Launcher {
 }
 
 /** The server program this app carries: built by `npm run prepare-server`. */
-class ServerResources(val agentSource: ByteArray, val agentDigest: String, val bundleDigest: String, val bundlePayload: String) {
+class ServerResources(
+    val agentSource: ByteArray,
+    val agentDigest: String,
+    val bundleDigest: String,
+    val bundlePayload: String,
+    /** scripts/install-claude-remote.sh; with `--node-only` it puts Node.js on a server that lacks it. */
+    val installScript: ByteArray? = null,
+) {
     companion object {
         fun read(open: (String) -> InputStream): ServerResources {
             val manifest = open("manifest.json").use { MirrorJson.parseToJsonElement(it.readBytes().decodeToString()) }.obj()
@@ -56,7 +63,8 @@ class ServerResources(val agentSource: ByteArray, val agentDigest: String, val b
             val bundle = manifest?.get("bundleDigest").string()
             val payload = manifest?.get("bundlePayload").string()
             if (agent == null || bundle == null || payload == null) throw RemoteException("应用内的服务端程序不完整，请重新构建")
-            return ServerResources(open("remote-agent.cjs").use { it.readBytes() }, agent, bundle, payload)
+            val installer = runCatching { open("install-claude-remote.sh").use { it.readBytes() } }.getOrNull()
+            return ServerResources(open("remote-agent.cjs").use { it.readBytes() }, agent, bundle, payload, installer)
         }
     }
 }
@@ -99,7 +107,7 @@ class AgentChannel internal constructor(
         get() = "sh -c " + shellQuote(script("install.sh").trim().replace("@AGENT@", agentFile).replace("@SIZE@", resources.agentSource.size.toString()))
 
     internal suspend fun start() = withContext(Dispatchers.IO) {
-        if (!launch()) {
+        if (!launchInstallingNode()) {
             install()
             if (!launch()) throw RemoteException("远端代理启动失败", confirmed = false)
         }
@@ -109,6 +117,25 @@ class AgentChannel internal constructor(
             throw NodeOutdatedException(server.node ?: "未知版本")
         }
         info = server
+    }
+
+    /** A server without a usable Node.js gets the app's own copy, then the agent starts as usual. */
+    private fun launchInstallingNode(): Boolean = try {
+        launch()
+    } catch (error: Exception) {
+        if (error !is NodeMissingException && error !is NodeOutdatedException) throw error
+        if (!installNode()) throw error
+        launch()
+    }
+
+    private fun installNode(): Boolean {
+        val script = resources.installScript ?: return false
+        val child = launcher.start(host, "sh -c " + shellQuote("command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- --node-only 2>&1"))
+        return try {
+            child.stdin.use { it.write(script) }
+            child.stdout.readBytes()
+            child.waitForExit() == 0
+        } catch (error: IOException) { false } finally { child.kill() }
     }
 
     /** True once the agent answers, false when its program still has to be uploaded. */

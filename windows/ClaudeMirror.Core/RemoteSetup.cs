@@ -70,6 +70,8 @@ public static class ConnectionAdvice
 public static class RemoteInstaller
 {
     public const string Command = "sh -c 'command -v bash >/dev/null 2>&1 || { echo \"服务器缺少 bash，无法自动安装。\"; exit 1; }; exec bash -s 2>&1'";
+    /// <summary>Only puts Node.js on the server; the agent runs this by itself when Node.js is missing or too old.</summary>
+    public const string NodeCommand = "sh -c 'command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- --node-only 2>&1'";
 
     public static string Summary(int code) => code switch
     {

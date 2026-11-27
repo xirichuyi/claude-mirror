@@ -87,6 +87,23 @@ cp "${dist}/\${url##*/}" "$out"`);
   } finally { f.close(); }
 });
 
+test('--node-only installs Node.js from the pinned list and touches nothing else', () => {
+  const f = fixture(); try {
+    fs.rmSync(path.join(f.home, '.local/bin/node'));
+    const log = path.join(f.home, 'urls');
+    // No claude on the server: --node-only must not try to install it.
+    f.put('curl', `while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; https://*) echo "$1" >> '${log}';; esac; shift; done; exit 22`);
+    const result = f.run('--node-only');
+    assert.equal(result.status, 3, result.stdout + result.stderr);
+    const urls = fs.readFileSync(log, 'utf8');
+    assert.doesNotMatch(urls, /claude\.ai/);
+    assert.match(urls, /nodejs\.org.*\/v22\.23\.5\/node-v22\.23\.5-/);
+    assert.match(urls, /npmmirror\.com/, 'a second mirror is tried');
+    assert.doesNotMatch(result.stdout, /Background sessions/);
+    assert.match(f.run('--node-only', '--runner', 'x').stderr, /--node-only goes alone/);
+  } finally { f.close(); }
+});
+
 test('remote setup checks the Full Access account options before installing anything', { skip: process.getuid?.() === 0 }, () => {
   const f = fixture(); try {
     f.put('curl', 'exit 99');

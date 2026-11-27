@@ -80,7 +80,7 @@ public final class AgentChannel: @unchecked Sendable {
     }
 
     func start() async throws {
-        var outcome = try await launch()
+        var outcome = try await launchInstallingNode()
         if outcome == "install" {
             try await install()
             outcome = try await launch()
@@ -93,6 +93,19 @@ public final class AgentChannel: @unchecked Sendable {
             throw RemoteSetupError.nodeOutdated(server.node ?? "未知版本")
         }
         lock.withLock { info = server }
+    }
+
+    /// A server without a usable Node.js gets the app's own copy, then the agent starts as usual.
+    private func launchInstallingNode() async throws -> String {
+        do {
+            return try await launch()
+        } catch let error as RemoteSetupError {
+            guard let script = resources.installScript,
+                  let code = try? await RemoteInstaller.run(launcher: launcher, config: config, script: script,
+                                                            command: RemoteInstaller.nodeCommand, output: { _ in }),
+                  code == 0 else { throw error }
+            return try await launch()
+        }
     }
 
     private final class LaunchState: @unchecked Sendable {
