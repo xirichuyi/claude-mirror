@@ -168,7 +168,8 @@ public sealed partial class MainWindow
         {
             busy.IsActive = true; error.Visibility = Visibility.Collapsed;
             try { await action(); }
-            catch (Exception e) when (e is not OperationCanceledException) { error.Text = "⚠ " + ConnectionAdvice.Explain(e.Message); error.Visibility = Visibility.Visible; }
+            catch (OperationCanceledException) { }
+            catch (Exception e) { error.Text = "⚠ " + ConnectionAdvice.Explain(e.Message); error.Visibility = Visibility.Visible; }
             finally { busy.IsActive = false; }
         }
         async Task Reload()
