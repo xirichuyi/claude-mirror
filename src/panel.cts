@@ -235,9 +235,9 @@ async function main() {
 
 const HTML = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Claude Mirror</title><link rel="stylesheet" href="app.css"><script src="app.js" defer></script></head>
+<title>Tether</title><link rel="stylesheet" href="app.css"><script src="app.js" defer></script></head>
 <body>
-<header><b>Claude Mirror</b><span id="server"></span><span class="grow"></span>
+<header><b>Tether</b><span id="server"></span><span class="grow"></span>
 <button id="password-open" class="ghost" hidden title="修改密码">密码</button><button id="logout" class="ghost" hidden title="退出">退出</button></header>
 <main>
 <form id="login" hidden><input id="user" autocomplete="username" placeholder="账号" required>

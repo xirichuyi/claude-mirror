@@ -347,8 +347,8 @@ install_panel() {
   if [ -n "${CLAUDE_MIRROR_PANEL_SOURCE:-}" ]; then
     cp -- "$CLAUDE_MIRROR_PANEL_SOURCE/claude-mirror-panel.cjs" "$CLAUDE_MIRROR_PANEL_SOURCE/install-claude-remote.sh" "$work/panel/"
   else
-    if [ "$PANEL_RELEASE" = latest ]; then url=https://github.com/xirichuyi/claude-mirror/releases/latest/download
-    else url=https://github.com/xirichuyi/claude-mirror/releases/download/$PANEL_RELEASE; fi
+    if [ "$PANEL_RELEASE" = latest ]; then url=https://github.com/xirichuyi/tether/releases/latest/download
+    else url=https://github.com/xirichuyi/tether/releases/download/$PANEL_RELEASE; fi
     echo 'Downloading the panel...'
     for source in claude-mirror-panel.cjs install-claude-remote.sh; do
       download "$url/$source" "$work/panel/$source" || { echo "Could not download $source." >&2; return 1; }
@@ -361,9 +361,9 @@ install_panel() {
   ip=$(hostname -I 2>/dev/null | awk '{print $1}')
   if [ ! -s "$PANEL_CONF/cert.pem" ]; then
     # Self-signed: the browser warns once; the fingerprint below tells it is this server.
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 -subj '/CN=Claude Mirror' \
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 -subj '/CN=Tether' \
       ${ip:+-addext "subjectAltName=IP:$ip"} -keyout "$PANEL_CONF/key.pem" -out "$PANEL_CONF/cert.pem" >/dev/null 2>&1 ||
-      openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj '/CN=Claude Mirror' -keyout "$PANEL_CONF/key.pem" -out "$PANEL_CONF/cert.pem" >/dev/null 2>&1 ||
+      openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj '/CN=Tether' -keyout "$PANEL_CONF/key.pem" -out "$PANEL_CONF/cert.pem" >/dev/null 2>&1 ||
       { echo 'Could not create the HTTPS certificate.' >&2; return 1; }
     chmod 600 "$PANEL_CONF/key.pem"
   fi
@@ -372,7 +372,7 @@ install_panel() {
   read -r port path < <("$node" "$PANEL_LIB/claude-mirror-panel.cjs" address "$PANEL_CONF")
   cat > /etc/systemd/system/claude-mirror-panel.service <<UNIT
 [Unit]
-Description=Claude Mirror panel
+Description=Tether panel
 After=network-online.target
 
 [Service]
