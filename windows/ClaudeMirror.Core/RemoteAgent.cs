@@ -50,6 +50,7 @@ public sealed class RemoteAgent : IDisposable
     public TimeSpan ProbeAfter { get; set; } = TimeSpan.FromSeconds(5);
     public TimeSpan DeadAfter { get; set; } = TimeSpan.FromSeconds(20);
     private long heard = Environment.TickCount64;
+    private long sent;
     private int lost;
     public bool Connected => (attached || ssh?.Connected == true) && writer is not null && !lifetime.IsCancellationRequested && !channelClosed;
 
@@ -231,7 +232,7 @@ public sealed class RemoteAgent : IDisposable
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(100), lifetime.Token);
                 if (!Probing || writer is null) continue;
-                var quiet = TimeSpan.FromMilliseconds(Environment.TickCount64 - Interlocked.Read(ref heard));
+                var quiet = TimeSpan.FromMilliseconds(Environment.TickCount64 - Math.Max(Interlocked.Read(ref heard), Interlocked.Read(ref sent)));
                 if (quiet >= DeadAfter)
                 {
                     Lose(new IOException("网络无响应，连接已断开"), current());
@@ -483,6 +484,8 @@ public sealed class RemoteAgent : IDisposable
                 if (count == 0) break;
                 upload.Spend(count);
                 await WriteFrameAsync(3, id, chunk.AsMemory(0, count));
+                // On a slow uplink a chunk can take longer than the silence limit before the agent answers; a write that completes proves the link moves.
+                Interlocked.Exchange(ref sent, Environment.TickCount64);
             }
             await WriteFrameAsync(4, id, ReadOnlyMemory<byte>.Empty);
             return (await reply)["path"]!.GetValue<string>();
