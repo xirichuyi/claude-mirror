@@ -395,4 +395,6 @@ public struct ServerInfo: Codable, Hashable, Sendable {
     public var claude: String?
     /// Set when the server kills background sessions on SSH logout (older agents omit it).
     public var persistenceWarning: String?
+    /// The SSH account's uid; 0 can manage members (older agents omit it).
+    public var uid: Int?
 }

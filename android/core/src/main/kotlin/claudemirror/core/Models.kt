@@ -53,6 +53,8 @@ data class ServerInfo(
     val nodeSupported: Boolean = true,
     val claude: String? = null,
     val persistenceWarning: String? = null,
+    /** The SSH account's uid; 0 can manage members (older agents omit it). */
+    val uid: Int? = null,
 )
 
 @Serializable

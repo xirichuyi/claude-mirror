@@ -220,6 +220,18 @@ sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app
 | `--copy-login` | 把 root 的 `~/.claude/.credentials.json` 复制给该账号（仅此一个文件，权限 600）。不加则按脚本最后打印的命令登录一次 |
 
 选项在安装任何东西之前检查，重复运行不会重复创建。完成后在新对话选择 Full Access，执行账号填 `claude-runner`。
+
+### 多人共用一台服务器
+
+每人一个 Linux 账号、自己的 SSH 密钥和 Claude 登录；家目录为 `700`，对话、文件、附件、任务和用量互相看不到。以 root 连接时，服务器旁出现「成员」，可添加（账号 + 公钥）和删除。也可以在终端运行：
+
+```bash
+sudo bash scripts/install-claude-remote.sh --add-user alice --key 'ssh-ed25519 AAAA… alice@laptop'
+sudo bash scripts/install-claude-remote.sh --list-users
+sudo bash scripts/install-claude-remote.sh --remove-user alice   # 删除账号和家目录
+```
+
+只管理本脚本创建的账号（记录在 `/etc/claude-mirror/members`），已有账号不会被修改或删除。成员用 `alice@服务器` 添加服务器，首次连接后自己登录 Claude。
 - 不会自动登录、索取 API Key，也不会把本机 Claude 凭据传到服务器。
 
 如需登录，请在服务器交互式终端运行 `claude auth login`；新安装通常位于 `~/.local/bin/claude`。完成后回到客户端连接同一主机。安装器要求远端能访问官方站点；发行地区、网络或系统依赖问题会按实际错误显示。

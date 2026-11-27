@@ -8,13 +8,19 @@
 #   --copy-login     copy root's Claude login file to the runner instead of logging in again
 #
 #   --node-only      only make sure Node.js is there; Claude Mirror runs this by itself when it connects
+#
+# Members of a shared server (root on Linux). Each one is an ordinary account with its own SSH key,
+# Claude login, conversations and files; homes are private, so members cannot see each other.
+#   --list-users                      print "member NAME FINGERPRINT" per member
+#   --add-user NAME --key 'ssh-...'   create the account (or add the key to it) and install Claude Code
+#   --remove-user NAME                delete the account and its home; only accounts added here
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 case "$(uname -s)" in
   Linux|Darwin) ;;
   *) echo 'This installer supports Linux, macOS and Linux under WSL.' >&2; exit 1 ;;
 esac
-runner=''; project=''; copy_login=no; node_only=no
+runner=''; project=''; copy_login=no; node_only=no; members=''; member=''; key=''
 # Directories that are never opened to the runner.
 protected() {
   case "$1" in
@@ -22,17 +28,38 @@ protected() {
   esac
   return 1
 }
-usage() { echo "$1" >&2; echo 'Options: [--runner NAME [--project /absolute/dir] [--copy-login]]' >&2; exit 2; }
+usage() { echo "$1" >&2; [ -n "${members:-}" ] || echo 'Options: [--runner NAME [--project /absolute/dir] [--copy-login]]' >&2; exit 2; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --runner) [ "$#" -ge 2 ] || usage '--runner needs an account name.'; runner=$2; shift 2 ;;
     --project) [ "$#" -ge 2 ] || usage '--project needs a directory.'; project=$2; shift 2 ;;
     --copy-login) copy_login=yes; shift ;;
     --node-only) node_only=yes; shift ;;
+    --list-users) members=list; shift ;;
+    --add-user|--remove-user) [ "$#" -ge 2 ] || usage "$1 needs an account name."; members=${1#--}; members=${members%-user}; member=$2; shift 2 ;;
+    --key) [ "$#" -ge 2 ] || usage '--key needs a public key.'; key=$2; shift 2 ;;
     *) usage "Unknown option: $1" ;;
   esac
 done
 if [ "$node_only" = yes ] && { [ -n "$runner$project" ] || [ "$copy_login" = yes ]; }; then usage '--node-only goes alone.'; fi
+MEMBERS=/etc/claude-mirror/members
+[ -z "$key" ] || [ "$members" = add ] || usage '--key only goes with --add-user.'
+if [ -n "$members" ]; then
+  [ "$node_only" = no ] && [ -z "$runner$project" ] && [ "$copy_login" = no ] || usage 'Member options go alone.'
+  [ "$(uname -s)" = Linux ] && [ "$(id -u)" -eq 0 ] || usage 'Managing members needs a root SSH login on Linux.'
+  command -v useradd >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1 || usage 'This server has no useradd or runuser.'
+  if [ "$members" != list ]; then
+    [[ "$member" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$member" != root ] || usage "Invalid account name: $member"
+    if [ -f "$MEMBERS/$member" ]; then :
+    elif [ "$members" = remove ]; then usage "$member is not a member added by Claude Mirror."
+    elif getent passwd "$member" >/dev/null; then usage "Account $member already exists. Choose another name; existing accounts are never modified."
+    fi
+  fi
+  if [ "$members" = add ]; then
+    [[ "$key" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\ [A-Za-z0-9+/]+=*(\ [^[:cntrl:]]*)?$ ]] || usage 'Not an SSH public key.'
+    ! command -v ssh-keygen >/dev/null 2>&1 || ssh-keygen -lf /dev/stdin <<<"$key" >/dev/null 2>&1 || usage 'Not an SSH public key.'
+  fi
+fi
 # Everything about the runner is checked before anything is installed.
 if [ -n "$runner" ]; then
   [[ "$runner" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$runner" != root ] || usage "Invalid account name: $runner"
@@ -60,6 +87,68 @@ download() {
     else wget -q -T 20 -O "$2" "$1"; fi
   fi
 }
+
+member_home() { getent passwd "$1" | cut -d: -f6; }
+as_member() { local home; home=$(member_home "$member"); runuser -u "$member" -- env -i HOME="$home" PATH="$home/.local/bin:/usr/local/bin:/usr/bin:/bin" "$@"; }
+list_members() {
+  local marker name fingerprint
+  for marker in "$MEMBERS"/*; do
+    [ -f "$marker" ] || continue
+    name=${marker##*/}
+    getent passwd "$name" >/dev/null || continue
+    fingerprint=$(ssh-keygen -lf "$(member_home "$name")/.ssh/authorized_keys" 2>/dev/null | awk 'NR==1{print $2}')
+    echo "member $name ${fingerprint:--}"
+  done
+}
+usable_home() { local home; home=$(member_home "$member"); [ "$(id -u "$member")" -gt 0 ] && [[ "$home" = /?*/* ]] && ! protected "$home"; }
+add_member() {
+  local home source dir
+  if getent passwd "$member" >/dev/null; then echo "Adding the key to $member."
+  else
+    useradd --create-home --shell /bin/bash -- "$member"
+    mkdir -p "$MEMBERS" && : > "$MEMBERS/$member"
+    echo "Created account $member."
+  fi
+  usable_home || { echo "Account $member is not usable." >&2; return 1; }
+  home=$(member_home "$member")
+  chmod 700 -- "$home"
+  # Written by the member itself, never by root.
+  as_member sh -c 'umask 077 && mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/authorized_keys" && { grep -qxF -- "$1" "$HOME/.ssh/authorized_keys" || printf "%s\n" "$1" >> "$HOME/.ssh/authorized_keys"; } && chmod 700 "$HOME/.ssh" && chmod 600 "$HOME/.ssh/authorized_keys"' sh "$key"
+  if as_member "$home/.local/bin/claude" --version >/dev/null 2>&1; then :
+  elif command -v claude >/dev/null 2>&1 && source=$(readlink -f -- "$(command -v claude)") &&
+    as_member sh -c 'mkdir -p "$HOME/.local/bin" && cat > "$HOME/.local/bin/.claude-new" && chmod 755 "$HOME/.local/bin/.claude-new" && mv "$HOME/.local/bin/.claude-new" "$HOME/.local/bin/claude"' < "$source" &&
+    as_member "$home/.local/bin/claude" --version >/dev/null 2>&1; then echo "Installed Claude Code for $member."
+  elif { command -v curl || command -v wget; } >/dev/null 2>&1 && download https://claude.ai/install.sh "$work/claude-install.sh" && as_member bash -s -- stable < "$work/claude-install.sh" >/dev/null; then
+    echo "Installed Claude Code for $member."
+  else echo "Claude Code is not installed for $member; they can install it from the app." >&2
+  fi
+  if command -v loginctl >/dev/null 2>&1 && [ "$(loginctl show-session -p KillUserProcesses --value 2>/dev/null)" = yes ]; then
+    loginctl enable-linger "$member" 2>/dev/null || true
+  fi
+  for dir in /home/*/; do
+    dir=${dir%/}
+    [ "$dir" = "$home" ] || [ "$(( $(stat -c %a -- "$dir") % 10 ))" = 0 ] || echo "Readable by members: $dir (chmod 700 $dir)"
+  done
+  echo "Ready. $member connects as $member@$(hostname) and logs in to Claude in the app."
+}
+remove_member() {
+  usable_home || { echo "Account $member is not usable." >&2; return 1; }
+  loginctl terminate-user "$member" 2>/dev/null || true
+  pkill -KILL -u "$member" 2>/dev/null || true
+  loginctl disable-linger "$member" 2>/dev/null || true
+  local tries=0
+  until userdel -r -- "$member" 2>/dev/null; do
+    tries=$((tries + 1)); [ "$tries" -lt 5 ] || { echo "Could not remove $member." >&2; return 1; }
+    pkill -KILL -u "$member" 2>/dev/null || true; sleep 1
+  done
+  rm -f -- "$MEMBERS/$member"
+  echo "Removed $member and their files."
+}
+case "$members" in
+  list) list_members; exit 0 ;;
+  add) add_member; exit ;;
+  remove) remove_member; exit ;;
+esac
 
 if [ "$node_only" = yes ]; then :
 else

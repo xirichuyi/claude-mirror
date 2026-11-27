@@ -133,3 +133,13 @@ test('setup-remote.sh passes the account options to the server as single argumen
     assert.equal(spawnSync('/bin/sh', [path.resolve('scripts/setup-remote.sh'), '--runner', 'x'], { encoding: 'utf8' }).status, 2);
   } finally { f.close(); }
 });
+
+test('member options need root and go alone', () => {
+  const f = fixture(); try {
+    let result = f.run('--list-users');
+    assert.equal(result.status, 2); assert.match(result.stderr, /root SSH login/); assert.doesNotMatch(result.stderr, /Options:/);
+    result = f.run('--add-user', 'alice', '--node-only');
+    assert.equal(result.status, 2); assert.match(result.stderr, /Member options go alone/);
+    assert.equal(f.run('--key', 'ssh-ed25519 AAAA').status, 2);
+  } finally { f.close(); }
+});

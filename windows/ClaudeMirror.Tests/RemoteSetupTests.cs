@@ -6,6 +6,14 @@ namespace ClaudeMirror.Tests;
 
 public class RemoteSetupTests
 {
+    [Fact] public void MembersCommandQuotesAndParses()
+    {
+        Assert.Equal("sh -c 'command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- '\\''--add-user'\\'' '\\''a'\\''\\'\\'''\\'''\\'' 2>&1'",
+            RemoteMembers.Command("--add-user", "a'"));
+        Assert.Equal([new RemoteMember("alice", "SHA256:x"), new RemoteMember("bob", "")],
+            RemoteMembers.Parse(["member alice SHA256:x", "noise", "member bob -"]));
+    }
+
     [Fact] public void MissingNodeOffersInstallOnly()
     {
         var issues = MachineHealth.Issues(new RemoteSetupException(false), null, null);

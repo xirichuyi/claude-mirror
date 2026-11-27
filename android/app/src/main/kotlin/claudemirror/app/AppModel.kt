@@ -10,6 +10,8 @@ import claudemirror.core.Engine
 import claudemirror.core.FileSessionStore
 import claudemirror.core.HostConfig
 import claudemirror.core.Preferences
+import claudemirror.core.RemoteMember
+import claudemirror.core.RemoteMembers
 import claudemirror.core.ServerResources
 import claudemirror.core.SshLauncher
 import claudemirror.core.SshSecret
@@ -143,6 +145,9 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createSession(host: HostConfig): ChatSession = engine.create(host)
+    suspend fun listMembers(host: HostConfig): List<RemoteMember> = RemoteMembers.parse(pool.members(host, "--list-users"))
+    suspend fun addMember(host: HostConfig, name: String, key: String) { pool.members(host, "--add-user", name, "--key", key) }
+    suspend fun removeMember(host: HostConfig, name: String) { pool.members(host, "--remove-user", name) }
     fun removeSession(id: String) = engine.remove(id)
     fun submit(id: String, text: String, steer: Boolean = false) = runCatching { engine.submit(id, text, steer) }.onFailure { notices.tryEmit(it.message ?: "发送失败") }.isSuccess
     fun steer(id: String, item: String) = act { engine.steer(id, item) }

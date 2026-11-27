@@ -283,8 +283,35 @@ sealed interface ConnectionState {
     data class Failed(val error: Throwable) : ConnectionState
 }
 
+data class RemoteMember(val name: String, val fingerprint: String)
+
+/** Accounts on a shared server, managed through install-claude-remote.sh from a root login. */
+object RemoteMembers {
+    fun command(arguments: List<String>): String =
+        "sh -c " + shellQuote("command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- " + arguments.joinToString(" ") { shellQuote(it) } + " 2>&1")
+
+    fun parse(lines: List<String>): List<RemoteMember> = lines.mapNotNull { line ->
+        val parts = line.split(' ').filter { it.isNotEmpty() }
+        if (parts.size >= 3 && parts[0] == "member") RemoteMember(parts[1], if (parts[2] == "-") "" else parts[2]) else null
+    }
+}
+
 /** One agent per server, started on first use and shared by every conversation on that server. */
 class AgentPool(private val launcher: Launcher, val resources: ServerResources) {
+    /** Output lines of a successful member command; a failure throws its last line. */
+    suspend fun members(host: HostConfig, vararg arguments: String): List<String> = withContext(Dispatchers.IO) {
+        val script = resources.installScript ?: throw RemoteException("缺少安装脚本")
+        val child = launcher.start(host, RemoteMembers.command(arguments.toList()))
+        try {
+            child.stdin.use { it.write(script) }
+            val lines = child.stdout.readBytes().decodeToString().lines()
+            if (child.waitForExit() != 0) throw RemoteException(lines.lastOrNull { it.isNotBlank() } ?: "操作失败")
+            lines
+        } catch (error: IOException) {
+            throw RemoteException(error.message ?: "操作失败")
+        } finally { child.kill() }
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val channels = HashMap<String, Deferred<AgentChannel>>()
     private val _states = MutableStateFlow<Map<String, ConnectionState>>(emptyMap())

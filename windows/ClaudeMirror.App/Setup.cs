@@ -147,6 +147,71 @@ public sealed partial class MainWindow
         if (result == 0) await RecheckAsync();
     }
 
+    private async Task MembersDialogAsync()
+    {
+        var remote = agent ?? throw new IOException("请先连接服务器");
+        using var cancel = new CancellationTokenSource();
+        var list = new StackPanel { Spacing = 2 };
+        var name = new TextBox { PlaceholderText = "账号", Width = 120 };
+        var key = new TextBox { PlaceholderText = "公钥 ssh-ed25519 …" };
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = muted, Visibility = Visibility.Collapsed };
+        var busy = new ProgressRing { IsActive = false, Width = 16, Height = 16 };
+        async Task<List<string>> Run(params string[] arguments)
+        {
+            var lines = new List<string>();
+            var code = await remote.InstallAsync(ServerResources, line => { lock (lines) lines.Add(line); }, cancel.Token, RemoteMembers.Command(arguments));
+            if (code != 0) throw new IOException(lines.LastOrDefault(l => !string.IsNullOrWhiteSpace(l)) ?? "操作失败");
+            return lines;
+        }
+        async Task Perform(Func<Task> action)
+        {
+            busy.IsActive = true; error.Visibility = Visibility.Collapsed;
+            try { await action(); }
+            catch (Exception e) when (e is not OperationCanceledException) { error.Text = "⚠ " + ConnectionAdvice.Explain(e.Message); error.Visibility = Visibility.Visible; }
+            finally { busy.IsActive = false; }
+        }
+        async Task Reload()
+        {
+            var members = RemoteMembers.Parse(await Run("--list-users"));
+            list.Children.Clear();
+            if (members.Count == 0) list.Children.Add(new TextBlock { Text = "无成员", Foreground = muted, Margin = new Thickness(0, 6, 0, 6) });
+            foreach (var member in members)
+            {
+                var row = new Grid { ColumnSpacing = 10, MinHeight = 40 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.Children.Add(new FontIcon { Glyph = "\uE77B", FontSize = 14, Foreground = muted });
+                var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+                text.Children.Add(new TextBlock { Text = member.Name, Foreground = ink });
+                if (member.Fingerprint.Length > 0) text.Children.Add(new TextBlock { Text = member.Fingerprint, FontSize = 12, Foreground = muted, TextTrimming = TextTrimming.CharacterEllipsis, IsTextSelectionEnabled = true });
+                Grid.SetColumn(text, 1); row.Children.Add(text);
+                var confirm = new Button { Content = "删除" };
+                var flyout = new Flyout { Content = new StackPanel { Spacing = 8, Children = { new TextBlock { Text = "删除账号和全部文件" }, confirm } } };
+                confirm.Click += async (_, _) => { flyout.Hide(); await Perform(async () => { await Run("--remove-user", member.Name); await Reload(); }); };
+                var delete = new Button { Content = new FontIcon { Glyph = "\uE74D", FontSize = 13 }, Flyout = flyout, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0) };
+                ToolTipService.SetToolTip(delete, "删除成员"); AutomationProperties.SetName(delete, "删除 " + member.Name);
+                Grid.SetColumn(delete, 2); row.Children.Add(delete);
+                list.Children.Add(row);
+            }
+        }
+        var add = new Button { Content = new FontIcon { Glyph = "\uE710", FontSize = 13 } };
+        ToolTipService.SetToolTip(add, "添加成员"); AutomationProperties.SetName(add, "添加成员");
+        add.Click += async (_, _) =>
+        {
+            var account = name.Text.Trim(); var publicKey = key.Text.Trim();
+            if (account.Length == 0 || publicKey.Length == 0) return;
+            await Perform(async () => { await Run("--add-user", account, "--key", publicKey); name.Text = ""; key.Text = ""; await Reload(); });
+        };
+        var form = new Grid { ColumnSpacing = 8 };
+        form.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); form.ColumnDefinitions.Add(new ColumnDefinition()); form.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); form.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        form.Children.Add(name); Grid.SetColumn(key, 1); form.Children.Add(key); Grid.SetColumn(add, 2); form.Children.Add(add); Grid.SetColumn(busy, 3); form.Children.Add(busy);
+        var panel = new StackPanel { Spacing = 12, MinWidth = 480 };
+        panel.Children.Add(list); panel.Children.Add(form); panel.Children.Add(error);
+        var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = "成员 · " + (host?.Name ?? "服务器"), Content = panel, CloseButtonText = "关闭", Background = canvas };
+        dialog.Opened += async (_, _) => await Perform(Reload);
+        await dialog.ShowAsync();
+        cancel.Cancel();
+    }
+
     private static string? FindKeygen()
     {
         var system = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "OpenSSH", "ssh-keygen.exe");

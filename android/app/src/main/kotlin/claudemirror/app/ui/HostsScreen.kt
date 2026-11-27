@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,7 +18,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -35,6 +41,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +61,8 @@ import claudemirror.app.HostSecret
 import claudemirror.core.AuthMethod
 import claudemirror.core.ConnectionState
 import claudemirror.core.HostConfig
+import claudemirror.core.RemoteMember
+import kotlinx.coroutines.launch
 
 /** What the connection to a server is doing, in the user's words. */
 fun ConnectionState?.label(): String = when (this) {
@@ -66,6 +77,8 @@ fun ConnectionState?.label(): String = when (this) {
 fun HostsScreen(model: AppModel, snackbar: SnackbarHostState, onOpen: (String) -> Unit, onEdit: (String) -> Unit) {
     val hosts by model.hosts.collectAsStateWithLifecycle()
     val connections by model.connections.collectAsStateWithLifecycle()
+    var managing by remember { mutableStateOf<HostConfig?>(null) }
+    managing?.let { host -> MembersDialog(model, host) { managing = null } }
     Scaffold(
         topBar = { TopAppBar(title = { Text("服务器") }) },
         snackbarHost = { Snackbar(snackbar) },
@@ -88,7 +101,14 @@ fun HostsScreen(model: AppModel, snackbar: SnackbarHostState, onOpen: (String) -
                             color = if (state is ConnectionState.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     },
-                    trailingContent = { IconButton(onClick = { onEdit(host.id) }) { Icon(Icons.Filled.Edit, "编辑") } },
+                    trailingContent = {
+                        Row {
+                            if ((state as? ConnectionState.Connected)?.info?.uid == 0) {
+                                IconButton(onClick = { managing = host }) { Icon(Icons.Filled.Group, "成员") }
+                            }
+                            IconButton(onClick = { onEdit(host.id) }) { Icon(Icons.Filled.Edit, "编辑") }
+                        }
+                    },
                     modifier = Modifier.clickable { onOpen(host.id) },
                 )
             }
@@ -174,4 +194,54 @@ fun HostEditScreen(model: AppModel, id: String, onDone: () -> Unit) {
             }
         }
     }
+}
+
+/** Accounts on a shared server: each member logs in with their own key and Claude account. */
+@Composable
+private fun MembersDialog(model: AppModel, host: HostConfig, onDismiss: () -> Unit) {
+    val members = remember { mutableStateListOf<RemoteMember>() }
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var key by rememberSaveable { mutableStateOf("") }
+    var removing by remember { mutableStateOf<String?>(null) }
+    fun perform(action: suspend () -> Unit) = scope.launch {
+        busy = true; error = null
+        try { action(); members.clear(); members.addAll(model.listMembers(host)) }
+        catch (failure: Exception) { error = failure.message ?: "操作失败" }
+        finally { busy = false }
+    }
+    LaunchedEffect(host.id) { perform {} }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("成员 · " + host.displayName) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (!busy && members.isEmpty()) Text("无成员", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                members.forEach { member ->
+                    ListItem(
+                        leadingContent = { Icon(Icons.Filled.Person, null) },
+                        headlineContent = { Text(member.name) },
+                        supportingContent = if (member.fingerprint.isEmpty()) null else { { Text(member.fingerprint, maxLines = 1, fontFamily = FontFamily.Monospace) } },
+                        trailingContent = {
+                            if (removing == member.name) TextButton(enabled = !busy, onClick = { removing = null; perform { model.removeMember(host, member.name) } }) {
+                                Text("删除账号和文件", color = MaterialTheme.colorScheme.error)
+                            } else IconButton(enabled = !busy, onClick = { removing = member.name }) { Icon(Icons.Filled.Delete, "删除 " + member.name) }
+                        },
+                    )
+                }
+                OutlinedTextField(name, { name = it.trim() }, label = { Text("账号") }, singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(key, { key = it }, label = { Text("公钥") }, placeholder = { Text("ssh-ed25519 …") }, enabled = !busy, maxLines = 3, modifier = Modifier.fillMaxWidth())
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            IconButton(enabled = !busy && name.isNotEmpty() && key.isNotBlank(), onClick = {
+                perform { model.addMember(host, name, key.trim()); name = ""; key = "" }
+            }) { Icon(Icons.Filled.Add, "添加成员") }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") } },
+    )
 }

@@ -67,6 +67,20 @@ public static class ConnectionAdvice
     }
 }
 
+public sealed record RemoteMember(string Name, string Fingerprint);
+
+/// <summary>Accounts on a shared server, managed through install-claude-remote.sh from a root login.</summary>
+public static class RemoteMembers
+{
+    public static string Command(params string[] arguments) =>
+        "sh -c " + Protocol.Quote("command -v bash >/dev/null 2>&1 || exit 1; exec bash -s -- " + string.Join(" ", arguments.Select(Protocol.Quote)) + " 2>&1");
+
+    public static List<RemoteMember> Parse(IEnumerable<string> lines) =>
+        lines.Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Where(parts => parts.Length >= 3 && parts[0] == "member")
+            .Select(parts => new RemoteMember(parts[1], parts[2] == "-" ? "" : parts[2])).ToList();
+}
+
 public static class RemoteInstaller
 {
     public const string Command = "sh -c 'command -v bash >/dev/null 2>&1 || { echo \"服务器缺少 bash，无法自动安装。\"; exit 1; }; exec bash -s 2>&1'";

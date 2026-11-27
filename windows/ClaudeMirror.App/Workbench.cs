@@ -31,7 +31,7 @@ public sealed partial class MainWindow
     private bool sidebarOpen = true;
     private readonly Border hostDot = new() { Width=7, Height=7, CornerRadius=new CornerRadius(3.5), VerticalAlignment=VerticalAlignment.Center };
     private readonly Border inputCard = new();
-    private Button commandMenu = null!, modelMenu = null!, connectHost = null!;
+    private Button commandMenu = null!, modelMenu = null!, connectHost = null!, membersButton = null!;
 
     private static string ShortDirectory(string path)
     {
@@ -43,6 +43,7 @@ public sealed partial class MainWindow
     {
         bool current=agent?.Connected==true && host!=null && Equals(hosts.SelectedItem,host);
         connectHost.Visibility=current?Visibility.Collapsed:Visibility.Visible;
+        membersButton.Visibility=current && agent?.Hello?["uid"]?.GetValue<int>()==0?Visibility.Visible:Visibility.Collapsed;
         ToolTipService.SetToolTip(hosts,(hosts.SelectedItem as HostProfile)?.Name ?? "选择主机");
     }
 
@@ -187,7 +188,8 @@ public sealed partial class MainWindow
         hostDot.Margin=new Thickness(8,0,0,0);hostPicker.Children.Add(hostDot);Grid.SetColumn(hosts,1);hostPicker.Children.Add(hosts);switcher.Children.Add(hostPicker);
         connectHost=ActionButton("连接","\uE839",() => ConnectDialogAsync(hosts.SelectedItem as HostProfile));
         hosts.SelectionChanged+=(_,_)=>UpdateHostPicker();
-        var tools = Row(connectHost,
+        membersButton=ActionButton("成员","\uE716",MembersDialogAsync); membersButton.Visibility=Visibility.Collapsed;
+        var tools = Row(connectHost,membersButton,
             ActionButton("添加主机","\uE710",() => ConnectDialogAsync(null)));
         tools.Spacing = 0; Grid.SetColumn(tools,1); switcher.Children.Add(tools); sidebar.Children.Add(switcher);
         fresh = ActionButton("新建对话","\uE70F",NewConversationAsync);

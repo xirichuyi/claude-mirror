@@ -391,7 +391,7 @@ async function hello() {
   const version = process.versions.node.split('.').map(Number);
   return { home: HOME, hostname: os.hostname(), platform: process.platform, arch: process.arch, node: process.versions.node,
     nodeSupported: version[0] > 18 || (version[0] === 18 && version[1] >= 14), nodePath: process.execPath, agentPath: __filename,
-    claude: located.code ? null : located.stdout.trim(), persistenceWarning: persistenceWarning() };
+    claude: located.code ? null : located.stdout.trim(), persistenceWarning: persistenceWarning(), uid: process.getuid?.() ?? null };
 }
 
 // Classifies `claude auth status`. Older Claude builds lack the command; that is "unknown",
