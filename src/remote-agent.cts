@@ -548,19 +548,24 @@ async function attachmentLookup(request) {
   return { file: file && request.account ? await storeAsAccount(request, file) : file };
 }
 
-// Copies a received attachment into the execution account's home, as that account (request.account).
-// The account cannot read the agent's own cache, and writing as root into a folder the account controls would follow its links.
+// Copies a received attachment into the execution account's home, as that account (request.account), through runuser
+// like Claude itself, so the account's supplementary groups apply. The account cannot read the agent's own cache, and writing
+// as root into a folder the account controls would follow its links. A copy cut short (the agent died mid-pipe) is never kept.
 // The modes are set outright: a default ACL on the home overrides umask. A login that is not root keeps it in its own home.
-const STORE_AS_ACCOUNT = `umask 077; mkdir -p "$1" && chmod 700 "$1" && : > "$1/$3" && chmod 600 "$1/$3" && cat >> "$1/$3" && mv "$1/$3" "$1/$2" && printf %s "$1/$2"`;
+const STORE_AS_ACCOUNT = `umask 077; mkdir -p "$1" && chmod 700 "$1" && : > "$1/$3" && chmod 600 "$1/$3" && cat >> "$1/$3" &&
+{ [ "$(wc -c < "$1/$3")" -eq "$4" ] || { rm -f "$1/$3"; exit 1; }; } && mv "$1/$3" "$1/$2" && printf %s "$1/$2"`;
 function storeAsAccount(request, file) {
+  if (request.account === os.userInfo().username) return file;
   const root = process.getuid?.() === 0;
-  const scope: { home: string, uid?: number, gid?: number } = root ? accountHistory(request.account) : { home: HOME };
-  const folder = path.join(scope.home, '.cache/claude-mirror/attachments', request.digest);
+  const home = root ? accountHistory(request.account).home : HOME;
+  const launcher = ['/usr/sbin/runuser', '/sbin/runuser'].find(candidate => fs.existsSync(candidate));
+  if (root && !launcher) throw new Error('服务器缺少 runuser');
+  const folder = path.join(home, '.cache/claude-mirror/attachments', request.digest);
   const name = path.basename(file.path);
+  const script = ['/bin/sh', '-c', STORE_AS_ACCOUNT, 'sh', folder, name, name + '.' + crypto.randomUUID() + '.tmp', String(file.size)];
   return new Promise<any>((resolve, reject) => {
-    const child = spawn('/bin/sh', ['-c', STORE_AS_ACCOUNT, 'sh', folder, name, name + '.' + crypto.randomUUID() + '.tmp'], {
-      ...(root ? { uid: scope.uid, gid: scope.gid } : {}), cwd: '/', env: { PATH: '/usr/bin:/bin' }, stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const child = root ? spawn(launcher, ['-u', request.account, '--', ...script], { cwd: '/', env: { PATH: '/usr/bin:/bin' }, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(script[0], script.slice(1), { cwd: '/', env: { PATH: '/usr/bin:/bin' }, stdio: ['pipe', 'pipe', 'pipe'] });
     let stored = '', problem = '';
     child.stdout.on('data', data => { stored += data; });
     child.stderr.on('data', data => { problem = (problem + data).slice(-2000); });
