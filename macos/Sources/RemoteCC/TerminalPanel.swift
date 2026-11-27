@@ -10,6 +10,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     let directory: String
     let view = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 240))
     @Published private(set) var ended = false
+    private lazy var clipboard = ClipboardGuard(view)
     private let launch: () -> (executable: String, arguments: [String])?
 
     init(key: String, directory: String, launch: @escaping () -> (executable: String, arguments: [String])?) {
@@ -18,6 +19,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         self.launch = launch
         super.init()
         view.processDelegate = self
+        view.terminalDelegate = clipboard
         view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         view.nativeBackgroundColor = .textBackgroundColor
         view.nativeForegroundColor = .textColor
@@ -40,6 +42,25 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     func processTerminated(source: TerminalView, exitCode: Int32?) {
         DispatchQueue.main.async { self.ended = true }
     }
+}
+
+/// The server may not read the Mac's clipboard, and may set it only while the shell has the focus.
+private final class ClipboardGuard: TerminalViewDelegate {
+    private weak var view: LocalProcessTerminalView?
+    init(_ view: LocalProcessTerminalView) { self.view = view }
+
+    func clipboardRead(source: TerminalView) -> Data? { nil }
+    func clipboardCopy(source: TerminalView, content: Data) {
+        guard let view, let window = view.window, window.isKeyWindow, window.firstResponder === view else { return }
+        view.clipboardCopy(source: source, content: content)
+    }
+    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) { view?.sizeChanged(source: source, newCols: newCols, newRows: newRows) }
+    func setTerminalTitle(source: TerminalView, title: String) { view?.setTerminalTitle(source: source, title: title) }
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) { view?.hostCurrentDirectoryUpdate(source: source, directory: directory) }
+    func send(source: TerminalView, data: ArraySlice<UInt8>) { view?.send(source: source, data: data) }
+    func scrolled(source: TerminalView, position: Double) { view?.scrolled(source: source, position: position) }
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) { view?.requestOpenLink(source: source, link: link, params: params) }
+    func rangeChanged(source: TerminalView, startY: Int, endY: Int) { view?.rangeChanged(source: source, startY: startY, endY: endY) }
 }
 
 struct TerminalPanel: View {
