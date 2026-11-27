@@ -17,6 +17,7 @@ struct RemoteDocumentPreview: View {
     let workspace: Workspace
     @EnvironmentObject private var model: AppModel
     @State private var document: JSON?
+    @State private var markdown: NSAttributedString?
     @State private var image: NSImage?
     @State private var folder: URL?
     @State private var error: String?
@@ -53,7 +54,7 @@ struct RemoteDocumentPreview: View {
                     }
                 case "markdown":
                     ScrollView {
-                        let content = WincMarkdownAdapter.document(document["blocks"]?.array ?? [])
+                        let content = markdown ?? NSAttributedString()
                         SelectableTranscriptText(text: content.string, attributed: content, scope: nil) { url in
                             if ["http", "https"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
                             else if let reference = RemoteFileLinks.reference(url) {
@@ -76,20 +77,34 @@ struct RemoteDocumentPreview: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: "\(preview.path)|\(preview.version ?? "")|\(requested)|\(retry)") {
             cleanup(); error = nil; sheetIndex = 0
+            let key = "\(workspace.serverKey)|\(preview.path)|\(preview.version ?? "")|\(preview.revision ?? "")"
+            if let rendered = RenderedPreviews.items[key] { document = rendered.document; markdown = rendered.markdown; return }
             guard preview.size <= 32 * 1024 * 1024 || requested else { return }
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent("remotecc-winc-" + UUID().uuidString)
             let url = folder.appendingPathComponent((preview.path as NSString).lastPathComponent)
             do {
                 guard preview.size <= 256 * 1024 * 1024 else { throw RemoteError("超过 Winc 预览文件大小上限（256 MB）") }
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-                try await workspace.downloadPreview(preview.path, to: url)
+                // Text the tab already holds is rendered as is, without fetching the file again.
+                if preview.kind == "text", preview.truncated != true, let text = preview.text {
+                    try Data(text.utf8).write(to: url, options: .atomic)
+                } else {
+                    try await workspace.downloadPreview(preview.path, to: url)
+                }
                 let result = try await WincPreviewBridge.load(url, output: folder.appendingPathComponent("rendered"))
                 try Task.checkCancellation()
                 if result["kind"]?.string == "image" {
                     image = NSImage(contentsOf: folder.appendingPathComponent("rendered/image.png"))
                     guard image != nil else { throw RemoteError("无法读取 Winc 渲染结果") }
                 }
-                self.folder = folder; document = result
+                if result["kind"]?.string == "markdown" {
+                    markdown = WincMarkdownAdapter.document(result["blocks"]?.array ?? [])
+                }
+                if result["kind"]?.string != "image" {
+                    try? FileManager.default.removeItem(at: folder)
+                    RenderedPreviews.keep(key, RenderedPreviews.Item(document: result, markdown: markdown))
+                } else { self.folder = folder }
+                document = result
             } catch {
                 try? FileManager.default.removeItem(at: folder)
                 if !Task.isCancelled { self.error = error.localizedDescription }
@@ -98,9 +113,19 @@ struct RemoteDocumentPreview: View {
         .onDisappear { cleanup() }
     }
     private func cleanup() {
-        document = nil; image = nil
+        document = nil; image = nil; markdown = nil
         if let folder { try? FileManager.default.removeItem(at: folder) }
         folder = nil
+    }
+}
+
+/// Rendered Markdown and tables by file version, so switching back to a tab shows at once.
+@MainActor private enum RenderedPreviews {
+    struct Item { let document: JSON; let markdown: NSAttributedString? }
+    static var items: [String: Item] = [:]
+    static func keep(_ key: String, _ item: Item) {
+        if items.count >= 24 { items.removeAll() }
+        items[key] = item
     }
 }
 

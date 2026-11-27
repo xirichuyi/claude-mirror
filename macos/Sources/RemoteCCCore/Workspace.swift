@@ -37,6 +37,7 @@ public struct TreeRow: Identifiable, Equatable {
 @MainActor
 @Observable public final class Workspace {
     public private(set) var root: String?
+    public var serverKey: String { config.key }
     public private(set) var rows: [TreeRow] = []
     public private(set) var error: String?
     public private(set) var footer = ""

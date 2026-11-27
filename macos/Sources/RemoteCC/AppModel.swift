@@ -798,15 +798,28 @@ final class AppModel: ObservableObject {
         let files = attachments[id] ?? []
         guard !value.isEmpty || !files.isEmpty else { return }
         guard isConnected else { show("请先连接 SSH 服务器"); return }
+        if value.hasPrefix("/"), files.isEmpty, let capabilities = active?.capabilities, let interaction = commandInteraction(capabilities, text: value, preferences: active?.preferences) {
+            perform { try await self.run(interaction, id: id) }
+            return
+        }
+        // The composer empties on the key press, so a second Enter has nothing left to send.
+        drafts[id] = ""
+        attachments[id] = nil
+        let restore = { [weak self] in
+            guard let self else { return }
+            if (self.drafts[id] ?? "").isEmpty { self.drafts[id] = text }
+            if (self.attachments[id] ?? []).isEmpty { self.attachments[id] = files }
+        }
+        if let session = engine.session(id), engine.projectPresent(session.config) {
+            do { try engine.submit(id, text: value, attachments: files, steer: steer) }
+            catch { restore(); show(error.localizedDescription) }
+            return
+        }
         perform {
-            if value.hasPrefix("/"), files.isEmpty, let capabilities = self.active?.capabilities, let interaction = commandInteraction(capabilities, text: value, preferences: self.active?.preferences) {
-                try await self.run(interaction, id: id)
-                return
-            }
-            if let session = engine.session(id) { try await engine.requireProject(session.config) }
-            try engine.submit(id, text: value, attachments: files, steer: steer)
-            self.attachments[id] = nil
-            self.drafts[id] = ""
+            do {
+                if let session = engine.session(id) { try await engine.requireProject(session.config) }
+                try engine.submit(id, text: value, attachments: files, steer: steer)
+            } catch { restore(); throw error }
         }
     }
 

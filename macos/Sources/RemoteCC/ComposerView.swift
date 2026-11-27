@@ -346,15 +346,14 @@ struct ComposerArea: View {
         if model.active == nil {
             let draft = text.wrappedValue
             let source = id
-            guard let config = model.currentConfig else { return }
-            model.perform {
-                guard let engine = model.engine else { return }
+            guard let config = model.currentConfig, let engine = model.engine else { return }
+            do {
                 let session = try engine.create(config)
                 model.drafts[session.id] = draft
                 model.drafts.removeValue(forKey: source)
                 model.select(session.id)
                 model.submit(text: draft)
-            }
+            } catch { model.show(error.localizedDescription) }
         } else { model.submit(text: text.wrappedValue, steer: steer) }
     }
 
