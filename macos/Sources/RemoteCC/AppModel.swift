@@ -632,6 +632,49 @@ final class AppModel: ObservableObject {
         show("已设置免密登录，以后会自动连接 \(updated.displayName)")
     }
 
+    /// Connects with a code from the server panel, then swaps its one-use key for this Mac's own key.
+    func connect(code text: String) async throws {
+        guard let connections else { throw RemoteError("连接服务尚未就绪") }
+        let code = try ConnectionCode.parse(text)
+        let publicKey = try LoginKeySetup.ensureKey()
+        let trusted = try ConnectionCode.trust(code)
+        var claimed = false
+        defer { if !claimed { ConnectionCode.untrust(trusted) } }
+        let invitePath = NSHomeDirectory() + "/.ssh/claude_mirror_invite_" + String(UUID().uuidString.prefix(8))
+        guard FileManager.default.createFile(atPath: invitePath, contents: Data(code.privateKey.utf8), attributes: [.posixPermissions: 0o600])
+        else { throw RemoteError("无法保存连接码密钥") }
+        defer { try? FileManager.default.removeItem(atPath: invitePath) }
+        let invite = ConnectionConfig(host: code.destination, port: code.port == 22 ? nil : code.port, directory: "~", name: code.name,
+                                      identityFile: invitePath, authentication: .keyFile)
+        do { try await connections.verifyLogin(invite) }
+        catch { throw RemoteError("连接码已使用或已过期") }
+        // Only the transport: the invitation is never saved as this machine's login.
+        // A machine already connected as this account keeps its connection (and its port forwards).
+        let existing = engine?.connectionState(invite).status == .connected ? savedMachines.first { $0.key == invite.key } : nil
+        // A machine already saved keeps its settings (reverse access, tunnels); only the login key changes.
+        var own = existing ?? invite
+        own.identityFile = LoginKeySetup.defaultKeyPath
+        own.authentication = .keyFile
+        func restore() { if let existing { connections.updateConfig(existing) } }
+        let result: String
+        do {
+            try await connections.connect(invite)
+            result = try await connections.runScript(invite, script: ConnectionCode.claimScript(publicKey: publicKey))
+        } catch {
+            if existing == nil { await connections.disconnect(invite) } else { restore() }
+            throw RemoteError("连接码已使用或已过期")
+        }
+        // Reconnects go back to the saved login right away: the invitation file is about to go.
+        if existing == nil { await connections.disconnect(invite) } else { restore() }
+        guard result.contains("__RCC_CLAIMED__") else { throw RemoteError("连接码已使用或已过期") }
+        claimed = true
+        try await connections.verifyLogin(own)
+        // The server accepts only this key now: save it before connecting, so a failed connect can be retried.
+        rememberMachine(own)
+        connections.updateConfig(own)
+        try await connect(own)
+    }
+
     func disconnect() {
         guard let engine, let connections, let config = currentConfig else { return }
         engine.detach(config)

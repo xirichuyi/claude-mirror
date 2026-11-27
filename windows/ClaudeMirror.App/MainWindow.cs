@@ -96,6 +96,7 @@ public sealed partial class MainWindow : Window
     }
     private async Task ConnectDialogAsync(HostProfile? existing)
     {
+        var code = new TextBox { Header = "连接码", PlaceholderText = "cm1.…", Visibility = existing is null ? Visibility.Visible : Visibility.Collapsed };
         var name = new TextBox { Header = "显示名称", Text = existing?.Name ?? "", PlaceholderText = "例如：开发服务器（可选）" };
         var address = new TextBox { Header = "服务器地址", Text = existing is null ? "" : existing.User.Length > 0 ? existing.User + "@" + existing.Host : existing.Host, PlaceholderText = "例如 ubuntu@192.168.1.10" };
         var user = new TextBox { Header = "用户名", PlaceholderText = "地址里没写 用户名@ 时填写" };
@@ -143,7 +144,7 @@ public sealed partial class MainWindow : Window
         };
         var panel = new StackPanel { Spacing = 14 };
         panel.Children.Add(new TextBlock { Text = "Claude Code 和项目都在服务器上运行。", TextWrapping = TextWrapping.Wrap, Foreground = muted });
-        foreach (var element in new UIElement[] { import, jumpNote, address, mode, password, key, pick, phrase, jump, note, expander }) panel.Children.Add(element);
+        foreach (var element in new UIElement[] { code, import, jumpNote, address, mode, password, key, pick, phrase, jump, note, expander }) panel.Children.Add(element);
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = existing == null ? "添加服务器" : "连接服务器", Content = new ScrollViewer { Content = panel }, Background = canvas, PrimaryButtonText = "连接", CloseButtonText = "取消" };
         (string User, string Host) Target()
         {
@@ -152,6 +153,7 @@ public sealed partial class MainWindow : Window
         }
         void Validate()
         {
+            if (code.Text.Trim().Length > 0) { dialog.IsPrimaryButtonEnabled = ConnectionCode.LooksLike(code.Text); return; }
             var (u, h) = Target();
             if (mode.SelectedIndex == 2)
             {
@@ -163,9 +165,10 @@ public sealed partial class MainWindow : Window
             if (string.IsNullOrWhiteSpace(u) && !string.IsNullOrWhiteSpace(h)) { note.Text = "请在地址前写上用户名，例如 root@" + h + "，或在高级选项里填写。"; }
             else if (!string.IsNullOrWhiteSpace(h)) UpdateMode();
         }
-        address.TextChanged += (_,_) => Validate(); user.TextChanged += (_,_) => Validate(); key.TextChanged += (_,_) => Validate(); jump.TextChanged += (_,_) => Validate();
+        code.TextChanged += (_,_) => Validate(); address.TextChanged += (_,_) => Validate(); user.TextChanged += (_,_) => Validate(); key.TextChanged += (_,_) => Validate(); jump.TextChanged += (_,_) => Validate();
         mode.SelectionChanged += (_,_) => Validate(); port.ValueChanged += (_,_) => Validate(); Validate();
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (code.Text.Trim().Length > 0) { await ConnectCodeAsync(code.Text); return; }
         var (login, server) = Target();
         bool system = mode.SelectedIndex == 2;
         var profile = new HostProfile(string.IsNullOrWhiteSpace(name.Text) ? server : name.Text.Trim(), server, double.IsNaN(port.Value) ? 0 : (int)port.Value, login, mode.SelectedIndex == 1 ? key.Text : null,

@@ -7,6 +7,7 @@ struct ConnectSheet: View {
     @EnvironmentObject private var model: AppModel
     private func dismiss() { model.presentation = nil }
     @State private var host = ""
+    @State private var code = ""
     @State private var port = ""
     @State private var name = ""
     @State private var username = ""
@@ -30,7 +31,14 @@ struct ConnectSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             SheetHeading(title: machine == nil ? "添加服务器" : "编辑服务器") { dismiss() }
                 .disabled(connecting)
-            VStack(alignment: .leading, spacing: 12) {
+            if machine == nil {
+                HStack {
+                    connectionField("连接码", text: $code, prompt: "cm1.…")
+                    Button { code = NSPasteboard.general.string(forType: .string) ?? "" } label: { Image(systemName: "doc.on.clipboard") }
+                        .buttonStyle(WorkbenchButtonStyle()).help("粘贴连接码").accessibilityLabel("粘贴连接码")
+                }
+            }
+            if !usingCode { VStack(alignment: .leading, spacing: 12) {
                 connectionField("服务器地址", text: $host, prompt: "user@hostname")
                 WorkbenchSelect(
                     title: "登录方式", selection: $authentication,
@@ -69,7 +77,7 @@ struct ConnectSheet: View {
                 } label: {
                     Text("高级选项").font(.callout).foregroundStyle(WorkbenchTheme.inkMuted)
                 }
-            }
+            } }
             if !error.isEmpty {
                 Label(error, systemImage: "exclamationmark.circle")
                     .font(.callout).foregroundStyle(WorkbenchTheme.error).textSelection(.enabled)
@@ -86,9 +94,9 @@ struct ConnectSheet: View {
                 Button(connecting ? "连接中…" : machine == nil ? "连接" : "保存并重连") { connect() }
                     .buttonStyle(WorkbenchButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
                     .disabled(
-                        connecting || host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        connecting || (!usingCode && (host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || (authentication == .keyFile && identityFile.isEmpty)
-                            || (authentication == .password && password.isEmpty && machine == nil))
+                            || (authentication == .password && password.isEmpty && machine == nil))))
             }
         }
         .font(WorkbenchMetrics.ui).padding(WorkbenchMetrics.dialogPadding).frame(width: 440)
@@ -104,11 +112,14 @@ struct ConnectSheet: View {
         }
         .task {
             await Task.yield()
-            focusedField = "服务器地址"
+            if machine == nil, let text = NSPasteboard.general.string(forType: .string), ConnectionCode.looksLike(text) { code = text }
+            focusedField = usingCode ? "连接码" : "服务器地址"
         }
         .onChange(of: authentication) { _, _ in password = "" }
-        .onDisappear { password = "" }
+        .onDisappear { password = ""; code = "" }
     }
+
+    private var usingCode: Bool { !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     private func connectionField(_ label: String, text: Binding<String>, prompt: String) -> some View {
         WorkbenchFormRow(label) {
@@ -124,6 +135,13 @@ struct ConnectSheet: View {
         error = ""
         Task {
             do {
+                if usingCode {
+                    try await model.connect(code: code)
+                    code = ""
+                    dismiss()
+                    connecting = false
+                    return
+                }
                 let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
                 let user = username.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard user.isEmpty || !address.contains("@") else { throw RemoteError("地址已含用户名，请清空高级选项里的用户名") }

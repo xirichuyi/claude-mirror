@@ -454,6 +454,19 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
         } finally { child.kill() }
     }
 
+    /** Runs a short shell script on the server and returns its output; a failure throws. */
+    suspend fun script(host: HostConfig, text: String): String = withContext(Dispatchers.IO) {
+        val child = launcher.start(host, "sh -c " + shellQuote(text))
+        try {
+            child.stdin.close()
+            val output = child.stdout.readBytes().decodeToString()
+            if (child.waitForExit() != 0) throw RemoteException(output.lines().lastOrNull { it.isNotBlank() } ?: "操作失败")
+            output
+        } catch (error: IOException) {
+            throw RemoteException(error.message ?: "操作失败")
+        } finally { child.kill() }
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val channels = HashMap<String, Deferred<AgentChannel>>()
     private val _states = MutableStateFlow<Map<String, ConnectionState>>(emptyMap())
