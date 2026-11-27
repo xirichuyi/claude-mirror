@@ -6,7 +6,7 @@
 <AssemblyName>claude-mirror</AssemblyName><ApplicationManifest>app.manifest</ApplicationManifest><ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
 </PropertyGroup>
 <ItemGroup><PackageReference Include="Markdig" Version="0.41.3" /><PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" /><ProjectReference Include="..\ClaudeMirror.Core\ClaudeMirror.Core.csproj" /></ItemGroup>
-<ItemGroup><Content Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" /><Content Include="..\Resources\server\**\*" Link="server\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+<ItemGroup><Content Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" /><Content Include="..\..\vendor\xterm\*" Link="Assets\terminal\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /><Content Include="..\..\build\src\windows-terminal.js" Link="Assets\terminal\terminal.js" CopyToOutputDirectory="PreserveNewest" /><Content Include="..\Resources\server\**\*" Link="server\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 <!-- The unpackaged SDK builds the app resource index and compiled XAML but
      does not always include them in the portable publish directory. -->
 <Target Name="PublishWindowResources" AfterTargets="Publish">
