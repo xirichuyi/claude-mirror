@@ -30,7 +30,7 @@ class ReleaseTests(unittest.TestCase):
             f'<rss xmlns:sparkle="{stable.SPARKLE[1:-1]}"><channel><item><sparkle:version>2</sparkle:version>'
             f'<sparkle:shortVersionString>1.2.3</sparkle:shortVersionString><enclosure length="4" sparkle:edSignature="test" '
             f'url="https://github.com/{stable.REPO}/releases/download/{self.tag}/{dmg}"/></item></channel></rss>')
-        for name in ("setup-remote.sh", "install-claude-remote.sh"):
+        for name in ("setup-remote.sh", "install-claude-remote.sh", "claude-mirror-panel.cjs"):
             (self.folder / name).write_text("script")
         (self.folder / "windows-update.json").write_text(json.dumps(stable.manifest(self.tag, self.folder)))
         (self.folder / "windows-update.sig").write_text(stable.base64.b64encode(bytes(64)).decode())

@@ -35,7 +35,7 @@ def manifest(tag, folder):
 
 def verify_assets(tag, folder):
     dmg = f"claude-mirror-{tag[1:]}-macOS-arm64.dmg"
-    names = ["appcast.xml", "windows-update.json", "windows-update.sig", "setup-remote.sh", "install-claude-remote.sh"]
+    names = ["appcast.xml", "windows-update.json", "windows-update.sig", "setup-remote.sh", "install-claude-remote.sh", "claude-mirror-panel.cjs"]
     for name in (INSTALLER, PORTABLE, dmg):
         expected = (folder / (name + ".sha256")).read_text().split()[0].lower()
         if expected != digest(folder / name):

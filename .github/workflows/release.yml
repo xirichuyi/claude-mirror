@@ -107,6 +107,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts && npm run build
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - uses: actions/download-artifact@v4
         with:
           name: macos-stable
@@ -127,6 +134,10 @@ jobs:
           sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)"
           swift package --package-path macos resolve
           cp scripts/{setup-remote,install-claude-remote}.sh staging/
+          # The panel installer fetches the panel from this same release.
+          sed -i '' "s/^PANEL_RELEASE=latest\$/PANEL_RELEASE=$TAG/" staging/install-claude-remote.sh
+          grep -qx "PANEL_RELEASE=$TAG" staging/install-claude-remote.sh
+          cp build/src/panel.cjs staging/claude-mirror-panel.cjs
           python3 scripts/stable-release.py manifest "$TAG" staging
           printf '%s' "$SPARKLE_PRIVATE_KEY" | macos/.build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file - -p staging/windows-update.json > staging/windows-update.sig
           swift scripts/check-update-signature.swift staging/windows-update.json staging/windows-update.sig
