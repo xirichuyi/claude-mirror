@@ -500,8 +500,8 @@ public final class AgentClient: @unchecked Sendable {
                 try await installQuic(config, Data(contentsOf: binary), to: target)
                 reply = try await main.call("quic", params, timeout: 30)
             }
-            guard let port = reply["port"]?.number, let fingerprint = reply["fingerprint"]?.string, let token = reply["token"]?.string else { return nil }
-            return QuicEndpoint(helper: helper, host: host, port: Int(port), fingerprint: fingerprint, token: token)
+            guard let port = reply["port"]?.int, let fingerprint = reply["fingerprint"]?.string, let token = reply["token"]?.string else { return nil }
+            return QuicEndpoint(helper: helper, host: host, port: port, fingerprint: fingerprint, token: token)
         } catch {
             return nil
         }
