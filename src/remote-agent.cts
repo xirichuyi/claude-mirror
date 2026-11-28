@@ -1368,7 +1368,7 @@ function createDirectoryWatcher(emit) {
 // ---------------------------------------------------------------- framed transfers (docs/agent-wire.md)
 
 const FRAME = { JSON: 1, BLOB: 2, DATA: 3, END: 4, CREDIT: 5 };
-const FRAME_CHUNK = 128 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
+const FRAME_CHUNK = 128 * 1024, READ_CHUNK = 32 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
 const SKIP_REPLY = Symbol('skip reply');
 function frame(type, id, payload = Buffer.alloc(0)) {
   const head = Buffer.alloc(9);
@@ -1399,15 +1399,15 @@ async function framedRead(id, request, token, wire) {
     while (position < before.size) {
       if (token.cancelled) throw new Error('已取消');
       if (stream.credit <= 0) { await new Promise(resume => stream.wake = resume); continue; }
-      const buffer = Buffer.allocUnsafe(Math.min(FRAME_CHUNK, stream.credit, before.size - position));
+      const buffer = Buffer.allocUnsafe(Math.min(READ_CHUNK, stream.credit, before.size - position));
       const { bytesRead } = await source.read(buffer, 0, buffer.length, position);
       if (!bytesRead) throw new Error('传输期间远端文件已变化，请重试');
       stream.credit -= bytesRead; position += bytesRead;
-      await wire.write(frame(FRAME.DATA, id, buffer.subarray(0, bytesRead)));
+      await wire.background(frame(FRAME.DATA, id, buffer.subarray(0, bytesRead)));
     }
     if ((await regular(filename)).version !== before.version) throw new Error('传输期间远端文件已变化，请重试');
-    await wire.write(frame(FRAME.END, id));
-  } catch (error) { await wire.write(frame(FRAME.END, id, Buffer.from(error.message || '读取失败'))); }
+    await wire.background(frame(FRAME.END, id));
+  } catch (error) { await wire.background(frame(FRAME.END, id, Buffer.from(error.message || '读取失败'))); }
   finally { wire.credits.delete(id); await source.close().catch(() => {}); }
   return SKIP_REPLY;
 }
@@ -1478,7 +1478,17 @@ async function framedWrite(id, request, token, wire) {
 function serve() {
   const tokens = new Map();
   let framed = false;
-  const write = data => process.stdout.write(data) ? Promise.resolve() : new Promise(resume => process.stdout.once('drain', resume));
+  // Replies and credit jump ahead of queued file data, so a transfer never holds up other requests.
+  const control = [], bulk = [];
+  let draining = false;
+  const pump = () => {
+    while (!draining && (control.length || bulk.length)) {
+      const item = control.length ? control.shift() : bulk.shift();
+      item.done();
+      if (!process.stdout.write(item.data)) { draining = true; process.stdout.once('drain', () => { draining = false; pump(); }); }
+    }
+  };
+  const write = (data, background = false) => new Promise<void>(done => { (background ? bulk : control).push({ data, done }); pump(); });
   const send = value => {
     if (!framed) return void process.stdout.write(JSON.stringify(value) + '\n');
     if (typeof value.result?.inlineData === 'string') {
@@ -1490,7 +1500,7 @@ function serve() {
     }
     void write(frame(FRAME.JSON, 0, Buffer.from(JSON.stringify(value))));
   };
-  const wire = { send, write, credits: new Map(), uploads: new Map() };
+  const wire = { send, write, background: data => write(data, true), credits: new Map(), uploads: new Map() };
   const watcher = createDirectoryWatcher(data => send({ event: 'fs', ...data }));
   const operations = {
     // Clients send this after a few quiet seconds; no reply means the network is gone.

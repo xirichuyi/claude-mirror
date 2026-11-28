@@ -47,7 +47,7 @@ public final class RemoteFiles: @unchecked Sendable {
         var request = params
         request["operation"] = .string(operation)
         request["base"] = .string(config.directory)
-        return try await agents.call(config, "file", .object(request), timeout: timeout)
+        return try await agents.call(config, "file", .object(request), timeout: timeout, files: true)
     }
 
     public func createFolder(_ config: ConnectionConfig, in parent: String, name: String) async throws -> FileEntry {
@@ -214,7 +214,7 @@ public final class RemoteFiles: @unchecked Sendable {
         do {
             try output.seek(toOffset: UInt64(offset))
             counter.bytes = offset
-            let channel = try await agents.channel(config)
+            let channel = try await agents.channel(config, files: true)
             _ = try await channel.read(request, offset: offset, into: output) { count in
                 counter.bytes += count
                 if Date().timeIntervalSince(counter.last) > 0.15 {
@@ -314,7 +314,7 @@ public final class RemoteFiles: @unchecked Sendable {
         let progress = onProgress
         let entry: FileEntry
         do {
-            let channel = try await agents.channel(config)
+            let channel = try await agents.channel(config, files: true)
             let reply = try await channel.write(request, file: file) { total in
                 sent.bytes = total
                 if Date().timeIntervalSince(sent.last) > 0.15 {

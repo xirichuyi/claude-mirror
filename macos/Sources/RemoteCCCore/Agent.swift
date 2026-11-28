@@ -435,8 +435,9 @@ public final class AgentClient: @unchecked Sendable {
 
     public init(launcher: RemoteLauncher, resources: ServerResources) { self.launcher = launcher; self.resources = resources }
 
-    public func channel(_ config: ConnectionConfig) async throws -> AgentChannel {
-        let key = config.key
+    /// `files` selects a second agent on its own SSH session, so file traffic never queues ahead of chat and history.
+    public func channel(_ config: ConnectionConfig, files: Bool = false) async throws -> AgentChannel {
+        let key = config.key + (files ? "|files" : "")
         let task = lock.withLock { () -> Task<AgentChannel, Error> in
             if let existing = channels[key] { return existing.task }
             let identity = UUID()
@@ -445,7 +446,11 @@ public final class AgentClient: @unchecked Sendable {
                 let channel = AgentChannel(launcher: self.launcher, config: config, resources: self.resources)
                 channel.onFileChange = { [weak self] directories in self?.onFileChange?(config, directories) }
                 channel.onClosed = { [weak self] in self?.forget(key, identity: identity) }
-                do { try await channel.start(); return channel }
+                do {
+                    try await channel.start()
+                    if !files { Task { [weak self] in _ = try? await self?.channel(config, files: true) } }
+                    return channel
+                }
                 catch { self.forget(key, identity: identity); throw error }
             }
             channels[key] = ChannelEntry(identity: identity, task: task)
@@ -461,8 +466,8 @@ public final class AgentClient: @unchecked Sendable {
         }
     }
 
-    public func call(_ config: ConnectionConfig, _ op: String, _ params: JSON, timeout: TimeInterval = 60) async throws -> JSON {
-        try await channel(config).call(op, params, timeout: timeout)
+    public func call(_ config: ConnectionConfig, _ op: String, _ params: JSON, timeout: TimeInterval = 60, files: Bool = false) async throws -> JSON {
+        try await channel(config, files: files).call(op, params, timeout: timeout)
     }
 
     public func info(_ config: ConnectionConfig) async throws -> ServerInfo {
@@ -471,8 +476,7 @@ public final class AgentClient: @unchecked Sendable {
     }
 
     public func close(_ config: ConnectionConfig) {
-        let task = lock.withLock { channels.removeValue(forKey: config.key)?.task }
-        guard let task else { return }
-        Task { (try? await task.value)?.close() }
+        let tasks = lock.withLock { [config.key, config.key + "|files"].compactMap { channels.removeValue(forKey: $0)?.task } }
+        for task in tasks { Task { (try? await task.value)?.close() } }
     }
 }
