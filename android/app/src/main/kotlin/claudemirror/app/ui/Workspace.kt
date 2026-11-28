@@ -4,6 +4,21 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.graphics.Color
+import claudemirror.core.ReviewComment
+import claudemirror.core.UnifiedLine
+import claudemirror.core.unifiedLines
+import kotlinx.coroutines.flow.update
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -115,6 +130,8 @@ fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> 
     var opened by remember { mutableStateOf<claudemirror.core.GitChange?>(null) }
     LaunchedEffect(attempt) { state = Loaded.Waiting; state = load { model.gitStatus(host, directory) } }
     val status = (state as? Loaded.Ready)?.value
+    val key = model.reviewKey(hostId, directory)
+    val comments = model.reviewComments.collectAsStateWithLifecycle().value[key].orEmpty()
 
     Scaffold(
         topBar = {
@@ -123,7 +140,14 @@ fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> 
                     Text(status?.branch?.removePrefix("No commits yet on ")?.substringBefore("...")?.ifEmpty { null } ?: folderName(directory), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
-                actions = { IconButton(onClick = { attempt++ }) { Icon(Icons.Filled.Refresh, "刷新") } },
+                actions = {
+                    if (comments.isNotEmpty()) {
+                        TextButton(onClick = { model.sendReview(host, directory) }) {
+                            Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("${comments.size}")
+                        }
+                    }
+                    IconButton(onClick = { attempt++ }) { Icon(Icons.Filled.Refresh, "刷新") }
+                },
             )
         },
     ) { padding ->
@@ -156,7 +180,7 @@ fun GitScreen(model: AppModel, hostId: String, directory: String, onBack: () -> 
             LaunchedEffect(again) { diff = Loaded.Waiting; diff = load { model.gitDiff(host, change.path) } }
             Loading(diff, Modifier.fillMaxSize(), onRetry = { again++ }) { text ->
                 if (text.isBlank()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("无差异", color = palette.muted) }
-                else Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) { CodeBox(text, "diff", title = null) }
+                else ReviewableDiff(model, key, change.path, text, comments)
             }
         }
     }
@@ -219,4 +243,47 @@ private fun byteSize(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
     bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
     else -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
+}
+
+/** A diff whose lines take a comment on tap; commented lines carry a mark. */
+@Composable
+private fun ReviewableDiff(model: AppModel, key: String, path: String, text: String, comments: List<ReviewComment>) {
+    val lines = remember(text) { unifiedLines(text) }
+    // A binary or mode-only change has no source lines; Git's own words say what changed.
+    if (lines.none { it.sign != '@' }) {
+        Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) { CodeBox(text, "diff", title = null) }
+        return
+    }
+    var commenting by remember { mutableStateOf<UnifiedLine?>(null) }
+    LazyColumn(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
+        items(lines.size) { index ->
+            val line = lines[index]
+            val marked = comments.any { it.path == path && if (it.removed) line.new == null && line.old == it.line else line.new == it.line }
+            val tint = when (line.sign) { '+' -> palette.added.copy(alpha = 0.12f); '-' -> palette.removed.copy(alpha = 0.12f); else -> Color.Transparent }
+            Row(
+                Modifier.background(tint).clickable(enabled = line.sign != '@') { commenting = line }.padding(horizontal = 8.dp, vertical = 1.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(4.dp).height(16.dp).background(if (marked) palette.accent else Color.Transparent))
+                Text((line.new ?: line.old)?.toString().orEmpty().padStart(5), style = CodeStyle, color = palette.muted)
+                Text("  " + (if (line.sign == '@') line.text else "${line.sign}${line.text}"), style = CodeStyle, softWrap = false,
+                    color = when (line.sign) { '+' -> palette.added; '-' -> palette.removed; '@' -> palette.muted; else -> palette.text })
+            }
+        }
+    }
+    commenting?.let { line ->
+        var note by remember(line) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { commenting = null },
+            title = { Text(ReviewComment.of(line, path, "-")?.location(null)?.substringAfterLast('/') ?: "评论", style = CodeStyle) },
+            text = { OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), placeholder = { Text("评论") }, minLines = 3) },
+            confirmButton = {
+                TextButton(enabled = note.isNotBlank(), onClick = {
+                    ReviewComment.of(line, path, note)?.let { comment -> model.reviewComments.update { it + (key to it[key].orEmpty() + comment) } }
+                    commenting = null
+                }) { Text("添加") }
+            },
+            dismissButton = { TextButton(onClick = { commenting = null }) { Text("取消") } },
+        )
+    }
 }
