@@ -290,7 +290,7 @@ public final class AgentChannel: @unchecked Sendable {
         var request = params
         request["operation"] = "read"
         request["offset"] = .number(Double(offset))
-        request["window"] = .number(Double(1024 * 1024))
+        request["window"] = .number(Double(4 * 1024 * 1024))
         return try await withTaskCancellationHandler {
             do {
                 let reply = try await call("file", request, id: id)

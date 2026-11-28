@@ -1385,7 +1385,7 @@ function createDirectoryWatcher(emit) {
 // ---------------------------------------------------------------- framed transfers (docs/agent-wire.md)
 
 const FRAME = { JSON: 1, BLOB: 2, DATA: 3, END: 4, CREDIT: 5 };
-const FRAME_CHUNK = 128 * 1024, READ_CHUNK = 32 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
+const FRAME_CHUNK = 128 * 1024, READ_CHUNK = 32 * 1024, FRAME_WINDOW = 4 * MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
 const SKIP_REPLY = Symbol('skip reply');
 function frame(type, id, payload = Buffer.alloc(0)) {
   const head = Buffer.alloc(9);
@@ -1406,7 +1406,7 @@ async function framedRead(id, request, token, wire) {
   const before = await regular(filename);
   if (request.version && request.version !== before.version) throw new Error('远端文件已变化，请重试');
   const offset = Math.max(0, Math.min(Number.isInteger(request.offset) ? request.offset : 0, before.size));
-  const stream = { credit: Math.max(FRAME_CHUNK, Math.min(Number.isInteger(request.window) ? request.window : FRAME_WINDOW, 4 * MEGABYTE)), wake: null };
+  const stream = { credit: Math.max(FRAME_CHUNK, Math.min(Number.isInteger(request.window) ? request.window : FRAME_WINDOW, 8 * MEGABYTE)), wake: null };
   const source = await fsp.open(filename, 'r');
   wire.credits.set(id, stream);
   token.cancel = () => { const resume = stream.wake; stream.wake = null; resume?.(); };
