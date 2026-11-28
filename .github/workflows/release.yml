@@ -110,6 +110,7 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
+      - run: pip install ziglang && cargo install cargo-zigbuild --locked
       - name: Build release APK
         working-directory: android
         env:

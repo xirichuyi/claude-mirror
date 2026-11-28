@@ -1648,32 +1648,24 @@ async function tuneNetwork() {
   await run('sysctl', ['-q', '-p', conf]);
 }
 
-if (require.main === module) {
-  if (process.argv[2] === 'transfer') {
-    transfer(JSON.parse(process.argv[3])).catch(error => {
-      process.stderr.write(error.message + '\n');
-      process.exitCode = 1;
-    });
-  } else if (process.argv[2] === 'thumbnail') {
-    try { thumbnailCommand(process.argv[3]); } catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
-  } else serve();
-}
-
-module.exports = { fileOperations, historyOperations, historyScope, accountHistory, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
-  processCommand, persistenceWarning, workerCommand, parseAuthStatus, shrinkPNG };
-
 // ---------------------------------------------------------------- QUIC file channel (quic/)
 
 // The app uploads tether-quic once per version; `serve` pipes each authenticated QUIC stream into a new agent like this one.
 const QUIC_PORTS = '47000-47099';
 let quicServer: Promise<object> | null = null;
+const quicVerified = new Set<string>();
 
 async function quicOperation(request) {
   const arch = process.platform === 'linux' ? { arm64: 'arm64', x64: 'x64' }[process.arch] : undefined;
   const digest = arch && request.binaries?.[arch];
   if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) throw new Error('QUIC 不支持此服务器');
   const binary = path.join(HOME, '.local/share/remotecc/quic', digest, 'tether-quic');
-  if (!fs.existsSync(binary)) return { install: binary, arch };
+  // An interrupted upload can leave a truncated file; only a binary matching its digest is run.
+  if (!quicVerified.has(binary)) {
+    const actual = await fsp.readFile(binary).then(data => crypto.createHash('sha256').update(data).digest('hex'), () => null);
+    if (actual !== digest) return { install: binary, arch };
+    quicVerified.add(binary);
+  }
   quicServer ??= startQuic(binary).catch(error => { quicServer = null; throw error; });
   return quicServer;
 }
@@ -1717,3 +1709,17 @@ async function openQuicPorts() {
   await fsp.mkdir(path.dirname(marker), { recursive: true });
   await fsp.writeFile(marker, '');
 }
+
+if (require.main === module) {
+  if (process.argv[2] === 'transfer') {
+    transfer(JSON.parse(process.argv[3])).catch(error => {
+      process.stderr.write(error.message + '\n');
+      process.exitCode = 1;
+    });
+  } else if (process.argv[2] === 'thumbnail') {
+    try { thumbnailCommand(process.argv[3]); } catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
+  } else serve();
+}
+
+module.exports = { fileOperations, historyOperations, historyScope, accountHistory, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
+  processCommand, persistenceWarning, workerCommand, parseAuthStatus, shrinkPNG };

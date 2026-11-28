@@ -6,6 +6,8 @@ import java.io.DataInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetAddress
+import java.security.MessageDigest
 import java.nio.ByteBuffer
 import java.util.Base64
 import java.util.UUID
@@ -77,7 +79,15 @@ class ServerResources(
     val bundlePayload: String,
     /** scripts/install-claude-remote.sh; with `--node-only` it puts Node.js on a server that lacks it. */
     val installScript: ByteArray? = null,
+    /** Linux builds of tether-quic by architecture (`arm64`, `x64`): the server side of the QUIC file channel. */
+    val quic: Map<String, ByteArray> = emptyMap(),
 ) {
+    /** This device's own tether-quic executable; without it files stay on SSH. */
+    @Volatile var quicHelper: String? = null
+    val quicDigests: Map<String, String> by lazy {
+        quic.mapValues { (_, bytes) -> MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) } }
+    }
+
     companion object {
         fun read(open: (String) -> InputStream): ServerResources {
             val manifest = open("manifest.json").use { MirrorJson.parseToJsonElement(it.readBytes().decodeToString()) }.obj()
@@ -86,7 +96,8 @@ class ServerResources(
             val payload = manifest?.get("bundlePayload").string()
             if (agent == null || bundle == null || payload == null) throw RemoteException("应用内的服务端程序不完整，请重新构建")
             val installer = runCatching { open("install-claude-remote.sh").use { it.readBytes() } }.getOrNull()
-            return ServerResources(open("remote-agent.cjs").use { it.readBytes() }, agent, bundle, payload, installer)
+            val quic = listOf("arm64", "x64").mapNotNull { arch -> runCatching { arch to open("quic/tether-quic-linux-$arch").use { it.readBytes() } }.getOrNull() }.toMap()
+            return ServerResources(open("remote-agent.cjs").use { it.readBytes() }, agent, bundle, payload, installer, quic)
         }
     }
 }
@@ -434,6 +445,25 @@ object RemoteMembers {
     }
 }
 
+/** Runs the local tether-quic helper instead of an SSH command: the agent on the other end is already chosen by the token. */
+internal class QuicLauncher(private val helper: String, private val address: String, private val port: Int, private val fingerprint: String, private val token: String) : Launcher {
+    override fun start(host: HostConfig, command: String): RemoteProcess {
+        val process = ProcessBuilder(helper, "connect", address, port.toString(), fingerprint).start()
+        process.outputStream.write("$token\n".toByteArray()); process.outputStream.flush()
+        val errors = StringBuffer()
+        thread(isDaemon = true, name = "quic-stderr") {
+            runCatching { process.errorStream.bufferedReader().forEachLine { if (errors.length < 8192) errors.appendLine(it) } }
+        }
+        return object : RemoteProcess {
+            override val stdout: InputStream = process.inputStream
+            override val stdin: OutputStream = process.outputStream
+            override fun errorText(): String = errors.toString()
+            override fun waitForExit(): Int? = runCatching { if (process.waitFor(60, TimeUnit.SECONDS)) process.exitValue() else null }.getOrNull()
+            override fun kill() { process.destroy() }
+        }
+    }
+}
+
 /** One agent per server, started on first use and shared by every conversation on that server. */
 class AgentPool(private val launcher: Launcher, val resources: ServerResources) {
     private companion object { const val MAX_UPLOAD = 1L shl 30 }
@@ -469,6 +499,7 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val channels = HashMap<String, Deferred<AgentChannel>>()
+    private val fileChannels = HashMap<String, Deferred<AgentChannel?>>()
     private val _states = MutableStateFlow<Map<String, ConnectionState>>(emptyMap())
     val states: StateFlow<Map<String, ConnectionState>> = _states
 
@@ -511,6 +542,49 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
     suspend fun call(host: HostConfig, op: String, params: JsonObject, timeoutMs: Long = 60_000): JsonElement =
         channel(host).call(op, params, timeoutMs)
 
+    /** File reads go over a second agent reached by QUIC (UDP) so they neither wait behind nor slow down the conversation; SSH when UDP is blocked. */
+    suspend fun fileCall(host: HostConfig, op: String, params: JsonObject, timeoutMs: Long = 60_000): JsonElement {
+        val files = files(host)
+        if (files != null) {
+            try { return files.call(op, params, timeoutMs) } catch (error: RemoteException) { if (error.confirmed) throw error }
+            synchronized(fileChannels) { fileChannels.remove(host.id) }
+            files.close()
+        }
+        return call(host, op, params, timeoutMs)
+    }
+
+    private suspend fun files(host: HostConfig): AgentChannel? {
+        val helper = resources.quicHelper ?: return null
+        if (resources.quic.isEmpty()) return null
+        val attempt = synchronized(fileChannels) { fileChannels.getOrPut(host.id) { scope.async { runCatching { startFiles(host, helper) }.getOrNull() } } }
+        return attempt.await()
+    }
+
+    private suspend fun startFiles(host: HostConfig, helper: String): AgentChannel? {
+        val params = buildJsonObject { put("binaries", buildJsonObject { resources.quicDigests.forEach { (arch, digest) -> put(arch, digest) } }) }
+        var reply = call(host, "quic", params, 30_000).obj()
+        val target = reply?.get("install").string()
+        val arch = reply?.get("arch").string()
+        if (target != null && arch != null) {
+            val binary = resources.quic[arch] ?: return null
+            val child = launcher.start(host, "sh -c " + shellQuote("T=${shellQuote(target)}; mkdir -p \"\${'$'}{T%/*}\" && cat > \"\${'$'}T.tmp\" && chmod 700 \"\${'$'}T.tmp\" && mv \"\${'$'}T.tmp\" \"\${'$'}T\""))
+            try {
+                child.stdin.use { it.write(binary) }
+                if (child.waitForExit() != 0) return null
+            } finally { child.kill() }
+            reply = call(host, "quic", params, 30_000).obj()
+        }
+        val port = (reply?.get("port") as? JsonPrimitive)?.intOrNull ?: return null
+        val fingerprint = reply["fingerprint"].string() ?: return null
+        val token = reply["token"].string() ?: return null
+        // The helper is a static Linux program; Android has no resolv.conf for it, so the app resolves the name.
+        val address = withContext(Dispatchers.IO) { InetAddress.getByName(host.host).hostAddress } ?: return null
+        val channel = AgentChannel(QuicLauncher(helper, address, port, fingerprint, token), host, resources)
+        channel.onClosed = { synchronized(fileChannels) { fileChannels.remove(host.id) } }
+        try { channel.start() } catch (error: Throwable) { channel.onClosed = null; channel.close(); throw error }
+        return channel
+    }
+
     /**
      * Puts a file where Claude can read it and says where that is. It is kept under what it
      * contains ([digest], SHA-256), so a file the server already has is not sent again.
@@ -529,6 +603,9 @@ class AgentPool(private val launcher: Launcher, val resources: ServerResources) 
 
     /** Drops the connection. Replies being produced on the server keep running there. */
     fun close(host: HostConfig) {
+        synchronized(fileChannels) { fileChannels.remove(host.id) }?.let { files ->
+            if (files.isCompleted && files.getCompletionExceptionOrNull() == null) files.getCompleted()?.close() else files.cancel()
+        }
         val attempt = synchronized(channels) { channels.remove(host.id) }
         if (attempt != null) {
             if (attempt.isCompleted && attempt.getCompletionExceptionOrNull() == null) attempt.getCompleted().close() else attempt.cancel()

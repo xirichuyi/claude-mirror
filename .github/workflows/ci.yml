@@ -49,6 +49,7 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v6
+      - run: pip install ziglang && cargo install cargo-zigbuild --locked
       - run: ./gradlew test assembleDebug
         working-directory: android
       - uses: actions/upload-artifact@v7

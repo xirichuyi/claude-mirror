@@ -24,6 +24,10 @@ public sealed class RemoteAgent : IDisposable
     private int upgradeId = -1;
     private readonly ConcurrentDictionary<int, Func<byte[]?, string?, Task>> reads = new();
     private readonly ConcurrentDictionary<int, Upload> uploads = new();
+    private string? resources;
+    private readonly object filesLock = new();
+    private Task<RemoteAgent?>? files;
+    private System.Diagnostics.Process? helper;
     private sealed class Upload
     {
         public readonly TaskCompletionSource<long> Offset = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -97,7 +101,7 @@ public sealed class RemoteAgent : IDisposable
     public async Task StartAgentAsync(string resourceDirectory, bool installNode = true)
     {
         if (ssh is null || !ssh.Connected) throw new IOException("请先连接服务器");
-        command?.Dispose(); writer = null; channelClosed = false; Hello = null; framed = false;
+        command?.Dispose(); writer = null; channelClosed = false; Hello = null; framed = false; resources = resourceDirectory;
         var manifest = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(resourceDirectory, "manifest.json")))!;
         Digest = manifest["bundleDigest"]!.GetValue<string>();
         var digest = manifest["agentDigest"]!.GetValue<string>();
@@ -423,12 +427,64 @@ public sealed class RemoteAgent : IDisposable
     }
     public async Task DownloadAsync(string remotePath, string localPath)
     {
+        if (framed && await FilesAsync() is { } quic)
+        {
+            try { await quic.ReadAsync(remotePath, localPath); return; }
+            catch (Exception) when (!quic.Connected) { lock (filesLock) files = null; quic.Dispose(); }
+        }
         if (framed) { await ReadAsync(remotePath, localPath); return; }
         using var download = ssh!.Run("cat -- " + Protocol.Quote(remotePath), false, lifetime.Token);
         await using var file = File.Create(localPath);
         await download.Output.CopyToAsync(file, lifetime.Token);
         if (await download.Exit != 0) throw new IOException(download.Error);
     }
+    /// <summary>A second agent reached over QUIC (UDP) for file transfers, so files neither wait behind nor slow down the SSH channel. Null when UDP is blocked.</summary>
+    private Task<RemoteAgent?> FilesAsync()
+    {
+        lock (filesLock) return files ??= StartQuicAsync().ContinueWith(t => t.IsCompletedSuccessfully ? t.Result : null, TaskScheduler.Default);
+    }
+
+    private async Task<RemoteAgent?> StartQuicAsync()
+    {
+        var program = Path.Combine(AppContext.BaseDirectory, "TetherQuic.exe");
+        if (resources is null || Profile is not { SystemSsh: false, Jump: null } profile || ssh is null || !File.Exists(program)) return null;
+        var binaries = new Dictionary<string, string>();
+        foreach (var arch in new[] { "arm64", "x64" })
+        {
+            var file = Path.Combine(resources, "quic", "tether-quic-linux-" + arch);
+            if (File.Exists(file)) { await using var input = File.OpenRead(file); binaries[arch] = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(input)).ToLowerInvariant(); }
+        }
+        if (binaries.Count == 0) return null;
+        var reply = await CallAsync("quic", new { binaries });
+        if (reply["install"]?.GetValue<string>() is { } target && reply["arch"]?.GetValue<string>() is { } wanted)
+        {
+            var folder = target[..target.LastIndexOf('/')];
+            using (var install = ssh.Run($"mkdir -p {Protocol.Quote(folder)} && cat > {Protocol.Quote(target + ".tmp")} && chmod 700 {Protocol.Quote(target + ".tmp")} && mv {Protocol.Quote(target + ".tmp")} {Protocol.Quote(target)}", true, lifetime.Token))
+            {
+                using (var input = install.Input) await input.WriteAsync(await File.ReadAllBytesAsync(Path.Combine(resources, "quic", "tether-quic-linux-" + wanted)));
+                if (await install.Exit.WaitAsync(TimeSpan.FromSeconds(60)) != 0) return null;
+            }
+            reply = await CallAsync("quic", new { binaries });
+        }
+        if (reply["port"] is not { } port || reply["fingerprint"]?.GetValue<string>() is not { } fingerprint || reply["token"]?.GetValue<string>() is not { } token) return null;
+        var start = new System.Diagnostics.ProcessStartInfo(program) { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in new[] { "connect", profile.Host, port.ToString(), fingerprint }) start.ArgumentList.Add(argument);
+        var process = System.Diagnostics.Process.Start(start)!;
+        process.ErrorDataReceived += (_, _) => { }; process.BeginErrorReadLine();
+        try
+        {
+            var input = process.StandardInput.BaseStream;
+            await input.WriteAsync(Encoding.UTF8.GetBytes(token + "\n")); await input.FlushAsync();
+            var agent = await AttachAsync(input, process.StandardOutput.BaseStream, profile);
+            agent.helper = process;
+            _ = process.WaitForExitAsync().ContinueWith(_ => agent.channelClosed = true, TaskScheduler.Default);
+            agent.upgradeId = Interlocked.Increment(ref agent.sequence);
+            await agent.CallAsync(agent.upgradeId, "frames", new { version = 1 }, TimeSpan.FromSeconds(30));
+            return agent;
+        }
+        catch { try { process.Kill(); } catch { } process.Dispose(); return null; }
+    }
+
     /// <summary>Where a broken download of one version of a remote file waits to be resumed.</summary>
     public static string PartialDirectory { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClaudeMirror", "partial");
 
@@ -599,6 +655,8 @@ public sealed class RemoteAgent : IDisposable
     public void Dispose()
     {
         lifetime.Cancel();
+        if (files is { IsCompletedSuccessfully: true, Result: { } quic }) quic.Dispose();
+        try { helper?.Kill(); } catch (InvalidOperationException) { } helper?.Dispose();
         lock (forwards) { foreach (var entry in forwards.Values) entry.Port.Dispose(); forwards.Clear(); } writer?.Dispose(); command?.Dispose(); ssh?.Dispose();
         foreach (var request in requests.Values) request.TrySetCanceled(); requests.Clear(); watches.Clear();
     }
