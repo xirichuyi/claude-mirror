@@ -1609,6 +1609,28 @@ function serve() {
   process.stdin.on('end', closed);
   process.stdout.on('error', closed);
   send({ rcc: 'ready', pid: process.pid });
+  void tuneNetwork().catch(() => {});
+}
+
+// Long-distance links drop packets and cubic then crawls on a long-lived SSH connection; BBR is several
+// times faster. A root login switches a stock server once; customised settings are left alone.
+async function tuneNetwork() {
+  if (process.platform !== 'linux' || process.getuid?.() !== 0) return;
+  const conf = '/etc/sysctl.d/90-tether-net.conf';
+  const read = name => fsp.readFile('/proc/sys/' + name.replace(/\./g, '/'), 'utf8').then(value => value.trim(), () => '');
+  const run = (command, args) => new Promise(done => execFile(command, args, { timeout: 10_000 }, error => done(!error)));
+  if (await fsp.stat(conf).then(() => true, () => false)) return;
+  if (!['cubic', 'reno'].includes(await read('net.ipv4.tcp_congestion_control'))) return;
+  await run('modprobe', ['tcp_bbr']);
+  if (!(await read('net.ipv4.tcp_available_congestion_control')).split(/\s+/).includes('bbr')) return;
+  const lines = ['# Tether: BBR keeps SSH file transfers fast on lossy long-distance links'];
+  if (['fq_codel', 'pfifo_fast'].includes(await read('net.core.default_qdisc'))) lines.push('net.core.default_qdisc = fq');
+  lines.push('net.ipv4.tcp_congestion_control = bbr');
+  if (await read('net.ipv4.tcp_slow_start_after_idle') === '1') lines.push('net.ipv4.tcp_slow_start_after_idle = 0');
+  await fsp.writeFile(conf, lines.join('\n') + '\n');
+  if (await fsp.stat('/etc/modules-load.d').then(info => info.isDirectory(), () => false))
+    await fsp.writeFile('/etc/modules-load.d/tether-bbr.conf', 'tcp_bbr\n');
+  await run('sysctl', ['-q', '-p', conf]);
 }
 
 if (require.main === module) {

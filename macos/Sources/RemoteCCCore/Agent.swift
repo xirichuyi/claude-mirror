@@ -66,8 +66,10 @@ public final class AgentChannel: @unchecked Sendable {
     var onFileChange: (@Sendable ([String]) -> Void)?
     var onClosed: (@Sendable () -> Void)?
 
-    init(launcher: RemoteLauncher, config: ConnectionConfig, resources: ServerResources) {
-        self.launcher = launcher; self.config = config; self.resources = resources
+    private let direct: Bool
+
+    init(launcher: RemoteLauncher, config: ConnectionConfig, resources: ServerResources, direct: Bool = false) {
+        self.launcher = launcher; self.config = config; self.resources = resources; self.direct = direct
     }
 
     private var agentFile: String { "$HOME/.local/share/remotecc/agent/\(resources.agentDigest)/remote-agent.cjs" }
@@ -104,7 +106,9 @@ public final class AgentChannel: @unchecked Sendable {
     }
 
     func start() async throws {
-        var outcome = try await launchInstallingNode()
+        // A direct login that fails (agent prompts, ProxyCommand, firewall) falls back to the shared connection.
+        var outcome = direct ? ((try? await launch(direct: true)) ?? "") : ""
+        if outcome != "ready" { outcome = try await launchInstallingNode() }
         if outcome == "install" {
             try await install()
             outcome = try await launch()
@@ -145,8 +149,8 @@ public final class AgentChannel: @unchecked Sendable {
         }
     }
 
-    private func launch() async throws -> String {
-        let process = try launcher.spawn(config, command: startCommand)
+    private func launch(direct: Bool = false) async throws -> String {
+        let process = try direct ? launcher.spawnDirect(config, command: startCommand) : launcher.spawn(config, command: startCommand)
         let state = LaunchState()
         return try await withCheckedThrowingContinuation { continuation in
             state.continuation = continuation
@@ -443,7 +447,7 @@ public final class AgentClient: @unchecked Sendable {
             let identity = UUID()
             let task = Task<AgentChannel, Error> { [weak self] in
                 guard let self else { throw RemoteError("客户端已关闭") }
-                let channel = AgentChannel(launcher: self.launcher, config: config, resources: self.resources)
+                let channel = AgentChannel(launcher: self.launcher, config: config, resources: self.resources, direct: files)
                 channel.onFileChange = { [weak self] directories in self?.onFileChange?(config, directories) }
                 channel.onClosed = { [weak self] in self?.forget(key, identity: identity) }
                 do {

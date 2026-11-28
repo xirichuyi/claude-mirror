@@ -118,6 +118,12 @@ public final class RemoteProcess: @unchecked Sendable {
 /// Starts commands on the server. SSH in production; `sh -c` in tests.
 public protocol RemoteLauncher: AnyObject, Sendable {
     func spawn(_ config: ConnectionConfig, command: String) throws -> RemoteProcess
+    /// A connection of its own, so bulk data does not share TCP congestion with the conversation.
+    func spawnDirect(_ config: ConnectionConfig, command: String) throws -> RemoteProcess
+}
+
+public extension RemoteLauncher {
+    func spawnDirect(_ config: ConnectionConfig, command: String) throws -> RemoteProcess { try spawn(config, command: command) }
 }
 
 /// Splits a byte stream into lines without assuming chunks align with UTF-8 boundaries.
@@ -403,6 +409,16 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
         guard let socket, status == .connected else { throw RemoteError("请先连接 SSH 服务器") }
         // ProxyCommand=false stops a dead master from silently opening a new connection.
         return try RemoteProcess(executable: executable, arguments: ["-T", "-S", socket, "-o", "BatchMode=yes", "-o", "ProxyCommand=false"] + portArguments(config) + [config.host, command])
+    }
+
+    /// Needs a login without prompts; the host key must already be known from the master connection.
+    public func spawnDirect(_ config: ConnectionConfig, command: String) throws -> RemoteProcess {
+        guard config.authentication != .password else { return try spawn(config, command: command) }
+        guard withLock({ entries[config.key]?.state.status }) == .connected else { throw RemoteError("请先连接 SSH 服务器") }
+        return try RemoteProcess(executable: executable, arguments: ["-T", "-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none",
+                                                                     "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5",
+                                                                     "-o", "ServerAliveCountMax=4", "-o", "Compression=no"]
+                                 + Self.authenticationArguments(config) + portArguments(config) + [config.host, command])
     }
 
     /// Runs a short script over the existing connection and returns its output.
