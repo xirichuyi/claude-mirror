@@ -121,7 +121,7 @@ class Engine(
 
     /** Small images come whole, larger ones as a thumbnail; text up to the first 256 KB. */
     suspend fun preview(host: HostConfig, path: String): FilePreview = MirrorJson.decodeFromJsonElement(
-        agents.call(host, "file", buildJsonObject { put("operation", "preview"); put("path", path); put("thumbnail", true); put("inlineMedia", true); put("textLimit", 256 * 1024) }),
+        agents.fileCall(host, "file", buildJsonObject { put("operation", "preview"); put("path", path); put("thumbnail", true); put("inlineMedia", true); put("textLimit", 256 * 1024) }),
     )
 
     suspend fun gitStatus(host: HostConfig, directory: String): GitStatus =

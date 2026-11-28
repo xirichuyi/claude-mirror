@@ -42,17 +42,35 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     packaging {
+        // The QUIC helper is an executable, so it must be extracted to nativeLibraryDir.
+        jniLibs.useLegacyPackaging = true
         resources.excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/versions/9/OSGI-INF/MANIFEST.MF")
     }
     // The server program built by the root project's prepareServer task.
     sourceSets["main"].assets.srcDir(rootProject.layout.buildDirectory.dir("server-assets").get().asFile)
+    sourceSets["main"].jniLibs.srcDir(rootProject.layout.buildDirectory.dir("quic-jni").get().asFile)
+}
+
+// Static musl builds of tether-quic: copied to servers, and run on the phone itself (Android executes static Linux binaries).
+val quicOutput = rootProject.layout.buildDirectory.dir("quic")
+val quicBinaries = tasks.register<Exec>("quicBinaries") {
+    workingDir = rootDir.parentFile
+    commandLine("sh", "scripts/build-quic-linux.sh", quicOutput.get().asFile.path)
+    outputs.dir(quicOutput)
+}
+val quicJni = tasks.register<Copy>("quicJni") {
+    dependsOn(quicBinaries)
+    from(quicOutput) { include("tether-quic-linux-arm64"); rename { "libtetherquic.so" }; into("arm64-v8a") }
+    from(quicOutput) { include("tether-quic-linux-x64"); rename { "libtetherquic.so" }; into("x86_64") }
+    into(rootProject.layout.buildDirectory.dir("quic-jni"))
 }
 
 val serverAssets = tasks.register<Copy>("serverAssets") {
     from(rootProject.tasks.named("prepareServer"))
     into(rootProject.layout.buildDirectory.dir("server-assets/server"))
+    from(quicBinaries) { into("quic") }
 }
-tasks.named("preBuild") { dependsOn(serverAssets) }
+tasks.named("preBuild") { dependsOn(serverAssets, quicJni) }
 
 dependencies {
     implementation(project(":core"))
