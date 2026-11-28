@@ -72,7 +72,12 @@ async fn serve(args: &[String]) -> Result<(), Failure> {
     config.transport_config(transport());
 
     let (endpoint, port) = (first..=last)
-        .find_map(|port| Endpoint::server(config.clone(), SocketAddr::from(([0, 0, 0, 0], port))).ok().map(|e| (e, port)))
+        // [::] is dual-stack on Linux; servers without IPv6 fall back to IPv4 only.
+        .find_map(|port| {
+            Endpoint::server(config.clone(), SocketAddr::from(([0u16; 8], port)))
+                .or_else(|_| Endpoint::server(config.clone(), SocketAddr::from(([0, 0, 0, 0], port))))
+                .ok().map(|e| (e, port))
+        })
         .ok_or("no free UDP port in range")?;
     let token: String = hex::encode(rand::random::<[u8; 32]>());
     println!("{{\"port\":{port},\"fingerprint\":\"{fingerprint}\",\"token\":\"{token}\"}}");
