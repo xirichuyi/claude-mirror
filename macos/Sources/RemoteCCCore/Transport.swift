@@ -415,7 +415,7 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
     public func spawnDirect(_ config: ConnectionConfig, command: String) throws -> RemoteProcess {
         guard config.authentication != .password else { return try spawn(config, command: command) }
         guard withLock({ entries[config.key]?.state.status }) == .connected else { throw RemoteError("请先连接 SSH 服务器") }
-        return try RemoteProcess(executable: executable, arguments: ["-T", "-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none",
+        return try RemoteProcess(executable: executable, arguments: ["-T", "-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ClearAllForwardings=yes",
                                                                      "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5",
                                                                      "-o", "ServerAliveCountMax=4", "-o", "Compression=no"]
                                  + Self.authenticationArguments(config) + portArguments(config) + [config.host, command])
