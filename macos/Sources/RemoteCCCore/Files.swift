@@ -36,6 +36,7 @@ public final class RemoteFiles: @unchecked Sendable {
     private let previewRequests = SharedFileRequests<FilePreview>()
     private let contentRequests = SharedFileRequests<URL>()
     private var previews: [String: FilePreview] = [:]
+    private var activePartials: Set<String> = []
     private var listings: [String: (time: Date, value: DirectoryListing)] = [:]
     public var onProgress: (@Sendable (TransferProgress) -> Void)?
 
@@ -185,7 +186,7 @@ public final class RemoteFiles: @unchecked Sendable {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         guard let files = try? FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: keys) else { return }
         let items = files.compactMap { url -> (URL, Date, Int)? in
-            guard !url.lastPathComponent.hasSuffix(".tmp"), let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
+            guard !url.lastPathComponent.hasSuffix(".tmp"), !lock.withLock({ activePartials.contains(url.lastPathComponent) }), let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
             return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
         }.sorted { $0.1 < $1.1 }
         var total = items.reduce(0) { $0 + $1.2 }
@@ -201,7 +202,11 @@ public final class RemoteFiles: @unchecked Sendable {
         let target = partial ?? destination
         let existing = partial.flatMap { (try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? NSNumber)?.intValue } ?? 0
         let offset = existing <= size ? existing : 0
-        if partial != nil { try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true) }
+        if let partial {
+            try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+            lock.withLock { _ = activePartials.insert(partial.lastPathComponent) }
+        }
+        defer { if let partial { lock.withLock { _ = activePartials.remove(partial.lastPathComponent) } } }
         if offset == 0 || partial == nil {
             guard FileManager.default.createFile(atPath: target.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw RemoteError("无法写入本地文件") }
         }
