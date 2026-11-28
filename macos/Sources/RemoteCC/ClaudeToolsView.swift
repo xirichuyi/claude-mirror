@@ -49,7 +49,7 @@ struct ClaudeToolsView: View {
                             LabeledContent("思考强度", value: session.preferences?.effort ?? "默认")
                             if let id = session.remoteSessionId { LabeledContent("会话 ID", value: id).textSelection(.enabled) }
                             HStack {
-                                Button("模型与权限") { dismiss(); model.showPreferences = true }
+                                Button("权限") { dismiss(); model.showPreferences = true }
                                 Button("隔离工作树") { dismiss(); model.showWorktree = true }
                             }
                         }

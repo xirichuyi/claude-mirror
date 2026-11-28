@@ -193,7 +193,7 @@ class ChatService extends EventEmitter {
   configure(id, patch) {
     const session = this.get(id);
     patch = preferencePatch(patch);
-    const defaults = { executionUser: '', agent: '', selectedModel: '', effort: '', outputStyle: '', promptCacheTtl: '', fastMode: false, permissionMode: 'default', additionalDirectories: [] };
+    const defaults = { executionUser: '', agent: '', selectedModel: '', effort: '', outputStyle: '', promptCacheTtl: '', fastMode: false, permissionMode: '', additionalDirectories: [] };
     if (session.remoteOwner) patch = Object.fromEntries(Object.entries(patch).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(session.preferences?.[key] ?? defaults[key])));
     const live = session.remoteOwner && Object.keys(patch).every(key => ['selectedModel', 'effort', 'permissionMode', 'fastMode', 'outputStyle'].includes(key));
     if (this.runs.has(id) && !live) throw new Error('请等待当前回复完成后切换设置');
@@ -293,7 +293,7 @@ class ChatService extends EventEmitter {
       enableFileCheckpointing: true,
       perTaskStopAffordance: true,
       extraArgs: { 'replay-user-messages': null },
-      permissionMode: preferences.permissionMode || 'default', includePartialMessages: true,
+      ...(preferences.permissionMode ? { permissionMode: preferences.permissionMode } : {}), includePartialMessages: true,
       // Enable live switching on eligible launches, without starting in bypass by default.
       allowDangerouslySkipPermissions: this.fullAccessAvailable === true || preferences.permissionMode === 'bypassPermissions',
       ...(preferences.selectedModel ? { model: preferences.selectedModel } : {}),

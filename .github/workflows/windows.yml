@@ -80,6 +80,13 @@ jobs:
           $version = $plist.SelectSingleNode('//key[text()="CFBundleShortVersionString"]/following-sibling::string[1]').InnerText
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid product version: $version" }
           "version=$version" >> $env:GITHUB_OUTPUT
+      - name: QUIC file helper (Windows) and server copies (Linux)
+        shell: bash
+        run: |
+          cargo build --release --locked --manifest-path quic/Cargo.toml
+          cp quic/target/release/tether-quic.exe windows/Resources/TetherQuic.exe
+          pip install ziglang && cargo install cargo-zigbuild --locked
+          sh scripts/build-quic-linux.sh windows/Resources/server/quic
       - run: dotnet publish windows/ClaudeMirror.App -c Release -r win-x64 -p:Platform=x64 -p:Version=${{ steps.product.outputs.version }} -o windows/dist/tether
       - name: Verify native window starts
         shell: pwsh

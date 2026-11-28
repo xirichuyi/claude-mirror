@@ -3,127 +3,52 @@ import SwiftUI
 import AppKit
 import RemoteCCCore
 
+/// Only the permission mode is set here; anything left alone follows the remote Claude settings.
 struct PreferencesSheet: View {
     @EnvironmentObject private var model: AppModel
     private func dismiss() { model.presentation = nil }
-    @State private var capabilities: Capabilities?
-    @State private var loadError = ""
-    @State private var agent = ""
-    @State private var selectedModel = ""
-    @State private var customModel = ""
-    @State private var effort = ""
-    @State private var permissionMode = "default"
-    @State private var executionUser = ""
-    @State private var fastMode = false
-    @State private var outputStyle = ""
-    @State private var promptCacheTtl = ""
-    @State private var directories = ""
+    @State private var remoteMode: String?
+    @State private var permissionMode = ""
     @State private var error = ""
     @State private var saving = false
-    @State private var advanced = false
 
-    private let customTag = "__custom__"
-    private var currentModel: RemoteModel? { capabilities?.models.first { $0.value == (selectedModel.isEmpty ? "default" : selectedModel) } }
+    static let modes: [(String, String)] = [("default", "请求时确认"), ("plan", "计划"), ("acceptEdits", "自动编辑"),
+                                            ("dontAsk", "拒绝未授权"), ("auto", "自动权限"), ("bypassPermissions", "Full Access")]
+    static func label(_ mode: String?) -> String { modes.first { $0.0 == mode }?.1 ?? mode ?? "请求时确认" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SheetHeading(title: "对话选项") { dismiss() }.disabled(saving).padding(.horizontal, WorkbenchMetrics.dialogPadding).frame(height: WorkbenchMetrics.dialogHeader)
-            if let capabilities { form(capabilities).disabled(saving) }
-            else if !loadError.isEmpty { Text(loadError).foregroundStyle(WorkbenchTheme.error).padding().textSelection(.enabled) }
-            else { ProgressView("读取远端能力…").padding().frame(maxWidth: .infinity) }
+            SheetHeading(title: "权限") { dismiss() }.disabled(saving).padding(.horizontal, WorkbenchMetrics.dialogPadding).frame(height: WorkbenchMetrics.dialogHeader)
+            WorkbenchSelect(title: "权限", selection: $permissionMode, options:
+                [WorkbenchOption("", "远端默认 · " + Self.label(remoteMode ?? "default"))] +
+                Self.modes.map { WorkbenchOption($0.0, $0.1) })
+                .disabled(saving)
+                .padding(.horizontal, WorkbenchMetrics.dialogPadding)
             HStack {
-                Button("刷新模型列表") { load(refresh: true) }
                 if !error.isEmpty { Text(error).font(.caption).foregroundStyle(WorkbenchTheme.error).fixedSize(horizontal: false, vertical: true) }
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("应用") { apply() }.buttonStyle(WorkbenchButtonStyle(prominent: true)).keyboardShortcut(.defaultAction).disabled(capabilities == nil || saving)
+                Button("应用") { apply() }.buttonStyle(WorkbenchButtonStyle(prominent: true)).keyboardShortcut(.defaultAction).disabled(saving)
             }
             .padding()
         }
-        .frame(width: 440)
-        .task { load(refresh: false) }
+        .frame(width: 360)
+        .task { await load() }
     }
 
-    private func form(_ capabilities: Capabilities) -> some View {
-        let session = model.active
-        return VStack(alignment: .leading, spacing: 8) {
-            WorkbenchSelect(title: "模型", selection: $selectedModel, options:
-                [WorkbenchOption("", "远端默认")] + capabilities.models.filter { $0.value != "default" }.map { WorkbenchOption($0.value, $0.displayName ?? $0.value) } + [WorkbenchOption(customTag, "自定义模型 ID")])
-            if selectedModel == customTag { TextField("模型 ID", text: $customModel) }
-            WorkbenchSelect(title: "思考强度", selection: $effort, options:
-                [WorkbenchOption("", "自动")] + ["low", "medium", "high", "xhigh", "max"].filter { currentModel == nil || currentModel?.supportedEffortLevels?.contains($0) == true }.map { WorkbenchOption($0, $0) })
-            WorkbenchSelect(title: "权限", selection: $permissionMode, options: permissionOptions)
-            if permissionMode == "bypassPermissions" {
-                Text(capabilities.permissionStatus?.executionUser == "root" && executionUser.isEmpty ? "跳过所有确认 · root" : "跳过所有确认")
-                    .font(.caption).foregroundStyle(WorkbenchTheme.inkMuted)
-            }
-            if capabilities.permissionStatus?.requiresExecutionUser == true || !executionUser.isEmpty {
-                TextField("Claude 执行账号（留空以 SSH 用户运行）", text: $executionUser)
-                    .disabled(session?.messages.isEmpty == false || session?.remoteSessionId != nil || session?.remoteOwner != nil)
-            }
-            DisclosureGroup("高级选项", isExpanded: $advanced) {
-                WorkbenchSelect(title: "Agent", selection: $agent, options:
-                    [WorkbenchOption("", "远端默认")] + (capabilities.agents ?? []).map { WorkbenchOption($0.name, $0.name) } +
-                    (!agent.isEmpty && capabilities.agents?.contains(where: { $0.name == agent }) != true ? [WorkbenchOption(agent, agent + "（不可用）")] : []))
-                .disabled(session?.messages.isEmpty == false)
-                .help(session?.messages.isEmpty == false ? "请在新对话中选择 Agent" : capabilities.agents?.first { $0.name == agent }?.description ?? "")
-                Toggle("快速模式", isOn: $fastMode).help("需要模型与账户支持").disabled(currentModel != nil && currentModel?.supportsFastMode != true)
-                WorkbenchSelect(title: "输出样式", selection: $outputStyle, options:
-                    [WorkbenchOption("", "远端默认")] + (capabilities.outputStyles ?? []).map { WorkbenchOption($0, $0) })
-                WorkbenchSelect(title: "上下文缓存", selection: $promptCacheTtl, options:
-                    [WorkbenchOption("", "远端默认"), WorkbenchOption("5m", "5 分钟"), WorkbenchOption("1h", "1 小时")])
-                .disabled(session?.isBusy == true)
-                .help("需要 Claude Code 2.1.242+")
-                VStack(alignment: .leading) {
-                    Text("额外目录").help("每行一个远端绝对路径")
-                    TextEditor(text: $directories).scrollContentBackground(.hidden).background(WorkbenchTheme.surface).font(.system(size: 12, design: .monospaced)).frame(height: 54).disabled(session?.isBusy == true)
-                }
-            }
-
-        }
-        .padding(.horizontal, WorkbenchMetrics.dialogPadding).padding(.bottom, WorkbenchMetrics.formRowGap)
-        .scrollContentBackground(.hidden)
-    }
-
-    private var permissionOptions: [WorkbenchOption<String>] {
-        var options = [WorkbenchOption("default", "默认 · 请求时确认"), WorkbenchOption("plan", "计划 · 不执行修改"),
-                       WorkbenchOption("acceptEdits", "自动接受文件编辑"), WorkbenchOption("dontAsk", "拒绝未授权操作"), WorkbenchOption("bypassPermissions", "Full Access · 跳过操作确认")]
-        if currentModel == nil || currentModel?.supportsAutoMode == true { options.append(WorkbenchOption("auto", "自动判断权限")) }
-        return options
-    }
-
-    private func load(refresh: Bool) {
-        guard let engine = model.engine, let session = model.active else { loadError = "请先连接 SSH"; return }
-        loadError = ""
-        let preferences = session.preferences ?? Preferences()
-        Task {
-            do {
-                let result = try await engine.capabilities(session.id, refresh: refresh)
-                agent = preferences.agent ?? ""
-                let selected = preferences.selectedModel ?? ""
-                if selected.isEmpty || result.models.contains(where: { $0.value == selected }) { selectedModel = selected }
-                else { selectedModel = customTag; customModel = selected }
-                effort = preferences.effort ?? ""
-                permissionMode = preferences.permissionMode ?? "default"
-                executionUser = preferences.executionUser ?? ""
-                fastMode = preferences.fastMode ?? false
-                outputStyle = preferences.outputStyle ?? ""
-                promptCacheTtl = preferences.promptCacheTtl ?? ""
-                directories = (preferences.additionalDirectories ?? []).joined(separator: "\n")
-                capabilities = result
-            } catch { loadError = error.localizedDescription }
-        }
+    private func load() async {
+        guard let engine = model.engine, let session = model.active else { return }
+        let stored = session.preferences?.permissionMode ?? ""
+        permissionMode = stored
+        guard let defaults = try? await engine.agents.call(session.config, "file", ["operation": "claudeDefaults", "directory": .string(session.directory)], timeout: 10),
+              case .string(let mode)? = defaults["permissionMode"] else { return }
+        remoteMode = mode
     }
 
     private func apply() {
         guard let engine = model.engine, let session = model.active else { return }
         var next = session.preferences ?? Preferences()
-        next.agent = agent
-        next.selectedModel = selectedModel == customTag ? customModel.trimmingCharacters(in: .whitespaces) : selectedModel
-        next.effort = effort; next.permissionMode = permissionMode; next.fastMode = fastMode; next.outputStyle = outputStyle
-        next.executionUser = executionUser.trimmingCharacters(in: .whitespacesAndNewlines)
-        next.promptCacheTtl = promptCacheTtl
-        next.additionalDirectories = directories.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        next.permissionMode = permissionMode.isEmpty ? nil : permissionMode
         saving = true; error = ""
         Task {
             do { try await engine.configure(session.id, next); dismiss() }

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { resolveClaudeExecution, spawnClaudeExecution, permissionStatus, validateDirectory } from './claude-launch.cjs';
 import { ChatService } from './chat-service.cjs';
 import { Transcript } from './transcript.cjs';
-import { catalogue, preferencePatch } from './capabilities.cjs';
+import { catalogue, preferencePatch, remotePermissionDefault } from './capabilities.cjs';
 import { SessionInput } from './session-input.cjs';
 import { IdlePolicy } from './idle-policy.cjs';
 import { readAccountQuota, requireQuota } from './account-quota.cjs';
@@ -164,7 +164,8 @@ async function control(command) {
         if (Object.keys(patch).some(key => !['selectedModel', 'permissionMode', 'effort', 'fastMode', 'outputStyle'].includes(key))) throw new Error('此设置需要重新打开会话');
         for (const [key, value] of Object.entries(patch)) {
           if (key === 'selectedModel') await query.setModel(value || undefined);
-          else if (key === 'permissionMode') await query.setPermissionMode(value);
+          // '' drops the override and goes back to the remote Claude settings.
+          else if (key === 'permissionMode') await query.setPermissionMode(value || await remotePermissionDefault(session.directory));
           else if (['effort', 'fastMode', 'outputStyle'].includes(key)) await query.applyFlagSettings({ [key === 'effort' ? 'effortLevel' : key]: value === '' ? null : value });
           else throw new Error('此设置需要重新打开会话');
           session.preferences[key] = value; snapshot();

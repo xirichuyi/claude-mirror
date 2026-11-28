@@ -508,6 +508,23 @@ function parseAuthStatus(result, env = process.env) {
   return 'unknown';
 }
 
+// Claude's own permission default for this directory, read from its settings files (later files win).
+async function claudeDefaults(request) {
+  const folder = typeof request.directory === 'string' && request.directory ? resolve(request.directory) : null;
+  const files = [path.join(os.homedir(), '.claude', 'settings.json'),
+    ...(folder ? [path.join(folder, '.claude', 'settings.json'), path.join(folder, '.claude', 'settings.local.json')] : []),
+    '/etc/claude-code/managed-settings.json'];
+  const result: { permissionMode?: string } = {};
+  for (const file of files) {
+    try {
+      if (!(await fsp.stat(file)).isFile()) continue;
+      const mode = JSON.parse(await fsp.readFile(file, 'utf8'))?.permissions?.defaultMode;
+      if (typeof mode === 'string') result.permissionMode = mode;
+    } catch {}
+  }
+  return result;
+}
+
 async function claudeStatus() {
   const located = await run('sh', ['-c', 'command -v claude']);
   if (located.code) return { claude: null, auth: 'unknown' };
@@ -577,7 +594,7 @@ function storeAsAccount(request, file) {
 }
 
 const fileOperations = {
-  attachmentLookup, hello, claudeStatus, list: listing, preview, textPage, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
+  attachmentLookup, hello, claudeStatus, claudeDefaults, list: listing, preview, textPage, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
   pathInfo: request => metadata(resolve(request.path, request.base)),
   diff: gitDiffText, gitStatus, gitFileDiff, createWorktree, create: createEntry, rename: renameEntry, remove: removeEntry,
 };
@@ -1368,7 +1385,7 @@ function createDirectoryWatcher(emit) {
 // ---------------------------------------------------------------- framed transfers (docs/agent-wire.md)
 
 const FRAME = { JSON: 1, BLOB: 2, DATA: 3, END: 4, CREDIT: 5 };
-const FRAME_CHUNK = 128 * 1024, FRAME_WINDOW = MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
+const FRAME_CHUNK = 128 * 1024, READ_CHUNK = 32 * 1024, FRAME_WINDOW = 4 * MEGABYTE, MAX_FRAME = 64 * MEGABYTE;
 const SKIP_REPLY = Symbol('skip reply');
 function frame(type, id, payload = Buffer.alloc(0)) {
   const head = Buffer.alloc(9);
@@ -1389,7 +1406,7 @@ async function framedRead(id, request, token, wire) {
   const before = await regular(filename);
   if (request.version && request.version !== before.version) throw new Error('远端文件已变化，请重试');
   const offset = Math.max(0, Math.min(Number.isInteger(request.offset) ? request.offset : 0, before.size));
-  const stream = { credit: Math.max(FRAME_CHUNK, Math.min(Number.isInteger(request.window) ? request.window : FRAME_WINDOW, 4 * MEGABYTE)), wake: null };
+  const stream = { credit: Math.max(FRAME_CHUNK, Math.min(Number.isInteger(request.window) ? request.window : FRAME_WINDOW, 8 * MEGABYTE)), wake: null };
   const source = await fsp.open(filename, 'r');
   wire.credits.set(id, stream);
   token.cancel = () => { const resume = stream.wake; stream.wake = null; resume?.(); };
@@ -1399,15 +1416,15 @@ async function framedRead(id, request, token, wire) {
     while (position < before.size) {
       if (token.cancelled) throw new Error('已取消');
       if (stream.credit <= 0) { await new Promise(resume => stream.wake = resume); continue; }
-      const buffer = Buffer.allocUnsafe(Math.min(FRAME_CHUNK, stream.credit, before.size - position));
+      const buffer = Buffer.allocUnsafe(Math.min(READ_CHUNK, stream.credit, before.size - position));
       const { bytesRead } = await source.read(buffer, 0, buffer.length, position);
       if (!bytesRead) throw new Error('传输期间远端文件已变化，请重试');
       stream.credit -= bytesRead; position += bytesRead;
-      await wire.write(frame(FRAME.DATA, id, buffer.subarray(0, bytesRead)));
+      await wire.background(frame(FRAME.DATA, id, buffer.subarray(0, bytesRead)));
     }
     if ((await regular(filename)).version !== before.version) throw new Error('传输期间远端文件已变化，请重试');
-    await wire.write(frame(FRAME.END, id));
-  } catch (error) { await wire.write(frame(FRAME.END, id, Buffer.from(error.message || '读取失败'))); }
+    await wire.background(frame(FRAME.END, id));
+  } catch (error) { await wire.background(frame(FRAME.END, id, Buffer.from(error.message || '读取失败'))); }
   finally { wire.credits.delete(id); await source.close().catch(() => {}); }
   return SKIP_REPLY;
 }
@@ -1478,7 +1495,17 @@ async function framedWrite(id, request, token, wire) {
 function serve() {
   const tokens = new Map();
   let framed = false;
-  const write = data => process.stdout.write(data) ? Promise.resolve() : new Promise(resume => process.stdout.once('drain', resume));
+  // Replies and credit jump ahead of queued file data, so a transfer never holds up other requests.
+  const control = [], bulk = [];
+  let draining = false;
+  const pump = () => {
+    while (!draining && (control.length || bulk.length)) {
+      const item = control.length ? control.shift() : bulk.shift();
+      item.done();
+      if (!process.stdout.write(item.data)) { draining = true; process.stdout.once('drain', () => { draining = false; pump(); }); }
+    }
+  };
+  const write = (data, background = false) => new Promise<void>(done => { (background ? bulk : control).push({ data, done }); pump(); });
   const send = value => {
     if (!framed) return void process.stdout.write(JSON.stringify(value) + '\n');
     if (typeof value.result?.inlineData === 'string') {
@@ -1490,7 +1517,7 @@ function serve() {
     }
     void write(frame(FRAME.JSON, 0, Buffer.from(JSON.stringify(value))));
   };
-  const wire = { send, write, credits: new Map(), uploads: new Map() };
+  const wire = { send, write, background: data => write(data, true), credits: new Map(), uploads: new Map() };
   const watcher = createDirectoryWatcher(data => send({ event: 'fs', ...data }));
   const operations = {
     // Clients send this after a few quiet seconds; no reply means the network is gone.
@@ -1508,6 +1535,7 @@ function serve() {
       return operation(request);
     },
     task: taskOperation,
+    quic: quicOperation,
     watchDirectories: request => watcher.set(Array.isArray(request.directories) ? request.directories : []),
     taskWatch: (request, token) => {
       void watchTask(request.taskId, packet => send({ sub: request.subscription, packet }), token).then(
@@ -1582,6 +1610,104 @@ function serve() {
   process.stdin.on('end', closed);
   process.stdout.on('error', closed);
   send({ rcc: 'ready', pid: process.pid });
+  void tuneNetwork().catch(() => {});
+  void openQuicPorts().catch(() => {});
+}
+
+// Long-distance links drop packets and cubic then crawls on a long-lived SSH connection; BBR is several
+// times faster. A root login switches a stock server once; anything an administrator set is left alone.
+async function tuneNetwork() {
+  if (process.platform !== 'linux' || process.getuid?.() !== 0) return;
+  const conf = '/etc/sysctl.d/90-tether-net.conf';
+  const read = name => fsp.readFile('/proc/sys/' + name.replace(/\./g, '/'), 'utf8').then(value => value.trim(), () => '');
+  const run = (command, args) => new Promise(done => execFile(command, args, { timeout: 10_000 }, error => done(!error)));
+  if (await fsp.stat(conf).then(() => true, () => false)) return;
+  // /etc and /run hold the administrator's settings; /usr/lib/sysctl.d is the distribution's defaults.
+  const sources = ['/etc/sysctl.conf'];
+  for (const dir of ['/etc/sysctl.d', '/run/sysctl.d'])
+    for (const name of await fsp.readdir(dir).catch(() => [])) if (name.endsWith('.conf')) sources.push(path.join(dir, name));
+  const set = new Set();
+  for (const file of sources) {
+    const text = await fsp.readFile(file, 'utf8').catch(() => '');
+    for (const line of text.split('\n')) {
+      const key = line.replace(/[#;].*/, '').split('=')[0].trim().replace(/^-/, '').replace(/\//g, '.');
+      if (key) set.add(key);
+    }
+  }
+  if (set.has('net.ipv4.tcp_congestion_control')) return;
+  if (!['cubic', 'reno'].includes(await read('net.ipv4.tcp_congestion_control'))) return;
+  await run('modprobe', ['tcp_bbr']);
+  if (!(await read('net.ipv4.tcp_available_congestion_control')).split(/\s+/).includes('bbr')) return;
+  const lines = ['# Tether: BBR keeps SSH file transfers fast on lossy long-distance links'];
+  if (!set.has('net.core.default_qdisc') && ['fq_codel', 'pfifo_fast'].includes(await read('net.core.default_qdisc'))) lines.push('net.core.default_qdisc = fq');
+  lines.push('net.ipv4.tcp_congestion_control = bbr');
+  if (!set.has('net.ipv4.tcp_slow_start_after_idle') && await read('net.ipv4.tcp_slow_start_after_idle') === '1') lines.push('net.ipv4.tcp_slow_start_after_idle = 0');
+  await fsp.writeFile(conf, lines.join('\n') + '\n');
+  if (await fsp.stat('/etc/modules-load.d').then(info => info.isDirectory(), () => false))
+    await fsp.writeFile('/etc/modules-load.d/tether-bbr.conf', 'tcp_bbr\n');
+  await run('sysctl', ['-q', '-p', conf]);
+}
+
+// ---------------------------------------------------------------- QUIC file channel (quic/)
+
+// The app uploads tether-quic once per version; `serve` pipes each authenticated QUIC stream into a new agent like this one.
+const QUIC_PORTS = '47000-47099';
+let quicServer: Promise<object> | null = null;
+const quicVerified = new Set<string>();
+
+async function quicOperation(request) {
+  const arch = process.platform === 'linux' ? { arm64: 'arm64', x64: 'x64' }[process.arch] : undefined;
+  const digest = arch && request.binaries?.[arch];
+  if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) throw new Error('QUIC 不支持此服务器');
+  const binary = path.join(HOME, '.local/share/remotecc/quic', digest, 'tether-quic');
+  // An interrupted upload can leave a truncated file; only a binary matching its digest is run.
+  if (!quicVerified.has(binary)) {
+    const actual = await fsp.readFile(binary).then(data => crypto.createHash('sha256').update(data).digest('hex'), () => null);
+    if (actual !== digest) return { install: binary, arch };
+    quicVerified.add(binary);
+  }
+  quicServer ??= startQuic(binary).catch(error => { quicServer = null; throw error; });
+  return quicServer;
+}
+
+function startQuic(binary) {
+  return new Promise<object>((done, fail) => {
+    const child = spawn(binary, ['serve', '--ports', QUIC_PORTS, '--', process.execPath, process.argv[1]], { stdio: ['pipe', 'pipe', 'ignore'] });
+    // Its stdin stays open while this agent lives; the agent exiting closes it and stops the server.
+    let text = '';
+    const timer = setTimeout(() => { child.kill(); fail(new Error('QUIC 启动超时')); }, 5000);
+    child.on('error', error => { clearTimeout(timer); fail(error); });
+    child.on('exit', () => { clearTimeout(timer); quicServer = null; fail(new Error('QUIC 已退出')); });
+    child.stdout.on('data', chunk => {
+      if (text.includes('\n')) return;
+      text += chunk;
+      if (!text.includes('\n')) return;
+      clearTimeout(timer);
+      try {
+        const { port, fingerprint, token } = JSON.parse(text.split('\n')[0]);
+        done({ port, fingerprint, token });
+      } catch { child.kill(); fail(new Error('QUIC 启动失败')); }
+    });
+  });
+}
+
+// Root logins open the QUIC ports in ufw or firewalld once; the marker keeps an administrator's later removal.
+async function openQuicPorts() {
+  if (process.platform !== 'linux' || process.getuid?.() !== 0) return;
+  const marker = '/var/lib/tether/quic-firewall';
+  if (await fsp.stat(marker).then(() => true, () => false)) return;
+  const run = (command, args) => new Promise<string | null>(done =>
+    execFile(command, args, { timeout: 15_000 }, (error, stdout) => done(error ? null : String(stdout))));
+  let opened = true;
+  if ((await run('ufw', ['status']))?.startsWith('Status: active')) {
+    opened = (await run('ufw', ['allow', QUIC_PORTS.replace('-', ':') + '/udp', 'comment', 'Tether files'])) !== null;
+  } else if ((await run('firewall-cmd', ['--state']))?.trim() === 'running') {
+    opened = (await run('firewall-cmd', ['--add-port=' + QUIC_PORTS + '/udp'])) !== null
+      && (await run('firewall-cmd', ['--permanent', '--add-port=' + QUIC_PORTS + '/udp'])) !== null;
+  }
+  if (!opened) return;
+  await fsp.mkdir(path.dirname(marker), { recursive: true });
+  await fsp.writeFile(marker, '');
 }
 
 if (require.main === module) {

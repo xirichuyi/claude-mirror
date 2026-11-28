@@ -16,6 +16,7 @@ sh scripts/setup-remote.sh -p 2222 -i ~/.ssh/id_ed25519 user@example.com
 - **已有 Claude：** 只验证能否运行，不覆盖、不升级、不改认证配置。
 - **没有 Claude：** 下载 [Claude 官方安装器](https://github.com/anthropics/claude-code#installation)并安装 stable 版本，由官方安装器选择平台和架构。
 - 远端 Node.js 低于 18.14 或不存在时，把固定版本、校验过 SHA-256 的 Node.js 装到用户目录，不改系统包（nodejs.org 不通时换 npmmirror；Alpine、CentOS 7 用非官方构建）。唯一例外：Alpine 上以 root 连接时会 `apk add libstdc++`，Node.js 的 musl 构建依赖它。
+- 以 root 登录 Linux 时，若 TCP 仍是默认的 cubic / reno，自动切到 BBR，写入 `/etc/sysctl.d/90-tether-net.conf`（只改仍为默认值的项）。高延迟、有丢包的跨境线路上，文件传输可快数倍；想保留原设置：把该文件清空（留着空文件，之后不会再改），重启服务器。
 - SSH 断开会杀后台进程的服务器上自动开启 `loginctl enable-linger`；需要管理员权限时先试免密 `sudo`，不行再给出要运行的命令。
 - 不会自动登录、索取 API Key，也不会把本机 Claude 凭据传到服务器。
 
@@ -36,6 +37,15 @@ sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app
 | `--copy-login` | 把 root 的 `~/.claude/.credentials.json` 复制给该账号（仅此一个文件，权限 600）。不加则按脚本最后打印的命令登录一次 |
 
 选项在安装任何东西之前检查，重复运行不会重复创建。完成后在新对话选择 Full Access，执行账号填 `claude-runner`。
+
+## 文件加速（QUIC）
+
+文件预览、下载和上传优先走 UDP（QUIC），不通时自动退回 SSH，不需要任何配置。
+
+- 服务端程序随客户端首次使用时上传到 `~/.local/share/remotecc/quic/`，按成员自己的账号运行，空闲 10 分钟退出。
+- 端口在 UDP `47000–47099` 中自动选择。root 登录时自动在 ufw / firewalld 放行一次；之后删掉规则不会再加回来。
+- 云服务器的安全组需要自己放行这段 UDP 端口；不放行也能用，只是走 SSH。
+- 加密用 TLS 1.3，证书指纹和一次性口令经 SSH 下发，不需要域名或证书。
 
 ## 多人共用一台服务器
 

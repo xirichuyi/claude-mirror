@@ -36,6 +36,7 @@ public final class RemoteFiles: @unchecked Sendable {
     private let previewRequests = SharedFileRequests<FilePreview>()
     private let contentRequests = SharedFileRequests<URL>()
     private var previews: [String: FilePreview] = [:]
+    private var activePartials: Set<String> = []
     private var listings: [String: (time: Date, value: DirectoryListing)] = [:]
     public var onProgress: (@Sendable (TransferProgress) -> Void)?
 
@@ -47,7 +48,7 @@ public final class RemoteFiles: @unchecked Sendable {
         var request = params
         request["operation"] = .string(operation)
         request["base"] = .string(config.directory)
-        return try await agents.call(config, "file", .object(request), timeout: timeout)
+        return try await agents.call(config, "file", .object(request), timeout: timeout, files: true)
     }
 
     public func createFolder(_ config: ConnectionConfig, in parent: String, name: String) async throws -> FileEntry {
@@ -121,7 +122,7 @@ public final class RemoteFiles: @unchecked Sendable {
         try Task.checkCancellation()
         var info = try response.decode(FilePreview.self)
         if info.notModified == true, let previous { return previous }
-        if thumbnailOnly && info.thumbnail != true { throw CancellationError() }
+        if thumbnailOnly && info.kind != "text" && info.thumbnail != true && response["inlineData"] == nil { throw CancellationError() }
         if info.kind == "image" || info.kind == "pdf" {
             let inline = response["inlineData"]?.string.flatMap { Data(base64Encoded: $0) }
             info.data = try Data(contentsOf: try await cached(config, info, inline: inline), options: .mappedIfSafe)
@@ -185,7 +186,7 @@ public final class RemoteFiles: @unchecked Sendable {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         guard let files = try? FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: keys) else { return }
         let items = files.compactMap { url -> (URL, Date, Int)? in
-            guard !url.lastPathComponent.hasSuffix(".tmp"), let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
+            guard !url.lastPathComponent.hasSuffix(".tmp"), !lock.withLock({ activePartials.contains(url.lastPathComponent) }), let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
             return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
         }.sorted { $0.1 < $1.1 }
         var total = items.reduce(0) { $0 + $1.2 }
@@ -201,7 +202,11 @@ public final class RemoteFiles: @unchecked Sendable {
         let target = partial ?? destination
         let existing = partial.flatMap { (try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? NSNumber)?.intValue } ?? 0
         let offset = existing <= size ? existing : 0
-        if partial != nil { try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true) }
+        if let partial {
+            try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+            lock.withLock { _ = activePartials.insert(partial.lastPathComponent) }
+        }
+        defer { if let partial { lock.withLock { _ = activePartials.remove(partial.lastPathComponent) } } }
         if offset == 0 || partial == nil {
             guard FileManager.default.createFile(atPath: target.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw RemoteError("无法写入本地文件") }
         }
@@ -214,7 +219,7 @@ public final class RemoteFiles: @unchecked Sendable {
         do {
             try output.seek(toOffset: UInt64(offset))
             counter.bytes = offset
-            let channel = try await agents.channel(config)
+            let channel = try await agents.channel(config, files: true)
             _ = try await channel.read(request, offset: offset, into: output) { count in
                 counter.bytes += count
                 if Date().timeIntervalSince(counter.last) > 0.15 {
@@ -246,10 +251,14 @@ public final class RemoteFiles: @unchecked Sendable {
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".remotecc-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: temporary) }
         let preview = try JSONDecoder().decode(FilePreview.self, from: JSONEncoder().encode(info))
-        let local = contentURL(config, preview)
-        if FileManager.default.fileExists(atPath: local.path),
-           (try? FileManager.default.copyItem(at: local, to: temporary)) != nil {
-            onProgress?(TransferProgress(config: config, name: info.name, bytes: info.size, total: info.size, finished: true))
+        // Shares one transfer with a preview of the same file: two writers on one .partial corrupt it,
+        // and whichever finishes first renames it away from the other.
+        // Files larger than the cache go straight to the destination; previews never fetch those.
+        if info.size <= cacheLimit {
+            let hit = FileManager.default.fileExists(atPath: contentURL(config, preview).path)
+            let local = try await cached(config, preview)
+            try FileManager.default.copyItem(at: local, to: temporary)
+            if hit { onProgress?(TransferProgress(config: config, name: info.name, bytes: info.size, total: info.size, finished: true)) }
         } else {
             try await transferDown(config, path: info.path, version: info.version, name: info.name, size: info.size, to: temporary)
         }
@@ -314,7 +323,7 @@ public final class RemoteFiles: @unchecked Sendable {
         let progress = onProgress
         let entry: FileEntry
         do {
-            let channel = try await agents.channel(config)
+            let channel = try await agents.channel(config, files: true)
             let reply = try await channel.write(request, file: file) { total in
                 sent.bytes = total
                 if Date().timeIntervalSince(sent.last) > 0.15 {
@@ -335,7 +344,7 @@ public final class RemoteFiles: @unchecked Sendable {
     }
 }
 
-private func attachmentDigest(_ file: URL) throws -> String {
+func attachmentDigest(_ file: URL) throws -> String {
 #if canImport(CryptoKit)
     let input = try FileHandle(forReadingFrom: file)
     defer { try? input.close() }

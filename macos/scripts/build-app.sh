@@ -4,6 +4,18 @@ set -eu
 cd "$(dirname "$0")/.."
 npm --prefix .. run prepare-server -- "$PWD/Resources/server"
 cargo build --release --locked --manifest-path Helpers/WincPreview/Cargo.toml
+cargo build --release --locked --manifest-path ../quic/Cargo.toml
+# Linux server copies of tether-quic; without cargo-zigbuild the app still works, files just stay on SSH.
+mkdir -p Resources/server/quic
+if command -v cargo-zigbuild >/dev/null 2>&1; then
+  for pair in aarch64:arm64 x86_64:x64; do
+    rustup target add "${pair%%:*}-unknown-linux-musl" >/dev/null 2>&1 || true
+    cargo zigbuild --release --locked --manifest-path ../quic/Cargo.toml --target "${pair%%:*}-unknown-linux-musl"
+    cp "../quic/target/${pair%%:*}-unknown-linux-musl/release/tether-quic" "Resources/server/quic/tether-quic-linux-${pair##*:}"
+  done
+else
+  echo "cargo-zigbuild not found: building without QUIC server binaries" >&2
+fi
 swift build -c "${BUILD_CONFIGURATION:-release}" --product RemoteCC
 STAGING=$(mktemp -d "${TMPDIR:-/tmp}/remotecc-build.XXXXXX")
 trap 'rm -rf "$STAGING"' EXIT HUP INT TERM
@@ -12,6 +24,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c "${BUILD_CONFIGURATION:-release}" --show-bin-path)/RemoteCC" "$APP/Contents/MacOS/RemoteCC"
 cp Helpers/WincPreview/target/release/winc-preview-bridge "$APP/Contents/MacOS/WincPreview"
 codesign --force --sign - "$APP/Contents/MacOS/WincPreview"
+cp ../quic/target/release/tether-quic "$APP/Contents/MacOS/TetherQuic"
+codesign --force --sign - "$APP/Contents/MacOS/TetherQuic"
 mkdir -p "$APP/Contents/Frameworks"
 ditto .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
 swiftc Helpers/ClaudockAskpass.swift -o "$APP/Contents/MacOS/ClaudockAskpass"
