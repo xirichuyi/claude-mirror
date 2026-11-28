@@ -72,11 +72,9 @@ async fn serve(args: &[String]) -> Result<(), Failure> {
     config.transport_config(transport());
 
     let (endpoint, port) = (first..=last)
-        // [::] is dual-stack on Linux; servers without IPv6 fall back to IPv4 only.
         .find_map(|port| {
-            Endpoint::server(config.clone(), SocketAddr::from(([0u16; 8], port)))
-                .or_else(|_| Endpoint::server(config.clone(), SocketAddr::from(([0, 0, 0, 0], port))))
-                .ok().map(|e| (e, port))
+            let socket = dual_stack(port).or_else(|_| std::net::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))).ok()?;
+            Endpoint::new(quinn::EndpointConfig::default(), Some(config.clone()), socket, Arc::new(quinn::TokioRuntime)).ok().map(|e| (e, port))
         })
         .ok_or("no free UDP port in range")?;
     let token: String = hex::encode(rand::random::<[u8; 32]>());
@@ -103,6 +101,14 @@ async fn serve(args: &[String]) -> Result<(), Failure> {
             }
         }
     }
+}
+
+/// One socket for IPv4 and IPv6 even where `net.ipv6.bindv6only=1`; hosts without IPv6 use IPv4 only.
+fn dual_stack(port: u16) -> std::io::Result<std::net::UdpSocket> {
+    let socket = socket2::Socket::new(socket2::Domain::IPV6, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
+    socket.set_only_v6(false)?;
+    socket.bind(&SocketAddr::from(([0u16; 8], port)).into())?;
+    Ok(socket.into())
 }
 
 async fn session(incoming: quinn::Incoming, token: &str, command: &[String]) -> Result<(), Failure> {
