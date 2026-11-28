@@ -504,8 +504,13 @@ tune_network() {
   case "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" in cubic|reno) ;; *) return 0 ;; esac
   modprobe tcp_bbr 2>/dev/null || return 0
   grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null || return 0
-  printf '%s\n' '# Tether: BBR keeps SSH file transfers fast on lossy long-distance links' \
-    'net.core.default_qdisc = fq' 'net.ipv4.tcp_congestion_control = bbr' 'net.ipv4.tcp_slow_start_after_idle = 0' > /etc/sysctl.d/90-tether-net.conf
+  # Queueing and idle settings are only changed while they are still the kernel defaults.
+  {
+    echo '# Tether: BBR keeps SSH file transfers fast on lossy long-distance links'
+    case "$(sysctl -n net.core.default_qdisc 2>/dev/null)" in fq_codel|pfifo_fast) echo 'net.core.default_qdisc = fq' ;; esac
+    echo 'net.ipv4.tcp_congestion_control = bbr'
+    [ "$(sysctl -n net.ipv4.tcp_slow_start_after_idle 2>/dev/null)" = 1 ] && echo 'net.ipv4.tcp_slow_start_after_idle = 0'
+  } > /etc/sysctl.d/90-tether-net.conf
   [ -d /etc/modules-load.d ] && echo tcp_bbr > /etc/modules-load.d/tether-bbr.conf
   sysctl -q -p /etc/sysctl.d/90-tether-net.conf && echo 'Switched TCP to BBR for faster transfers (/etc/sysctl.d/90-tether-net.conf).'
 }
