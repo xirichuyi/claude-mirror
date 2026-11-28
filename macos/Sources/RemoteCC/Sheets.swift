@@ -49,8 +49,7 @@ struct PreferencesSheet: View {
     private func apply() {
         guard let engine = model.engine, let session = model.active else { return }
         var next = session.preferences ?? Preferences()
-        // A live session needs a concrete mode to switch back; a new one just leaves it to the remote settings.
-        next.permissionMode = permissionMode.isEmpty ? (session.remoteOwner != nil && next.permissionMode != nil ? remoteMode ?? "default" : nil) : permissionMode
+        next.permissionMode = permissionMode.isEmpty ? nil : permissionMode
         saving = true; error = ""
         Task {
             do { try await engine.configure(session.id, next); dismiss() }

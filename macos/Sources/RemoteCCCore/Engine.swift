@@ -848,7 +848,7 @@ public final class ChatEngine {
         var patch: [String: JSON] = [:]
         if (next.selectedModel ?? "") != (current.selectedModel ?? "") { patch["selectedModel"] = .string(next.selectedModel ?? "") }
         if (next.effort ?? "") != (current.effort ?? "") { patch["effort"] = .string(next.effort ?? "") }
-        if (next.permissionMode ?? "default") != (current.permissionMode ?? "default") { patch["permissionMode"] = .string(next.permissionMode ?? "default") }
+        if (next.permissionMode ?? "") != (current.permissionMode ?? "") { patch["permissionMode"] = .string(next.permissionMode ?? "") }
         if (next.fastMode ?? false) != (current.fastMode ?? false) { patch["fastMode"] = .bool(next.fastMode ?? false) }
         if (next.outputStyle ?? "") != (current.outputStyle ?? "") { patch["outputStyle"] = .string(next.outputStyle ?? "") }
         let startup = identityChanged || cacheChanged || (next.additionalDirectories ?? []) != (current.additionalDirectories ?? []) || (next.agent ?? "") != (current.agent ?? "")

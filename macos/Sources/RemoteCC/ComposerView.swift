@@ -282,7 +282,7 @@ struct ComposerArea: View {
 
     private var sessionControls: some View {
         let session = model.active
-        let mode = session?.preferences?.permissionMode
+        let mode = session?.preferences?.permissionMode.flatMap { $0.isEmpty ? nil : $0 }
         let busy = session?.isBusy ?? false
         return HStack(spacing: 4) {
             if session != nil {

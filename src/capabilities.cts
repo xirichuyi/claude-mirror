@@ -1,4 +1,7 @@
 import type { Preferences } from './contracts.js';
+import fs = require('node:fs');
+import os = require('node:os');
+import path = require('node:path');
 class EmptyInput {
   declare waiters: any[];
   declare closed: boolean;
@@ -62,7 +65,7 @@ function preferencePatch(patch) {
       if (typeof value !== 'string' || !['', 'low', 'medium', 'high', 'xhigh', 'max'].includes(value)) throw new Error('无效思考强度');
       result.effort = value;
     } else if (key === 'permissionMode') {
-      if (typeof value !== 'string' || !['default', 'acceptEdits', 'plan', 'dontAsk', 'auto', 'bypassPermissions'].includes(value)) throw new Error('无效权限模式');
+      if (typeof value !== 'string' || !['', 'default', 'acceptEdits', 'plan', 'dontAsk', 'auto', 'bypassPermissions'].includes(value)) throw new Error('无效权限模式');
       result.permissionMode = value;
     } else if (key === 'executionUser') {
       if (typeof value !== 'string' || (value && !/^[a-z_][a-z0-9_-]{0,31}$/.test(value))) throw new Error('无效的 Claude 执行账号');
@@ -84,4 +87,19 @@ function preferencePatch(patch) {
   return result;
 }
 
-export { inspectRemote, catalogue, preferencePatch, EmptyInput };
+// Claude's own permission default for a directory, from its settings files (later files win).
+function remotePermissionDefault(directory) {
+  const files = [path.join(os.homedir(), '.claude', 'settings.json'),
+    ...(directory ? [path.join(directory, '.claude', 'settings.json'), path.join(directory, '.claude', 'settings.local.json')] : []),
+    '/etc/claude-code/managed-settings.json'];
+  let mode = 'default';
+  for (const file of files) {
+    try {
+      const value = JSON.parse(fs.readFileSync(file, 'utf8'))?.permissions?.defaultMode;
+      if (typeof value === 'string') mode = value;
+    } catch {}
+  }
+  return mode;
+}
+
+export { inspectRemote, catalogue, preferencePatch, remotePermissionDefault, EmptyInput };

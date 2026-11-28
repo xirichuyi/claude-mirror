@@ -20,6 +20,7 @@ test('settings are validated and sent to remote query, branches preserve context
   assert.equal(source.messages[0].text, 'remember');
   assert.equal(preferencePatch({ permissionMode: 'bypassPermissions' }).permissionMode, 'bypassPermissions');
   assert.throws(() => preferencePatch({ permissionMode: 'invalid' }));
+  assert.equal(preferencePatch({ permissionMode: '' }).permissionMode, '');
   assert.throws(() => preferencePatch({ additionalDirectories: ['relative'] }));
   assert.throws(() => preferencePatch({ selectedModel: 'sonnet\n--unsafe' }));
   await service.close();
