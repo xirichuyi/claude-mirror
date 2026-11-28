@@ -143,8 +143,8 @@ public sealed partial class MainWindow
             summary.Text = RemoteInstaller.Summary(result ?? 1);
             dialog.PrimaryButtonText = "重新安装"; dialog.IsPrimaryButtonEnabled = true;
         }
-        dialog.PrimaryButtonClick += (_, e) => { e.Cancel = true; _ = Install(); };
-        dialog.Opened += (_, _) => _ = Install();
+        dialog.PrimaryButtonClick += (sender, e) => { e.Cancel = true; _ = Install(); };
+        dialog.Opened += (sender, e) => _ = Install();
         await dialog.ShowAsync();
         cancel.Cancel();
         if (result == 0) await RecheckAsync();
