@@ -185,7 +185,7 @@ public final class RemoteFiles: @unchecked Sendable {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         guard let files = try? FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: keys) else { return }
         let items = files.compactMap { url -> (URL, Date, Int)? in
-            guard !url.lastPathComponent.hasSuffix(".tmp"), !url.lastPathComponent.hasSuffix(".partial"), let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
+            guard !url.lastPathComponent.hasSuffix(".tmp"), let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
             return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
         }.sorted { $0.1 < $1.1 }
         var total = items.reduce(0) { $0 + $1.2 }
