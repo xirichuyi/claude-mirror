@@ -31,7 +31,7 @@ public sealed partial class MainWindow
     {
         if(installing || stagedInstaller is not {} installer || pendingUpdate is not {} update || !File.Exists(Path.Combine(AppContext.BaseDirectory,"unins000.exe"))) return;
         try {
-            update.VerifyFileAsync(installer,CancellationToken.None).GetAwaiter().GetResult();
+            Task.Run(()=>update.VerifyFileAsync(installer,CancellationToken.None)).GetAwaiter().GetResult();
             var start=new ProcessStartInfo(installer){UseShellExecute=true};
             foreach(var arg in new[]{"/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART"})start.ArgumentList.Add(arg);
             Process.Start(start)?.Dispose();
