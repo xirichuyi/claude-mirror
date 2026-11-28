@@ -174,7 +174,11 @@ public final class AgentChannel: @unchecked Sendable {
     }
 
     private func launch(direct: Bool = false, quic: QuicEndpoint? = nil) async throws -> String {
-        let process = try quic.map { try RemoteProcess(executable: $0.helper, arguments: ["connect", $0.host, String($0.port), $0.fingerprint, $0.token]) }
+        let process = try quic.map { quic in
+            let process = try RemoteProcess(executable: quic.helper, arguments: ["connect", quic.host, String(quic.port), quic.fingerprint])
+            process.write(Data((quic.token + "\n").utf8))
+            return process
+        }
             ?? (direct ? launcher.spawnDirect(config, command: startCommand) : launcher.spawn(config, command: startCommand))
         let state = LaunchState()
         return try await withCheckedThrowingContinuation { continuation in

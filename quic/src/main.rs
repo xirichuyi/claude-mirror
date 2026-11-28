@@ -11,10 +11,11 @@ use rustls::{client::danger::{HandshakeSignatureValid, ServerCertVerified, Serve
              crypto::{ring, CryptoProvider}, pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName, UnixTime},
              DigitallySignedStruct, SignatureScheme};
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 const ALPN: &[u8] = b"tether-files/1";
 const IDLE: Duration = Duration::from_secs(600);
+const AUTH: Duration = Duration::from_secs(5);
 
 fn transport() -> Arc<TransportConfig> {
     let mut config = TransportConfig::default();
@@ -38,13 +39,15 @@ async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("serve") => serve(&args[1..]).await,
-        Some("connect") if args.len() == 5 => connect(&args[1], &args[2], &args[3], &args[4]).await,
-        _ => Err("usage: tether-quic serve --ports A-B -- COMMAND... | connect HOST PORT FINGERPRINT TOKEN".into()),
+        Some("connect") if args.len() == 4 => connect(&args[1], &args[2], &args[3]).await,
+        _ => Err("usage: tether-quic serve --ports A-B -- COMMAND... | connect HOST PORT FINGERPRINT (token on the first stdin line)".into()),
     };
     if let Err(error) = result {
         eprintln!("tether-quic: {error}");
         std::process::exit(2);
     }
+    // Exit directly: a blocking stdin read would keep the Tokio runtime from shutting down.
+    std::process::exit(0);
 }
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
@@ -78,12 +81,18 @@ async fn serve(args: &[String]) -> Result<(), Failure> {
     let command = Arc::new(command);
     let mut parent = tokio::io::stdin();
     let mut sink = [0u8; 64];
+    let mut tick = tokio::time::interval(Duration::from_secs(15));
+    let mut active = tokio::time::Instant::now();
     loop {
         tokio::select! {
             read = parent.read(&mut sink) => if matches!(read, Ok(0) | Err(_)) { return Ok(()) },
-            _ = tokio::time::sleep(IDLE), if endpoint.open_connections() == 0 => return Ok(()),
+            _ = tick.tick() => {
+                if endpoint.open_connections() > 0 { active = tokio::time::Instant::now(); }
+                else if active.elapsed() >= IDLE { return Ok(()) }
+            }
             incoming = endpoint.accept() => {
                 let Some(incoming) = incoming else { return Ok(()) };
+                active = tokio::time::Instant::now();
                 let (token, command) = (token.clone(), command.clone());
                 tokio::spawn(async move { if let Err(error) = session(incoming, &token, &command).await { eprintln!("tether-quic: {error}"); } });
             }
@@ -92,21 +101,29 @@ async fn serve(args: &[String]) -> Result<(), Failure> {
 }
 
 async fn session(incoming: quinn::Incoming, token: &str, command: &[String]) -> Result<(), Failure> {
-    let connection = incoming.await?;
+    let connection = tokio::time::timeout(AUTH, incoming).await.map_err(|_| "handshake timeout")??;
+    let mut first = true;
     loop {
-        let (mut send, mut recv) = connection.accept_bi().await?;
+        let stream = if first { tokio::time::timeout(AUTH, connection.accept_bi()).await.map_err(|_| "no stream")? } else { connection.accept_bi().await };
+        first = false;
+        let (mut send, mut recv) = stream?;
+        let connection = connection.clone();
         let (token, command) = (token.to_owned(), command.to_vec());
         tokio::spawn(async move {
             let mut presented = vec![0u8; token.len() + 1];
-            let ok = tokio::time::timeout(Duration::from_secs(5), recv.read_exact(&mut presented)).await.is_ok_and(|r| r.is_ok())
+            let ok = tokio::time::timeout(AUTH, recv.read_exact(&mut presented)).await.is_ok_and(|r| r.is_ok())
                 && presented[..token.len()].iter().zip(token.as_bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
                 && presented[token.len()] == b'\n';
-            if !ok { let _ = send.reset(VarInt::from_u32(1)); return; }
+            if !ok { connection.close(VarInt::from_u32(1), b"unauthorized"); return; }
             let Ok(mut child) = tokio::process::Command::new(&command[0]).args(&command[1..])
-                .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true).spawn() else { return };
+                .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn() else { return };
             let (mut input, mut output) = (child.stdin.take().unwrap(), child.stdout.take().unwrap());
             let upstream = async { let _ = tokio::io::copy(&mut recv, &mut input).await; drop(input); };
-            let downstream = async { let _ = tokio::io::copy(&mut output, &mut send).await; let _ = send.finish(); };
+            let downstream = async {
+                if tokio::io::copy(&mut output, &mut send).await.is_ok() { let _ = send.finish(); }
+                // Keep draining so a disconnected agent can still finish its cleanup instead of blocking on stdout.
+                let _ = tokio::io::copy(&mut output, &mut tokio::io::sink()).await;
+            };
             tokio::join!(upstream, downstream);
             let _ = child.wait().await;
         });
@@ -131,7 +148,11 @@ impl ServerCertVerifier for Pinned {
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> { self.provider.signature_verification_algorithms.supported_schemes() }
 }
 
-async fn connect(host: &str, port: &str, fingerprint: &str, token: &str) -> Result<(), Failure> {
+async fn connect(host: &str, port: &str, fingerprint: &str) -> Result<(), Failure> {
+    let mut input = tokio::io::BufReader::new(tokio::io::stdin());
+    let mut token = String::new();
+    input.read_line(&mut token).await?;
+    let token = token.trim_end();
     let address = tokio::net::lookup_host((host, port.parse::<u16>()?)).await?.next().ok_or("host not found")?;
     let provider = provider();
     let mut tls = rustls::ClientConfig::builder_with_provider(provider.clone())
@@ -148,7 +169,7 @@ async fn connect(host: &str, port: &str, fingerprint: &str, token: &str) -> Resu
     let (mut send, mut recv) = connection.open_bi().await?;
     send.write_all(format!("{token}\n").as_bytes()).await?;
     let upstream = async move {
-        let _ = tokio::io::copy(&mut tokio::io::stdin(), &mut send).await;
+        let _ = tokio::io::copy(&mut input, &mut send).await;
         let _ = send.finish();
     };
     let downstream = async move {
