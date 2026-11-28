@@ -21,7 +21,7 @@ struct PreferencesSheet: View {
             SheetHeading(title: "权限") { dismiss() }.disabled(saving).padding(.horizontal, WorkbenchMetrics.dialogPadding).frame(height: WorkbenchMetrics.dialogHeader)
             WorkbenchSelect(title: "权限", selection: $permissionMode, options:
                 [WorkbenchOption("", "远端默认 · " + Self.label(remoteMode ?? "default"))] +
-                Self.modes.filter { $0.0 != (remoteMode ?? "default") }.map { WorkbenchOption($0.0, $0.1) })
+                Self.modes.map { WorkbenchOption($0.0, $0.1) })
                 .disabled(saving)
                 .padding(.horizontal, WorkbenchMetrics.dialogPadding)
             HStack {
@@ -43,7 +43,6 @@ struct PreferencesSheet: View {
         guard let defaults = try? await engine.agents.call(session.config, "file", ["operation": "claudeDefaults", "directory": .string(session.directory)], timeout: 10),
               case .string(let mode)? = defaults["permissionMode"] else { return }
         remoteMode = mode
-        if stored == mode { permissionMode = "" }
     }
 
     private func apply() {
