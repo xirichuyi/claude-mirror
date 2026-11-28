@@ -56,6 +56,9 @@ val quicOutput = rootProject.layout.buildDirectory.dir("quic")
 val quicBinaries = tasks.register<Exec>("quicBinaries") {
     workingDir = rootDir.parentFile
     commandLine("sh", "scripts/build-quic-linux.sh", quicOutput.get().asFile.path)
+    val repository = rootDir.parentFile
+    inputs.dir(repository.resolve("quic/src"))
+    inputs.files(repository.resolve("quic/Cargo.toml"), repository.resolve("quic/Cargo.lock"), repository.resolve("scripts/build-quic-linux.sh"))
     outputs.dir(quicOutput)
 }
 val quicJni = tasks.register<Copy>("quicJni") {
