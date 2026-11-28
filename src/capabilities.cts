@@ -1,5 +1,5 @@
 import type { Preferences } from './contracts.js';
-import fs = require('node:fs');
+import fsp = require('node:fs/promises');
 import os = require('node:os');
 import path = require('node:path');
 class EmptyInput {
@@ -88,14 +88,16 @@ function preferencePatch(patch) {
 }
 
 // Claude's own permission default for a directory, from its settings files (later files win).
-function remotePermissionDefault(directory) {
+async function remotePermissionDefault(directory) {
   const files = [path.join(os.homedir(), '.claude', 'settings.json'),
     ...(directory ? [path.join(directory, '.claude', 'settings.json'), path.join(directory, '.claude', 'settings.local.json')] : []),
     '/etc/claude-code/managed-settings.json'];
   let mode = 'default';
   for (const file of files) {
     try {
-      const value = JSON.parse(fs.readFileSync(file, 'utf8'))?.permissions?.defaultMode;
+      // Only plain files: a FIFO or device in a shared project must not stall the worker.
+      if (!(await fsp.stat(file)).isFile()) continue;
+      const value = JSON.parse(await fsp.readFile(file, 'utf8'))?.permissions?.defaultMode;
       if (typeof value === 'string') mode = value;
     } catch {}
   }

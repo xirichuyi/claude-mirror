@@ -165,7 +165,7 @@ async function control(command) {
         for (const [key, value] of Object.entries(patch)) {
           if (key === 'selectedModel') await query.setModel(value || undefined);
           // '' drops the override and goes back to the remote Claude settings.
-          else if (key === 'permissionMode') await query.setPermissionMode(value || remotePermissionDefault(session.directory));
+          else if (key === 'permissionMode') await query.setPermissionMode(value || await remotePermissionDefault(session.directory));
           else if (['effort', 'fastMode', 'outputStyle'].includes(key)) await query.applyFlagSettings({ [key === 'effort' ? 'effortLevel' : key]: value === '' ? null : value });
           else throw new Error('此设置需要重新打开会话');
           session.preferences[key] = value; snapshot();

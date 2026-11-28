@@ -517,6 +517,7 @@ async function claudeDefaults(request) {
   const result: { permissionMode?: string } = {};
   for (const file of files) {
     try {
+      if (!(await fsp.stat(file)).isFile()) continue;
       const mode = JSON.parse(await fsp.readFile(file, 'utf8'))?.permissions?.defaultMode;
       if (typeof mode === 'string') result.permissionMode = mode;
     } catch {}
