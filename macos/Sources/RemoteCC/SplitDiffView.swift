@@ -7,7 +7,10 @@ import RemoteCCCore
 struct SplitDiffView: View {
     let text: String
     let path: String
+    @EnvironmentObject private var model: AppModel
     @State private var selectedChange = 0
+    @State private var commenting: SplitDiff.Row?
+    @State private var showComments = false
 
     var body: some View {
         let diff = SplitDiff(text)
@@ -24,6 +27,13 @@ struct SplitDiffView: View {
                 Button { move(1, diff: diff) } label: { Image(systemName: "chevron.down") }
                     .help("下一处改动").accessibilityLabel("下一处改动").disabled(diff.changes.isEmpty)
                 Spacer(minLength: 4)
+                if !model.activeReviewComments.isEmpty {
+                    Button { showComments = true } label: { Label("\(model.activeReviewComments.count)", systemImage: "text.bubble") }
+                        .help("评论").accessibilityLabel("评论")
+                        .popover(isPresented: $showComments, arrowEdge: .bottom) { ReviewCommentList() }
+                    Button { model.sendReviewComments() } label: { Image(systemName: "paperplane") }
+                        .help("把评论发给 Claude").accessibilityLabel("发送评论")
+                }
                 Text("工作区版本").foregroundStyle(WorkbenchTheme.inkMuted)
             }.font(WorkbenchMetrics.caption).buttonStyle(QuietButtonStyle())
                 .padding(.horizontal, 12).frame(height: 36)
@@ -32,13 +42,21 @@ struct SplitDiffView: View {
                 InterfaceState(title: "没有差异", detail: "此文件与 Git 中的版本一致。", symbol: "checkmark.circle")
                     .frame(maxHeight: .infinity)
             } else {
-                PairedDiffPane(text: text, path: path, selectedChange: selectedChange)
+                PairedDiffPane(text: text, path: path, selectedChange: selectedChange,
+                               commented: Set(diff.rows.filter { row in model.activeReviewComments.contains { $0.path == path && $0.matches(row) } }.map(\.id))) { index in
+                    // Only source lines take a comment: Git's notes about a binary or a mode change sit before any hunk.
+                    guard let hunk = diff.rows.firstIndex(where: { $0.kind == .hunk }), index > hunk, diff.rows.indices.contains(index), diff.rows[index].kind != .hunk else { return }
+                    commenting = diff.rows[index]
+                }
             }
             WorkbenchStatusBar {
                 Image(systemName: "arrow.left.arrow.right"); Text("并排比较")
                 Spacer(); Text((path as NSString).lastPathComponent)
             }
         }.onChange(of: text) { selectedChange = 0 }
+        .sheet(item: $commenting) { row in
+            ReviewCommentSheet(row: row, path: path) { comment in model.addReviewComment(comment) }
+        }
     }
     private func move(_ offset: Int, diff: SplitDiff) {
         guard !diff.changes.isEmpty else { return }
@@ -50,8 +68,67 @@ private struct PairedDiffPane: NSViewRepresentable {
     let text: String
     let path: String
     let selectedChange: Int
+    let commented: Set<Int>
+    let onComment: (Int) -> Void
     func makeNSView(context: Context) -> PairedDiffDocument { PairedDiffDocument() }
-    func updateNSView(_ view: PairedDiffDocument, context: Context) { view.update(text: text, path: path, change: selectedChange) }
+    func updateNSView(_ view: PairedDiffDocument, context: Context) {
+        view.update(text: text, path: path, change: selectedChange)
+        view.setComments(commented, onComment: onComment)
+    }
+}
+
+private extension ReviewComment {
+    func matches(_ row: SplitDiff.Row) -> Bool {
+        removed ? row.right.number == nil && row.left.number == line : row.right.number == line
+    }
+}
+
+/// The note for one diff line; it joins the others until they are sent together.
+private struct ReviewCommentSheet: View {
+    let row: SplitDiff.Row
+    let path: String
+    let onAdd: (ReviewComment) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+
+    var body: some View {
+        let probe = ReviewComment(row: row, path: path, text: "-")
+        VStack(alignment: .leading, spacing: 12) {
+            SheetHeading(title: probe.map { (($0.path as NSString).lastPathComponent) + ($0.removed ? " 删除前第 \($0.line) 行" : ":\($0.line)") } ?? "评论") { dismiss() }
+            Text(probe?.code ?? "").font(.system(.callout, design: .monospaced)).foregroundStyle(WorkbenchTheme.inkMuted)
+                .lineLimit(2).truncationMode(.tail).textSelection(.enabled)
+            TextField("评论", text: $text, axis: .vertical).lineLimit(3...8).textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("添加") {
+                    if let comment = ReviewComment(row: row, path: path, text: text) { onAdd(comment) }
+                    dismiss()
+                }.buttonStyle(WorkbenchButtonStyle(prominent: true)).keyboardShortcut(.defaultAction)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.padding(20).frame(width: 440)
+    }
+}
+
+private struct ReviewCommentList: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(model.activeReviewComments) { comment in
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(comment.location(root: model.active?.directory)).font(.system(.caption, design: .monospaced)).foregroundStyle(WorkbenchTheme.inkMuted)
+                        Text(comment.text).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Button { model.removeReviewComment(comment.id) } label: { Image(systemName: "xmark") }
+                        .buttonStyle(QuietButtonStyle()).help("删除").accessibilityLabel("删除评论")
+                }
+            }
+        }.padding(14).frame(width: 320)
+    }
 }
 
 /// Native text selection and find remain available in both columns. Only the visible line fills
@@ -102,6 +179,10 @@ private final class PairedDiffDocument: NSView {
         gutter.frame = NSRect(x: width, y: 0, width: middle, height: bounds.height)
         rightScroll.frame = NSRect(x: width + middle, y: 0, width: width, height: bounds.height)
         resizeDocuments()
+    }
+    func setComments(_ rows: Set<Int>, onComment: @escaping (Int) -> Void) {
+        gutter.onClick = onComment
+        if gutter.commented != rows { gutter.commented = rows; gutter.needsDisplay = true }
     }
     func update(text: String, path: String, change: Int) {
         if source != text || sourcePath != path {
@@ -182,7 +263,16 @@ private final class DiffTextView: NSTextView {
 private final class DiffCentreGutter: NSView {
     var rows: [SplitDiff.Row] = []
     var offset: CGFloat = 0
+    var commented: Set<Int> = []
+    var onClick: ((Int) -> Void)?
     override var isFlipped: Bool { true }
+    override init(frame: NSRect) { super.init(frame: frame); toolTip = "点击行号添加评论" }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func mouseDown(with event: NSEvent) {
+        let y = convert(event.locationInWindow, from: nil).y
+        onClick?(Int(floor((y + offset - 8) / CodeStyle.lineHeight)))
+    }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
     override func draw(_ dirtyRect: NSRect) {
         NSTheme.card.setFill(); bounds.fill()
         NSTheme.surface.setFill(); NSRect(x: 36, y: 0, width: 20, height: bounds.height).fill()
@@ -198,6 +288,10 @@ private final class DiffCentreGutter: NSView {
                 ribbon.move(to: NSPoint(x: 36, y: y)); ribbon.line(to: NSPoint(x: 56, y: y + (row.right.text == nil ? 8 : 0)))
                 ribbon.line(to: NSPoint(x: 56, y: y + CodeStyle.lineHeight)); ribbon.line(to: NSPoint(x: 36, y: y + CodeStyle.lineHeight)); ribbon.close()
                 diffColor(row.kind).withAlphaComponent(0.18).setFill(); ribbon.fill()
+            }
+            if commented.contains(row.id) {
+                NSTheme.accent.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 42, y: y + CodeStyle.lineHeight / 2 - 4, width: 8, height: 8)).fill()
             }
             NSAttributedString(string: row.left.number.map(String.init) ?? "", attributes: attributes).draw(in: NSRect(x: 0, y: y, width: 30, height: CodeStyle.lineHeight))
             NSAttributedString(string: row.right.number.map(String.init) ?? "", attributes: attributes).draw(in: NSRect(x: 56, y: y, width: 30, height: CodeStyle.lineHeight))

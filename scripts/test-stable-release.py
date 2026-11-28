@@ -23,7 +23,7 @@ class ReleaseTests(unittest.TestCase):
         self.folder = Path("staging")
         self.folder.mkdir()
         dmg = "tether-1.2.3-macOS-arm64.dmg"
-        for name in (dmg, stable.INSTALLER, stable.PORTABLE):
+        for name in (dmg, stable.INSTALLER, stable.PORTABLE, stable.ANDROID):
             (self.folder / name).write_bytes(b"test")
             (self.folder / (name + ".sha256")).write_text(hashlib.sha256(b"test").hexdigest())
         (self.folder / "appcast.xml").write_text(

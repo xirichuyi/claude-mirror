@@ -22,7 +22,7 @@ jobs:
       tag: ${{ steps.check.outputs.tag }}
       revision: ${{ steps.check.outputs.revision }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.rehearsal && github.sha || inputs.tag || github.ref }}
       - id: check
@@ -51,12 +51,12 @@ jobs:
     env:
       TAG: ${{ needs.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.revision }}
       - name: Select stable Xcode
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -64,7 +64,7 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
       - run: python3 macos/scripts/test-publish-appcast.py
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: python3 -m pip install Pillow==12.2.0
@@ -82,7 +82,7 @@ jobs:
         run: |
           test -n "$SPARKLE_PRIVATE_KEY"
           bash macos/scripts/generate-appcast.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-stable
           path: |
@@ -90,8 +90,52 @@ jobs:
             macos/dist/*.dmg.sha256
             macos/dist/appcast.xml
           if-no-files-found: error
+  android:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.revision }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build release APK
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$KEYSTORE_BASE64" ]]; then
+            export ANDROID_KEYSTORE="$RUNNER_TEMP/release.jks"
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$ANDROID_KEYSTORE"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; the APK is debug-signed and cannot update an earlier install."
+          fi
+          ./gradlew test assembleRelease
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/tether-android.apk
+          (cd dist && shasum -a 256 tether-android.apk > tether-android.apk.sha256)
+          rm -f "$RUNNER_TEMP/release.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tether-android
+          path: android/dist/*
+          if-no-files-found: error
   publish:
-    needs: [version, windows, macos]
+    needs: [version, windows, macos, android]
     runs-on: macos-26
     permissions:
       contents: write
@@ -101,30 +145,34 @@ jobs:
     env:
       TAG: ${{ needs.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.revision }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts && npm run build
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: macos-stable
           path: staging
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: tether-windows-installer
           path: staging
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: tether-windows-x64
+          path: staging
+      - uses: actions/download-artifact@v4
+        with:
+          name: tether-android
           path: staging
       - name: Prepare signed Windows update metadata
         env:
@@ -142,7 +190,7 @@ jobs:
           printf '%s' "$SPARKLE_PRIVATE_KEY" | macos/.build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file - -p staging/windows-update.json > staging/windows-update.sig
           swift scripts/check-update-signature.swift staging/windows-update.json staging/windows-update.sig
           python3 scripts/stable-release.py verify "$TAG" staging
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: inputs.rehearsal
         with:
           name: stable-release-rehearsal

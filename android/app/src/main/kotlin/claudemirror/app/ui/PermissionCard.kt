@@ -164,7 +164,26 @@ private fun Questions(questions: List<JsonObject>, onAnswer: (JsonObject) -> Uni
 private fun Elicitation(permission: PermissionRequest, onAnswer: (JsonObject) -> Unit) {
     val request = permission.request as? JsonObject
     Text(request?.text("title") ?: request?.text("serverName") ?: "MCP", style = MaterialTheme.typography.titleSmall, color = palette.text)
-    request?.text("message")?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = palette.text) }
-    Text("请在电脑端填写", style = MaterialTheme.typography.bodySmall, color = palette.muted)
-    Actions("拒绝", null, onRefuse = { onAnswer(buildJsonObject { put("interaction", buildJsonObject { put("action", "decline") }) }) })
+    request?.text("message")?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = palette.text) }
+    val choice = request?.let(::singleChoice)
+    if (choice == null) Text("请在电脑端填写", style = MaterialTheme.typography.bodySmall, color = palette.muted)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { onAnswer(buildJsonObject { put("interaction", buildJsonObject { put("action", "decline") }) }) }) { Text("拒绝", color = palette.muted) }
+        choice?.options?.forEachIndexed { index, (value, label) ->
+            val answer = { onAnswer(buildJsonObject { put("interaction", buildJsonObject { put("action", "accept"); put("content", buildJsonObject { put(choice.name, value) }) }) }) }
+            if (index == 0) Button(onClick = answer, colors = fillColors()) { Text(label) } else TextButton(onClick = answer) { Text(label) }
+        }
+    }
+}
+
+private class SingleChoice(val name: String, val options: List<Pair<String, String>>)
+
+/** A form that is one required pick from a list is answered with a button per option. */
+private fun singleChoice(request: JsonObject): SingleChoice? {
+    val schema = request["requestedSchema"] as? JsonObject ?: return null
+    val properties = schema["properties"] as? JsonObject ?: return null
+    val (name, field) = properties.entries.singleOrNull() ?: return null
+    val values = ((field as? JsonObject)?.get("enum") as? JsonArray)?.map { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content ?: return null } ?: return null
+    val labels = (field["enumNames"] as? JsonArray)?.map { (it as? JsonPrimitive)?.content }
+    return SingleChoice(name, values.mapIndexed { i, value -> value to (labels?.getOrNull(i) ?: value) }).takeIf { values.isNotEmpty() && values.size <= 4 }
 }

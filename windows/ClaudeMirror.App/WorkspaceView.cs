@@ -94,20 +94,85 @@ public sealed partial class MainWindow
         var rows = Workspace.Split(Presentation.Text(result["text"]) ?? "");
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(6) };
         bar.Children.Add(BackToChat()); bar.Children.Add(ActionButton("打开文件", "\uE8E5", () => PreviewAsync(path), true));
+        Button? send = null;
+        send = ActionButton("发送评论", "\uE724", async () => { await SendReviewAsync(); UpdateReviewButton(send!); }, true);
+        ToolTipService.SetToolTip(send, "把评论发给 Claude");
+        UpdateReviewButton(send);
+        bar.Children.Add(send);
         bar.Children.Add(new TextBlock { Text = relative, FontSize = 12, Foreground = muted, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
-        OpenToolTab("diff:" + path, "± " + Path.GetFileName(path), ToolArea(bar, SplitDiff(rows)));
+        OpenToolTab("diff:" + path, "± " + Path.GetFileName(path), ToolArea(bar, SplitDiff(rows, path, () => UpdateReviewButton(send))));
+    }
+
+    /// Diff comments per project directory, waiting to be sent together.
+    private readonly Dictionary<string, List<ReviewComment>> reviewComments = [];
+    private List<ReviewComment> ReviewComments
+    {
+        get
+        {
+            if (!reviewComments.TryGetValue(directory.Text, out var list)) reviewComments[directory.Text] = list = [];
+            return list;
+        }
+    }
+
+    private void UpdateReviewButton(Button button)
+    {
+        var count = ReviewComments.Count;
+        button.IsEnabled = count > 0;
+        if (button.Content is StackPanel { Children: [_, TextBlock label] }) label.Text = count > 0 ? $"发送评论 {count}" : "发送评论";
+    }
+
+    /// <summary>Every diff comment goes to Claude as one message; while it replies the message waits in the queue. On failure the comments stay.</summary>
+    private async Task SendReviewAsync()
+    {
+        var comments = ReviewComments;
+        if (comments.Count == 0) return;
+        if (conversation is not null && directory.Text != conversation.Directory) throw new IOException("切换工作目录请新建对话");
+        RequireAgent();
+        var text = ReviewComment.Prompt(comments, directory.Text);
+        if (busy) { queue.Add(text); RenderQueue(); }
+        else { queue.Resume(); await SendTextAsync(text); }
+        comments.Clear();
+        showEditor = false; LayoutSplit();
+    }
+
+    private void AskComment(FrameworkElement anchor, SplitRow row, string path, Action changed)
+    {
+        var box = new TextBox { PlaceholderText = "评论", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinWidth = 300, MinHeight = 72 };
+        var flyout = new Flyout();
+        var add = new Button { Content = "添加" };
+        add.Click += (_, _) =>
+        {
+            if (ReviewComment.For(row, path, box.Text) is { } comment) { ReviewComments.Add(comment); changed(); }
+            flyout.Hide();
+        };
+        var location = row.RightLine is { } right ? $"{Path.GetFileName(path)}:{right}" : $"{Path.GetFileName(path)} 删除前第 {row.LeftLine} 行";
+        flyout.Content = new StackPanel { Spacing = 8, Children = { new TextBlock { Text = location, FontSize = 12, Foreground = muted }, box, add } };
+        flyout.ShowAt(anchor);
+        box.Focus(FocusState.Programmatic);
     }
 
     /// Old text on the left, new text on the right. Both sides share one vertical scroll; each scrolls sideways on its own.
-    private FrameworkElement SplitDiff(IReadOnlyList<SplitRow> rows)
+    /// Double-clicking a line adds a comment on it.
+    private FrameworkElement SplitDiff(IReadOnlyList<SplitRow> rows, string path, Action onComment)
     {
         if (rows.Count == 0) return new TextBlock { Text = "没有可显示的差异", Foreground = muted, FontSize = 13, Margin = new Thickness(14) };
         var left = new StackPanel(); var right = new StackPanel();
-        Border Line(int? number, string? text, Brush? tint) => new()
+        bool Commented(SplitRow row) => ReviewComments.Any(c => c.Path == path && (c.Removed ? row.RightLine is null && row.LeftLine == c.Line : row.RightLine == c.Line));
+        Border Line(SplitRow row, int? number, string? text, Brush? tint)
         {
-            Height = 20, Background = tint, Padding = new Thickness(6, 0, 12, 0),
-            Child = text is null ? null : new TextBlock { Text = (number?.ToString() ?? "").PadLeft(5) + "  " + text, FontFamily = Mono, FontSize = 12.5, Foreground = ink, TextWrapping = TextWrapping.NoWrap, IsTextSelectionEnabled = true }
-        };
+            var line = new Border
+            {
+                Height = 20, Background = tint ?? new SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new Thickness(3, 0, 12, 0),
+                BorderBrush = accent, BorderThickness = new Thickness(Commented(row) ? 3 : 0, 0, 0, 0),
+                Child = text is null ? null : new TextBlock { Text = (number?.ToString() ?? "").PadLeft(5) + "  " + text, FontFamily = Mono, FontSize = 12.5, Foreground = ink, TextWrapping = TextWrapping.NoWrap, IsTextSelectionEnabled = true }
+            };
+            if (text is not null)
+            {
+                ToolTipService.SetToolTip(line, "双击添加评论");
+                line.DoubleTapped += (_, _) => AskComment(line, row, path, () => { onComment(); line.BorderThickness = new Thickness(Commented(row) ? 3 : 0, 0, 0, 0); });
+            }
+            return line;
+        }
         foreach (var row in rows.Take(SplitRowLimit))
         {
             if (row.Kind == DiffKind.Hunk)
@@ -117,8 +182,8 @@ public sealed partial class MainWindow
                 continue;
             }
             bool changed = row.Kind != DiffKind.Context;
-            left.Children.Add(Line(row.LeftLine, row.Left, changed && row.Left is not null ? removed : null));
-            right.Children.Add(Line(row.RightLine, row.Right, changed && row.Right is not null ? added : null));
+            left.Children.Add(Line(row, row.LeftLine, row.Left, changed && row.Left is not null ? removed : null));
+            right.Children.Add(Line(row, row.RightLine, row.Right, changed && row.Right is not null ? added : null));
         }
         ScrollViewer Side(StackPanel lines) => new() { Content = lines, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollMode = ScrollMode.Disabled };
         var sides = new Grid(); sides.ColumnDefinitions.Add(new ColumnDefinition()); sides.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) }); sides.ColumnDefinitions.Add(new ColumnDefinition());

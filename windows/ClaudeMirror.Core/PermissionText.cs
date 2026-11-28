@@ -20,6 +20,22 @@ public static class PermissionText
 
     private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
+    /// <summary>A form that is one pick from up to four options, answered with a button per option.</summary>
+    public static (string Name, IReadOnlyList<(string Value, string Label)> Options)? SingleChoice(JsonNode? request)
+    {
+        if (request?["requestedSchema"]?["properties"] is not JsonObject properties || properties.Count != 1) return null;
+        var (name, field) = properties.First();
+        if (field?["enum"] is not JsonArray values || values.Count is 0 or > 4) return null;
+        var labels = field["enumNames"] as JsonArray;
+        var options = new List<(string, string)>();
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (Text(values[i]) is not { } value) return null;
+            options.Add((value, (labels is not null && i < labels.Count ? Text(labels[i]) : null) ?? value));
+        }
+        return (name, options);
+    }
+
     public static IReadOnlyList<PermissionRuleLine> RuleLines(JsonNode? suggestions) =>
         suggestions is JsonArray list ? list.Where(item => item is not null).Select(item => Line(item!)).ToList() : [];
 

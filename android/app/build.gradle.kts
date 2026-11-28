@@ -4,6 +4,13 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// One product version for all clients: the release workflow checks the tag against this plist.
+val productVersion = Regex("<key>CFBundleShortVersionString</key>\\s*<string>(\\d+)\\.(\\d+)\\.(\\d+)</string>")
+    .find(rootProject.file("../macos/Resources/Info.plist").readText())?.groupValues ?: error("No version in macos/Resources/Info.plist")
+
+// Release signing comes only from the environment (CI secrets); nothing is kept in the repository.
+val releaseKeystore = System.getenv("ANDROID_KEYSTORE")?.takeIf { it.isNotBlank() }?.let(rootProject::file)
+
 android {
     namespace = "claudemirror.app"
     compileSdk = 37
@@ -12,8 +19,22 @@ android {
         applicationId = "local.claudemirror.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = productVersion[1].toInt() * 10000 + productVersion[2].toInt() * 100 + productVersion[3].toInt()
+        versionName = productVersion.drop(1).joinToString(".")
+    }
+    signingConfigs {
+        if (releaseKeystore != null) create("release") {
+            storeFile = releaseKeystore
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+        }
     }
     buildFeatures { compose = true }
     compileOptions {

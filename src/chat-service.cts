@@ -303,13 +303,9 @@ class ChatService extends EventEmitter {
       ...(session.forkPending ? { forkSession: true } : {}),
       settingSources: ['user', 'project', 'local'],
       ...(session.remoteSessionId ? { resume: session.remoteSessionId } : {}),
-      // No opaque dialog is advertised until its exact payload/result has a renderer.
-      supportedDialogKinds: [],
-      onUserDialog: async request => {
-        run.transcript.notice('当前客户端暂不支持此确认流程：' + request.dialogKind + '。请在远端 Claude Code 中处理。', 'error');
-        this.changed(session, true);
-        throw new Error('Unsupported dialog kind: ' + request.dialogKind);
-      },
+      // Only dialogs with a known payload/result are advertised; each is shown as a form every client already renders.
+      supportedDialogKinds: ['refusal_fallback_prompt'],
+      onUserDialog: (request, context) => this.requestDialog(session, run, request, context),
       onElicitation: (request, context) => this.requestElicitation(session, request, context),
       canUseTool: (name, input, context) => this.requestPermission(session, { name, input }, context),
       spawnClaudeCodeProcess: options => this.spawn(session, options, data => {
@@ -403,6 +399,28 @@ class ChatService extends EventEmitter {
       session.status = 'permission';
       this.changed(session, true);
     });
+  }
+
+  async requestDialog(session, run, request, context) {
+    if (request.dialogKind !== 'refusal_fallback_prompt') {
+      // Undeclared kinds must stay unanswered: a cancel would settle another client's dialog.
+      run.transcript.notice('不支持的确认：' + request.dialogKind, 'error');
+      this.changed(session, true);
+      throw new Error('Unsupported dialog kind: ' + request.dialogKind);
+    }
+    const payload = request.payload || {};
+    const model = typeof payload.fallbackModel === 'string' && payload.fallbackModel ? payload.fallbackModel : '备用模型';
+    const asked = this.requestElicitation(session, {
+      mode: 'form', title: '回复被拒绝',
+      ...(typeof payload.guidanceText === 'string' && payload.guidanceText.trim() ? { message: payload.guidanceText.slice(0, 2000) } : {}),
+      requestedSchema: { type: 'object', required: ['choice'], properties: {
+        choice: { type: 'string', title: '处理', enum: ['retry_fallback'], enumNames: ['用 ' + model + ' 重试'], default: 'retry_fallback' },
+      } },
+    }, context);
+    const answer = (await asked) as { action?: string; content?: { choice?: string } };
+    if (answer.action !== 'accept' || !answer.content?.choice) return { behavior: 'cancelled' };
+    run.transcript.retract(payload.retractedMessageUuids);
+    return { behavior: 'completed', result: answer.content.choice };
   }
 
   requestPermission(session, tool, context) {
