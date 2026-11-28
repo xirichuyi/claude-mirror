@@ -1,6 +1,6 @@
 {
   "name": "remotecc",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "Remote Claude Code client for macOS, Windows and Android over SSH",
   "main": "build/src/main.cjs",
   "author": "Tether",
