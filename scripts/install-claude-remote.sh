@@ -496,6 +496,20 @@ setup_runner() {
   fi
   echo "In Tether, start a new conversation, choose Full Access and enter the execution account: $runner"
 }
+# Long-distance links drop packets; cubic then crawls along at ~100 KB/s on a long-lived SSH connection.
+# BBR keeps file transfers several times faster. Only switched from the stock settings, never over a custom one.
+tune_network() {
+  [ "$(uname -s)" = Linux ] && [ "$(id -u)" -eq 0 ] || return 0
+  [ -e /etc/sysctl.d/90-tether-net.conf ] && return 0
+  case "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" in cubic|reno) ;; *) return 0 ;; esac
+  modprobe tcp_bbr 2>/dev/null || return 0
+  grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null || return 0
+  printf '%s\n' '# Tether: BBR keeps SSH file transfers fast on lossy long-distance links' \
+    'net.core.default_qdisc = fq' 'net.ipv4.tcp_congestion_control = bbr' 'net.ipv4.tcp_slow_start_after_idle = 0' > /etc/sysctl.d/90-tether-net.conf
+  [ -d /etc/modules-load.d ] && echo tcp_bbr > /etc/modules-load.d/tether-bbr.conf
+  sysctl -q -p /etc/sysctl.d/90-tether-net.conf && echo 'Switched TCP to BBR for faster transfers (/etc/sysctl.d/90-tether-net.conf).'
+}
+tune_network || true
 if [ -n "$runner" ]; then
   echo '==> Full Access account'
   setup_runner
