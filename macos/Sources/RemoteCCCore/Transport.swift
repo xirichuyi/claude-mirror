@@ -120,10 +120,14 @@ public protocol RemoteLauncher: AnyObject, Sendable {
     func spawn(_ config: ConnectionConfig, command: String) throws -> RemoteProcess
     /// A connection of its own, so bulk data does not share TCP congestion with the conversation.
     func spawnDirect(_ config: ConnectionConfig, command: String) throws -> RemoteProcess
+
+    /// The address a direct UDP connection should use, or nil when the SSH route can't be followed (jump hosts, proxies).
+    func quicHost(_ config: ConnectionConfig) -> String?
 }
 
 public extension RemoteLauncher {
     func spawnDirect(_ config: ConnectionConfig, command: String) throws -> RemoteProcess { try spawn(config, command: command) }
+    func quicHost(_ config: ConnectionConfig) -> String? { nil }
 }
 
 /// Splits a byte stream into lines without assuming chunks align with UTF-8 boundaries.
@@ -412,6 +416,25 @@ public final class SSHConnections: RemoteLauncher, @unchecked Sendable {
     }
 
     /// Needs a login without prompts; the host key must already be known from the master connection.
+    public func quicHost(_ config: ConnectionConfig) -> String? {
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = ["-G"] + portArguments(config) + [config.host]
+        process.standardOutput = output; process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        var options: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
+            if parts.count == 2, options[parts[0]] == nil { options[parts[0]] = parts[1] }
+        }
+        if let jump = options["proxyjump"], jump != "none" { return nil }
+        if let proxy = options["proxycommand"], proxy != "none" { return nil }
+        return options["hostname"]
+    }
+
     public func spawnDirect(_ config: ConnectionConfig, command: String) throws -> RemoteProcess {
         guard config.authentication != .password else { return try spawn(config, command: command) }
         guard withLock({ entries[config.key]?.state.status }) == .connected else { throw RemoteError("请先连接 SSH 服务器") }

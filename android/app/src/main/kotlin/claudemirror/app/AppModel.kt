@@ -81,7 +81,9 @@ class AppModel(private val application: Application) {
     private val ssh = SshLauncher { host -> secrets.read(host.id).let { SshSecret(it.password, it.privateKey, it.passphrase) } }
     private val pool = AgentPool(
         ssh,
-        ServerResources.read { application.assets.open("server/$it") },
+        ServerResources.read { application.assets.open("server/$it") }.apply {
+            quicHelper = File(application.applicationInfo.nativeLibraryDir, "libtetherquic.so").takeIf { it.exists() }?.path
+        },
     )
     private val _hosts = MutableStateFlow(hostStore.load())
     private val engine = Engine(scope, pool, FileSessionStore(File(files, "sessions")), host = ::host)

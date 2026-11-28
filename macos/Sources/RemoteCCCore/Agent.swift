@@ -8,8 +8,20 @@ public struct ServerResources: Sendable {
     public let bundlePayload: String
     /// scripts/install-claude-remote.sh, run over SSH for one-click server setup.
     public let installScript: Data?
+    /// tether-quic for Linux servers by `uname -m` style arch, and the local client next to the app binary.
+    public let quicBinaries: [String: URL]
+    public let quicDigests: [String: String]
+    public let quicHelper: String?
 
     public init(directory: URL) throws {
+        var binaries: [String: URL] = [:], digests: [String: String] = [:]
+        for arch in ["arm64", "x64"] {
+            let file = directory.appendingPathComponent("quic/tether-quic-linux-\(arch)")
+            if let digest = try? attachmentDigest(file) { binaries[arch] = file; digests[arch] = digest }
+        }
+        quicBinaries = binaries; quicDigests = digests
+        let helper = directory.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("MacOS/TetherQuic").path
+        quicHelper = FileManager.default.isExecutableFile(atPath: helper) ? helper : nil
         installScript = try? Data(contentsOf: directory.appendingPathComponent("install-claude-remote.sh"))
         agentSource = try Data(contentsOf: directory.appendingPathComponent("remote-agent.cjs"))
         let manifest = try JSON.parse(try Data(contentsOf: directory.appendingPathComponent("manifest.json")))
@@ -18,6 +30,14 @@ public struct ServerResources: Sendable {
         }
         agentDigest = agent; bundleDigest = digest; bundlePayload = payload
     }
+}
+
+public struct QuicEndpoint: Sendable {
+    let helper: String
+    let host: String
+    let port: Int
+    let fingerprint: String
+    let token: String
 }
 
 /// One persistent SSH channel to remote-agent.cjs, multiplexing every small request.
@@ -67,9 +87,11 @@ public final class AgentChannel: @unchecked Sendable {
     var onClosed: (@Sendable () -> Void)?
 
     private let direct: Bool
+    private let quic: QuicEndpoint?
+    public private(set) var viaQuic = false
 
-    init(launcher: RemoteLauncher, config: ConnectionConfig, resources: ServerResources, direct: Bool = false) {
-        self.launcher = launcher; self.config = config; self.resources = resources; self.direct = direct
+    init(launcher: RemoteLauncher, config: ConnectionConfig, resources: ServerResources, direct: Bool = false, quic: QuicEndpoint? = nil) {
+        self.launcher = launcher; self.config = config; self.resources = resources; self.direct = direct; self.quic = quic
     }
 
     private var agentFile: String { "$HOME/.local/share/remotecc/agent/\(resources.agentDigest)/remote-agent.cjs" }
@@ -107,7 +129,9 @@ public final class AgentChannel: @unchecked Sendable {
 
     func start() async throws {
         // A direct login that fails (agent prompts, ProxyCommand, firewall) falls back to the shared connection.
-        var outcome = direct ? ((try? await launch(direct: true)) ?? "") : ""
+        var outcome = ""
+        if let quic, (try? await launch(quic: quic)) == "ready" { outcome = "ready"; viaQuic = true }
+        if outcome != "ready", direct { outcome = (try? await launch(direct: true)) ?? "" }
         if outcome != "ready" { outcome = try await launchInstallingNode() }
         if outcome == "install" {
             try await install()
@@ -149,8 +173,13 @@ public final class AgentChannel: @unchecked Sendable {
         }
     }
 
-    private func launch(direct: Bool = false) async throws -> String {
-        let process = try direct ? launcher.spawnDirect(config, command: startCommand) : launcher.spawn(config, command: startCommand)
+    private func launch(direct: Bool = false, quic: QuicEndpoint? = nil) async throws -> String {
+        let process = try quic.map { quic in
+            let process = try RemoteProcess(executable: quic.helper, arguments: ["connect", quic.host, String(quic.port), quic.fingerprint])
+            process.write(Data((quic.token + "\n").utf8))
+            return process
+        }
+            ?? (direct ? launcher.spawnDirect(config, command: startCommand) : launcher.spawn(config, command: startCommand))
         let state = LaunchState()
         return try await withCheckedThrowingContinuation { continuation in
             state.continuation = continuation
@@ -447,7 +476,8 @@ public final class AgentClient: @unchecked Sendable {
             let identity = UUID()
             let task = Task<AgentChannel, Error> { [weak self] in
                 guard let self else { throw RemoteError("客户端已关闭") }
-                let channel = AgentChannel(launcher: self.launcher, config: config, resources: self.resources, direct: files)
+                let quic = files ? await self.quicEndpoint(config) : nil
+                let channel = AgentChannel(launcher: self.launcher, config: config, resources: self.resources, direct: files, quic: quic)
                 channel.onFileChange = { [weak self] directories in self?.onFileChange?(config, directories) }
                 channel.onClosed = { [weak self] in self?.forget(key, identity: identity) }
                 do {
@@ -461,6 +491,34 @@ public final class AgentClient: @unchecked Sendable {
             return task
         }
         return try await task.value
+    }
+
+    /// Asks the main agent for a QUIC server, uploading tether-quic first if this version is missing. Nil means SSH.
+    private func quicEndpoint(_ config: ConnectionConfig) async -> QuicEndpoint? {
+        guard let helper = resources.quicHelper, !resources.quicDigests.isEmpty, let host = launcher.quicHost(config) else { return nil }
+        do {
+            let main = try await channel(config)
+            let params: JSON = ["binaries": .object(resources.quicDigests.mapValues { .string($0) })]
+            var reply = try await main.call("quic", params, timeout: 30)
+            if let target = reply["install"]?.string, let arch = reply["arch"]?.string, let binary = resources.quicBinaries[arch] {
+                try await installQuic(config, Data(contentsOf: binary), to: target)
+                reply = try await main.call("quic", params, timeout: 30)
+            }
+            guard let port = reply["port"]?.int, let fingerprint = reply["fingerprint"]?.string, let token = reply["token"]?.string else { return nil }
+            return QuicEndpoint(helper: helper, host: host, port: port, fingerprint: fingerprint, token: token)
+        } catch {
+            return nil
+        }
+    }
+
+    private func installQuic(_ config: ConnectionConfig, _ binary: Data, to target: String) async throws {
+        let script = "T=\(shellQuote(target)); D=\"$(dirname \"$T\")\"; P=\"$D/.install.$$\"; mkdir -p \"$D\" && chmod 700 \"$D\" && cat > \"$P\" && "
+            + "[ \"$(wc -c < \"$P\" | tr -d ' ')\" = \"\(binary.count)\" ] && chmod 700 \"$P\" && mv \"$P\" \"$T\" || { rm -f \"$P\"; exit 1; }"
+        let process = try launcher.spawn(config, command: "sh -c " + shellQuote(script))
+        process.readOutput(chunk: { _ in }, done: {})
+        process.write(binary)
+        process.closeInput()
+        if await process.waitForExit() != 0 { throw RemoteError("无法安装 QUIC 文件服务") }
     }
 
     private func forget(_ key: String, identity: UUID) {

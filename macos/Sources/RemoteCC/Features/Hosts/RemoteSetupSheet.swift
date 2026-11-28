@@ -53,6 +53,7 @@ struct RemoteSetupSheet: View {
         }
         .padding(24).frame(width: 560)
         .interactiveDismissDisabled(running)
+        .onAppear { if task == nil { start() } }
         .onDisappear { task?.cancel() }
     }
 
