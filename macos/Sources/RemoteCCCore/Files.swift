@@ -248,10 +248,15 @@ public final class RemoteFiles: @unchecked Sendable {
         let preview = try JSONDecoder().decode(FilePreview.self, from: JSONEncoder().encode(info))
         // Shares one transfer with a preview of the same file: two writers on one .partial corrupt it,
         // and whichever finishes first renames it away from the other.
-        let hit = FileManager.default.fileExists(atPath: contentURL(config, preview).path)
-        let local = try await cached(config, preview)
-        try FileManager.default.copyItem(at: local, to: temporary)
-        if hit { onProgress?(TransferProgress(config: config, name: info.name, bytes: info.size, total: info.size, finished: true)) }
+        // Files larger than the cache go straight to the destination; previews never fetch those.
+        if info.size <= cacheLimit {
+            let hit = FileManager.default.fileExists(atPath: contentURL(config, preview).path)
+            let local = try await cached(config, preview)
+            try FileManager.default.copyItem(at: local, to: temporary)
+            if hit { onProgress?(TransferProgress(config: config, name: info.name, bytes: info.size, total: info.size, finished: true)) }
+        } else {
+            try await transferDown(config, path: info.path, version: info.version, name: info.name, size: info.size, to: temporary)
+        }
 
         // Same-filesystem rename is atomic and refuses to replace a directory.
         // Never remove the previous destination before the replacement succeeds.
