@@ -4,55 +4,40 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>Tether</title>
         <item>
-            <title>0.28.0</title>
-            <pubDate>Fri, 27 Nov 2026 17:30:23 +0000</pubDate>
-            <sparkle:version>22</sparkle:version>
-            <sparkle:shortVersionString>0.28.0</sparkle:shortVersionString>
+            <title>0.29.0</title>
+            <pubDate>Sat, 28 Nov 2026 03:16:18 +0000</pubDate>
+            <sparkle:version>23</sparkle:version>
+            <sparkle:shortVersionString>0.29.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Tether v0.28.0
+            <description sparkle:format="markdown"><![CDATA[# Tether v0.29.0
 
-项目改名为 Tether。本次更新：服务器网页面板和一次性连接码，三端内置终端，断线约 20 秒内发现并自动重连。
+本次更新：Git 改动逐行评论发给 Claude，Android 分享和图片缩略图，Windows 自动更新改进，Android 正式签名。
 
 ## 三端
 
-- 粘贴连接码添加服务器：不用填地址、账号和密钥，也不用确认指纹。首次连接时换成本机生成的密钥，连接码随即作废。
-- 内置终端：走已有的 SSH 连接，在当前项目目录打开登录 shell。
-- 断线约 20 秒内发现并自动重连；5 秒没回应先提示“网络响应较慢”。
-- 成员页报错改成简短中文。
-
-## 服务器
-
-- `install-claude-remote.sh --panel` 安装网页面板：随机端口、路径和密码，只走 HTTPS。面板里可以添加、删除成员，复制连接码。
-- `--invite NAME` 在终端生成连接码；连接码 24 小时内有效，只能用一次。
-
-## macOS
-
-- 回车后输入框立即清空，不再重复发送。
-- Markdown 预览直接用已读取的内容，切回标签马上显示。
-- 去掉“较新消息”按钮：滚到底自动接上新消息，箭头一次回到最新。
-
-## Windows
-
-- 下载断点续传；执行账号的附件走已有连接。
-- 系统通知：回复完成、中断、需要确认、断线、重连。
+- Git 差异里可以逐行评论，评论合成一条消息发给 Claude。
+- Claude 拒绝回复时，可一键换备用模型重试；被撤回的半截回复从对话里删掉。
 
 ## Android
 
-- 浏览服务器文件，预览文本和图片；Git 改动和单文件差异。
-- 删除成员改为带“取消 / 删除”的确认框。
+- 对话里的图片显示缩略图。
+- 从相册或其他 App 分享文件和文字进来，选一个对话后放进输入框，不会自动发送。
+- 版本号和产品一致，APK 改为正式签名。**已装旧版的需要先卸载一次再安装**，之后可以直接覆盖升级。
+
+## Windows
+
+- 每 4 小时检查一次更新，下载中断后接着下，退出时自动安装。
+- 本版需要手动安装一次，之后自动更新。
 
 ## 其他
 
-- 更名 Tether，仓库地址改为 `xirichuyi/tether`，旧地址自动跳转。已有安装照常自动更新，保存的服务器和对话不变。
-- README 重写，细节文档移到 `docs/`。
-
-验证：自动化测试和三端 CI 通过；Android 文件、Git、成员页和终端在模拟器上测过。连接码导入还没有在三端上实际操作过；macOS 和 Windows 没有在真机上测过。
+- CI 升级到 Node 24 版本的 actions。
 ]]></description>
-            <enclosure url="https://github.com/xirichuyi/tether/releases/download/v0.28.0/tether-0.28.0-macOS-arm64.dmg" length="8509321" type="application/octet-stream" sparkle:edSignature="gKb27/2K9ufypYR+fK5ScEhmsGNBlechaY2yIMIrjisEkCNo4z5bvvomk/5wOn7SJp7K8kFPj3PP97Av+4G0CQ=="></enclosure>
+            <enclosure url="https://github.com/xirichuyi/tether/releases/download/v0.29.0/tether-0.29.0-macOS-arm64.dmg" length="8551076" type="application/octet-stream" sparkle:edSignature="79SNGr0Uz5RnN4vvkVOoR12oIQUyDBGefDMKl/f24+CgPJ7rFu+7KikPrTBEtQuG5kisH8/qpeW4cSgWDyrSAg=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: 7lU4iXSUWzR0Yi0RDNgJRW6DYkBFmDJ4tyfZwkuQ9YfU2wS5RarzhIUtJhVdPTaESsT5fERn8nsPGEMX9nXyAQ==
-length: 3019
+edSignature: In2lKyi5LgEmG1O/Gr2N+fVmVMTP3fv2NHdIUGP0hsg7ojrUtjT90r/pO7SQt4XvLK1vBF0mCDpfSS51qf2OAw==
+length: 2082
 -->
