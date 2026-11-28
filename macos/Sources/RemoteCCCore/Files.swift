@@ -185,7 +185,7 @@ public final class RemoteFiles: @unchecked Sendable {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         guard let files = try? FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: keys) else { return }
         let items = files.compactMap { url -> (URL, Date, Int)? in
-            guard !url.lastPathComponent.hasSuffix(".tmp"), let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
+            guard !url.lastPathComponent.hasSuffix(".tmp"), !url.lastPathComponent.hasSuffix(".partial"), let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
             return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
         }.sorted { $0.1 < $1.1 }
         var total = items.reduce(0) { $0 + $1.2 }
@@ -246,13 +246,12 @@ public final class RemoteFiles: @unchecked Sendable {
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".remotecc-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: temporary) }
         let preview = try JSONDecoder().decode(FilePreview.self, from: JSONEncoder().encode(info))
-        let local = contentURL(config, preview)
-        if FileManager.default.fileExists(atPath: local.path),
-           (try? FileManager.default.copyItem(at: local, to: temporary)) != nil {
-            onProgress?(TransferProgress(config: config, name: info.name, bytes: info.size, total: info.size, finished: true))
-        } else {
-            try await transferDown(config, path: info.path, version: info.version, name: info.name, size: info.size, to: temporary)
-        }
+        // Shares one transfer with a preview of the same file: two writers on one .partial corrupt it,
+        // and whichever finishes first renames it away from the other.
+        let hit = FileManager.default.fileExists(atPath: contentURL(config, preview).path)
+        let local = try await cached(config, preview)
+        try FileManager.default.copyItem(at: local, to: temporary)
+        if hit { onProgress?(TransferProgress(config: config, name: info.name, bytes: info.size, total: info.size, finished: true)) }
 
         // Same-filesystem rename is atomic and refuses to replace a directory.
         // Never remove the previous destination before the replacement succeeds.
