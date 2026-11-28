@@ -15,12 +15,34 @@ public sealed partial class MainWindow
 
     private void StartCheckingUpdates()
     {
-        Closed += (_,_) => updateLifetime.Cancel();
+        Closed += (_,_) => { updateLifetime.Cancel(); InstallOnQuit(); };
         if (DemoScene is null && !Environment.GetCommandLineArgs().Contains("--smoke-test"))
-            _ = CheckUpdatesAsync(false);
+            _ = CheckPeriodicallyAsync();
+    }
+    private async Task CheckPeriodicallyAsync()
+    {
+        using var timer=new PeriodicTimer(TimeSpan.FromHours(4));
+        try { do await CheckUpdatesAsync(false); while(await timer.WaitForNextTickAsync(updateLifetime.Token)); }
+        catch(OperationCanceledException) { }
+    }
+    private bool installing;
+    // Like Sparkle on macOS: a staged update the user did not install now goes in silently once the app quits.
+    private void InstallOnQuit()
+    {
+        if(installing || stagedInstaller is not {} installer || pendingUpdate is not {} update || !File.Exists(Path.Combine(AppContext.BaseDirectory,"unins000.exe"))) return;
+        try {
+            update.VerifyFileAsync(installer,CancellationToken.None).GetAwaiter().GetResult();
+            var start=new ProcessStartInfo(installer){UseShellExecute=true};
+            foreach(var arg in new[]{"/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART"})start.ArgumentList.Add(arg);
+            Process.Start(start)?.Dispose();
+        } catch { }
     }
     private async Task CheckUpdatesAsync(bool manual)
     {
+        if (stagedInstaller is not null) {
+            if (manual) status.Text=$"{pendingUpdate?.Tag} 已下载，可以重启更新";
+            return;
+        }
         if (!await updateLock.WaitAsync(0)) {
             if (manual) status.Text="正在检查或下载更新…";
             return;
@@ -59,6 +81,7 @@ public sealed partial class MainWindow
         var start=new ProcessStartInfo(installer){UseShellExecute=true};
         foreach(var arg in new[]{"/SILENT","/NORESTART","/UPDATEANDRESTART"})start.ArgumentList.Add(arg);
         using var process=Process.Start(start) ?? throw new IOException("无法启动安装程序");
+        installing=true;
         Close();
     }
 }

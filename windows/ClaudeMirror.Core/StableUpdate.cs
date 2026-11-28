@@ -60,29 +60,42 @@ public sealed record StableUpdate(string Tag, long Length, string Sha256)
         if (stream.Length != Length || !CryptographicOperations.FixedTimeEquals(await SHA256.HashDataAsync(stream,token), Convert.FromHexString(Sha256)))
             throw new InvalidDataException("安装包未通过 SHA-256 校验");
     }
-    public async Task<string> StageAsync(string directory, CancellationToken token)
+    public Task<string> StageAsync(string directory, CancellationToken token) =>
+        StageAsync(directory,new Uri($"{Repository}/releases/download/{Tag}/{Installer}"),token);
+
+    // A dropped download keeps its .part file and resumes from it on the next check.
+    internal async Task<string> StageAsync(string directory, Uri source, CancellationToken token)
     {
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory,$"Tether-{Tag}-Setup.exe");
         if (File.Exists(path)) {
-            try { await VerifyFileAsync(path,token); return path; } catch (InvalidDataException) { }
+            try { await VerifyFileAsync(path,token); return path; } catch (InvalidDataException) { File.Delete(path); }
         }
-        string temporary = Path.Combine(directory,Guid.NewGuid()+".part");
-        try {
-            using var response = await Client.GetAsync($"{Repository}/releases/download/{Tag}/{Installer}",HttpCompletionOption.ResponseHeadersRead,token);
-            response.EnsureSuccessStatusCode();
-            await using var source = await response.Content.ReadAsStreamAsync(token);
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-            deadline.CancelAfter(TimeSpan.FromMinutes(8));
-            await using (var output = File.Open(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None)) {
+        string partial = path+".part";
+        foreach (var stale in Directory.EnumerateFiles(directory,"*.part"))
+            if (stale != partial) File.Delete(stale);
+        await using (var output = File.Open(partial,FileMode.OpenOrCreate,FileAccess.Write,FileShare.None)) {
+            if (output.Length > Length) output.SetLength(0);
+            output.Seek(0,SeekOrigin.End);
+            if (output.Length < Length) {
+                using var request = new HttpRequestMessage(HttpMethod.Get,source);
+                if (output.Length > 0) request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(output.Length,null);
+                using var response = await Client.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,token);
+                response.EnsureSuccessStatusCode();
+                if (response.StatusCode != System.Net.HttpStatusCode.PartialContent) output.SetLength(0);
+                await using var stream = await response.Content.ReadAsStreamAsync(token);
                 var buffer = new byte[81920]; int count;
-                while ((count = await source.ReadAsync(buffer,deadline.Token)) != 0) {
-                    if (output.Length + count > Length) throw new InvalidDataException("安装包长度不符");
-                    await output.WriteAsync(buffer.AsMemory(0,count),deadline.Token);
+                using var idle = CancellationTokenSource.CreateLinkedTokenSource(token);
+                while (true) {
+                    idle.CancelAfter(TimeSpan.FromMinutes(1));
+                    if ((count = await stream.ReadAsync(buffer,idle.Token)) == 0) break;
+                    if (output.Length + count > Length) { output.SetLength(0); throw new InvalidDataException("安装包长度不符"); }
+                    await output.WriteAsync(buffer.AsMemory(0,count),token);
                 }
             }
-            await VerifyFileAsync(temporary,token);
-            File.Move(temporary,path,true);return path;
-        } finally { File.Delete(temporary); }
+        }
+        try { await VerifyFileAsync(partial,token); }
+        catch (InvalidDataException) { File.Delete(partial); throw; }
+        File.Move(partial,path,true); return path;
     }
 }
