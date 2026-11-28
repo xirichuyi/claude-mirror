@@ -121,7 +121,7 @@ public final class RemoteFiles: @unchecked Sendable {
         try Task.checkCancellation()
         var info = try response.decode(FilePreview.self)
         if info.notModified == true, let previous { return previous }
-        if thumbnailOnly && info.thumbnail != true { throw CancellationError() }
+        if thumbnailOnly && info.kind != "text" && info.thumbnail != true && response["inlineData"] == nil { throw CancellationError() }
         if info.kind == "image" || info.kind == "pdf" {
             let inline = response["inlineData"]?.string.flatMap { Data(base64Encoded: $0) }
             info.data = try Data(contentsOf: try await cached(config, info, inline: inline), options: .mappedIfSafe)

@@ -49,7 +49,7 @@ test('second turn resumes the same remote session; history stays local', async (
   await until(service, () => !service.runs.size);
   assert.equal(seen[0].resume, undefined);
   assert.equal(seen[1].resume, 'remote-1');
-  assert.equal(seen[1].permissionMode, 'default');
+  assert.equal(seen[1].permissionMode, undefined);
   assert.equal(session.messages.length, 4);
   assert.equal(session.status, 'idle');
   service.close();

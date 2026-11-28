@@ -13,9 +13,7 @@ struct ComposerArea: View {
     @State private var mentions: [FileEntry] = []
     @State private var mentionTask: Task<Void, Never>?
     @State private var dropTarget = false
-    @State private var changingModel = false
     @State private var showingCommands = false
-    @State private var showingModels = false
 
     private var id: String { model.activeId ?? "welcome-" + (model.currentConfig?.key ?? "local") }
     private var canSend: Bool {
@@ -284,37 +282,13 @@ struct ComposerArea: View {
 
     private var sessionControls: some View {
         let session = model.active
-        let preferences = session?.preferences
-        let modelName = preferences?.selectedModel.flatMap { $0.isEmpty ? nil : $0 }
-        let displayed = session?.capabilities?.models.first { $0.value == (modelName ?? "default") }?.displayName ?? modelName ?? session?.model ?? "模型"
-        let modes = ["default": "默认权限", "plan": "计划", "acceptEdits": "自动编辑", "bypassPermissions": "Full Access", "dontAsk": "拒绝未授权", "auto": "自动权限"]
+        let mode = session?.preferences?.permissionMode
         let busy = session?.isBusy ?? false
         return HStack(spacing: 4) {
             if session != nil {
-                Button { model.showPreferences = true } label: { Text(modes[preferences?.permissionMode ?? "default"] ?? "默认权限").font(.system(size: 11)).lineLimit(1) }
+                Button { model.showPreferences = true } label: { Text(mode == nil ? "远端默认" : PreferencesSheet.label(mode)).font(.system(size: 11)).lineLimit(1) }
                     .buttonStyle(QuietButtonStyle()).foregroundStyle(WorkbenchTheme.inkMuted).disabled(!model.isConnected)
                 Spacer(minLength: 2)
-                Button { showingModels.toggle() } label: {
-                    HStack(spacing: 4) {
-                        let title = changingModel ? "切换中…" : (displayed == "Default (recommended)" || displayed == "默认" || displayed == "default") ? "默认模型" : displayed
-                        Text(title.count > 20 ? String(title.prefix(19)) + "…" : title).font(.system(size: 11)).lineLimit(1).fixedSize()
-                        WorkbenchIcon(symbol: "chevron.down").font(.caption2)
-                    }
-                }.buttonStyle(QuietButtonStyle()).disabled(!model.isConnected || changingModel)
-                    .popover(isPresented: $showingModels, arrowEdge: .top) {
-                        SearchPicker(title: "模型", items: (session?.capabilities?.models ?? []).map {
-                            SearchPickerItem(id: $0.value, title: $0.value == "default" ? "远端默认（推荐）" : ($0.displayName ?? $0.value), detail: $0.value == "default" ? "跟随远端 Claude Code 的默认模型" : $0.value)
-                        }, selected: modelName ?? "default", refresh: { model.refreshCapabilities(force: true) }) { value in
-                            guard let session else { return }
-                            showingModels = false
-                            changingModel = true
-                            Task { @MainActor in
-                                defer { changingModel = false }
-                                do { try await model.engine?.selectModel(session.id, value == "default" ? "" : value) }
-                                catch { model.show(error.localizedDescription) }
-                            }
-                        }
-                    }
             }
             if session == nil { Spacer() }
             HStack(spacing: 8) {

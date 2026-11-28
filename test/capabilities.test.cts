@@ -137,10 +137,18 @@ test('Full Access startup flags allow live switching without changing the initia
   assert.equal(service.options(session, {}).allowDangerouslySkipPermissions, false);
   service.fullAccessAvailable = true;
   assert.equal(service.options(session, {}).allowDangerouslySkipPermissions, true);
-  assert.equal(service.options(session, {}).permissionMode, 'default');
+  assert.equal(service.options(session, {}).permissionMode, undefined);
   service.configure(session.id, { permissionMode: 'bypassPermissions', executionUser: 'claude-runner' });
   assert.equal(service.options(session, {}).permissionMode, 'bypassPermissions');
   session.messages.push({ role: 'user', text: 'context' });
   assert.throws(() => service.configure(session.id, { executionUser: 'another' }), /新对话/);
   await service.close();
+});
+
+test('An unset permission mode leaves the remote Claude settings in charge', () => {
+  const service = new ChatService({ load: () => [], save() {} });
+  const session = service.create({ host: 'test', directory: '/tmp' });
+  assert.equal('permissionMode' in service.options(session, {}), false);
+  service.configure(session.id, { permissionMode: 'plan' });
+  assert.equal(service.options(session, {}).permissionMode, 'plan');
 });

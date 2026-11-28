@@ -508,6 +508,22 @@ function parseAuthStatus(result, env = process.env) {
   return 'unknown';
 }
 
+// Claude's own permission default for this directory, read from its settings files (later files win).
+async function claudeDefaults(request) {
+  const folder = typeof request.directory === 'string' && request.directory ? resolve(request.directory) : null;
+  const files = [path.join(os.homedir(), '.claude', 'settings.json'),
+    ...(folder ? [path.join(folder, '.claude', 'settings.json'), path.join(folder, '.claude', 'settings.local.json')] : []),
+    '/etc/claude-code/managed-settings.json'];
+  const result: { permissionMode?: string } = {};
+  for (const file of files) {
+    try {
+      const mode = JSON.parse(await fsp.readFile(file, 'utf8'))?.permissions?.defaultMode;
+      if (typeof mode === 'string') result.permissionMode = mode;
+    } catch {}
+  }
+  return result;
+}
+
 async function claudeStatus() {
   const located = await run('sh', ['-c', 'command -v claude']);
   if (located.code) return { claude: null, auth: 'unknown' };
@@ -577,7 +593,7 @@ function storeAsAccount(request, file) {
 }
 
 const fileOperations = {
-  attachmentLookup, hello, claudeStatus, list: listing, preview, textPage, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
+  attachmentLookup, hello, claudeStatus, claudeDefaults, list: listing, preview, textPage, save, suggest, search, stat: request => regular(resolve(request.path, request.base)),
   pathInfo: request => metadata(resolve(request.path, request.base)),
   diff: gitDiffText, gitStatus, gitFileDiff, createWorktree, create: createEntry, rename: renameEntry, remove: removeEntry,
 };

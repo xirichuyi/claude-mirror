@@ -40,7 +40,7 @@ struct RemoteCCApp: App {
                 Button("显示 / 隐藏侧栏") { model.sidebarVisible.toggle() }.keyboardShortcut("b")
                 Button("显示 / 隐藏终端") { model.terminalVisible.toggle() }.keyboardShortcut("`", modifiers: .control).disabled(!model.isConnected)
                 Divider()
-                Button("模型与会话设置…") { model.showPreferences = true }
+                Button("权限…") { model.showPreferences = true }
                 Button("连接 SSH…") { model.showConnect = true }
                 #if DEBUG
                 Divider()

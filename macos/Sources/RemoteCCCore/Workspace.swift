@@ -72,21 +72,30 @@ public struct TreeRow: Identifiable, Equatable {
     public var hasUnsavedEdits: Bool { tabs.contains(where: \.isDirty) }
     private func changed() { onChange?() }
 
-    /// Fetches thumbnails for the first images of a folder that was just opened, one at a time,
-    /// so clicking one shows it at once. Stops when another folder is opened.
+    /// Quietly loads the first images and small text files of a folder that was just opened, one at a time
+    /// on the file channel, so clicking one shows it at once. Stops when another folder is opened.
     private func warm(_ listing: DirectoryListing) {
+        let binary: Set<String> = ["zip", "gz", "tgz", "xz", "bz2", "7z", "tar", "jar", "so", "dylib", "o", "a", "bin", "exe", "dll",
+                                   "class", "pyc", "mp3", "mp4", "mov", "wav", "gif", "ico", "pdf", "woff", "woff2", "ttf", "otf", "db", "sqlite"]
         let images = listing.entries.filter {
             !$0.directory && $0.size > 256 * 1024 && $0.size <= 20 * 1024 * 1024
                 && ["png", "jpg", "jpeg", "webp"].contains(URL(fileURLWithPath: $0.name).pathExtension.lowercased())
         }.prefix(8)
+        let texts = listing.entries.filter {
+            let ext = URL(fileURLWithPath: $0.name).pathExtension.lowercased()
+            return !$0.directory && $0.size > 0 && $0.size <= 256 * 1024 && !binary.contains(ext)
+                && !["png", "jpg", "jpeg", "webp"].contains(ext)
+        }.prefix(24)
         warming?.cancel()
-        guard !images.isEmpty else { return }
+        let candidates = Array(images) + Array(texts)
+        guard !candidates.isEmpty else { return }
         let files = self.files, config = self.config
         warming = Task(priority: .utility) {
-            for image in images {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            for file in candidates {
                 if Task.isCancelled { return }
-                if let cached = await files.cachedPreview(config, image.path), cached.version == image.version { continue }
-                await files.warm(config, image.path)
+                if let cached = await files.cachedPreview(config, file.path), cached.version == file.version { continue }
+                await files.warm(config, file.path)
             }
         }
     }
