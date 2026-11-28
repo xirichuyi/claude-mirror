@@ -1648,26 +1648,11 @@ async function tuneNetwork() {
   await run('sysctl', ['-q', '-p', conf]);
 }
 
-if (require.main === module) {
-  if (process.argv[2] === 'transfer') {
-    transfer(JSON.parse(process.argv[3])).catch(error => {
-      process.stderr.write(error.message + '\n');
-      process.exitCode = 1;
-    });
-  } else if (process.argv[2] === 'thumbnail') {
-    try { thumbnailCommand(process.argv[3]); } catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
-  } else serve();
-}
-
-module.exports = { fileOperations, historyOperations, historyScope, accountHistory, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
-  processCommand, persistenceWarning, workerCommand, parseAuthStatus, shrinkPNG };
-
 // ---------------------------------------------------------------- QUIC file channel (quic/)
 
 // The app uploads tether-quic once per version; `serve` pipes each authenticated QUIC stream into a new agent like this one.
 const QUIC_PORTS = '47000-47099';
 let quicServer: Promise<object> | null = null;
-
 const quicVerified = new Set<string>();
 
 async function quicOperation(request) {
@@ -1724,3 +1709,17 @@ async function openQuicPorts() {
   await fsp.mkdir(path.dirname(marker), { recursive: true });
   await fsp.writeFile(marker, '');
 }
+
+if (require.main === module) {
+  if (process.argv[2] === 'transfer') {
+    transfer(JSON.parse(process.argv[3])).catch(error => {
+      process.stderr.write(error.message + '\n');
+      process.exitCode = 1;
+    });
+  } else if (process.argv[2] === 'thumbnail') {
+    try { thumbnailCommand(process.argv[3]); } catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
+  } else serve();
+}
+
+module.exports = { fileOperations, historyOperations, historyScope, accountHistory, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
+  processCommand, persistenceWarning, workerCommand, parseAuthStatus, shrinkPNG };

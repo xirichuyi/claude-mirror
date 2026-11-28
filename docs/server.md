@@ -38,6 +38,15 @@ sh scripts/setup-remote.sh --runner claude-runner --project /opt/projects/my-app
 
 选项在安装任何东西之前检查，重复运行不会重复创建。完成后在新对话选择 Full Access，执行账号填 `claude-runner`。
 
+## 文件加速（QUIC）
+
+文件预览、下载和上传优先走 UDP（QUIC），不通时自动退回 SSH，不需要任何配置。
+
+- 服务端程序随客户端首次使用时上传到 `~/.local/share/remotecc/quic/`，按成员自己的账号运行，空闲 10 分钟退出。
+- 端口在 UDP `47000–47099` 中自动选择。root 登录时自动在 ufw / firewalld 放行一次；之后删掉规则不会再加回来。
+- 云服务器的安全组需要自己放行这段 UDP 端口；不放行也能用，只是走 SSH。
+- 加密用 TLS 1.3，证书指纹和一次性口令经 SSH 下发，不需要域名或证书。
+
 ## 多人共用一台服务器
 
 每人一个 Linux 账号、自己的 SSH 密钥和 Claude 登录；家目录为 `700`，对话、文件、附件、任务和用量互相看不到。以 root 连接时，服务器旁出现「成员」，可添加（账号 + 公钥）和删除。也可以在终端运行：

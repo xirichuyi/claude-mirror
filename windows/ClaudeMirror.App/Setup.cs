@@ -132,9 +132,9 @@ public sealed partial class MainWindow
         var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = "设置 " + (host?.Name ?? "服务器"), Content = panel, PrimaryButtonText = "开始安装", CloseButtonText = "关闭", Background = canvas };
         using var cancel = new CancellationTokenSource();
         int? result = null;
-        dialog.PrimaryButtonClick += async (_, e) =>
+        async Task Install()
         {
-            e.Cancel = true; dialog.IsPrimaryButtonEnabled = false; log.Text = ""; summary.Text = "正在安装…";
+            dialog.IsPrimaryButtonEnabled = false; log.Text = ""; summary.Text = "正在安装…";
             try
             {
                 result = await remote.InstallAsync(ServerResources, line => DispatcherQueue.TryEnqueue(() => { log.Text += line + "\n"; log.SelectionStart = log.Text.Length; }), cancel.Token);
@@ -142,7 +142,9 @@ public sealed partial class MainWindow
             catch (Exception error) { log.Text += ConnectionAdvice.Explain(error.Message) + "\n"; result = 1; }
             summary.Text = RemoteInstaller.Summary(result ?? 1);
             dialog.PrimaryButtonText = "重新安装"; dialog.IsPrimaryButtonEnabled = true;
-        };
+        }
+        dialog.PrimaryButtonClick += (_, e) => { e.Cancel = true; _ = Install(); };
+        dialog.Opened += (_, _) => _ = Install();
         await dialog.ShowAsync();
         cancel.Cancel();
         if (result == 0) await RecheckAsync();
