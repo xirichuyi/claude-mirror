@@ -32,4 +32,15 @@ public class PermissionTextTests
         Assert.Equal("Red, bright, Blue, and green", PermissionText.Answer(["Red, bright", "Blue"], "  and green "));
         Assert.Equal("", PermissionText.Answer([], "  "));
     }
+
+    [Fact] public void OnePickFormBecomesButtons()
+    {
+        var choice = PermissionText.SingleChoice(JsonNode.Parse("""
+            {"requestedSchema":{"type":"object","properties":{"choice":{"type":"string","enum":["retry_fallback","edit_prompt"],"enumNames":["用 b 重试"]}}}}
+            """));
+        Assert.NotNull(choice);
+        Assert.Equal("choice", choice.Value.Name);
+        Assert.Equal([("retry_fallback", "用 b 重试"), ("edit_prompt", "edit_prompt")], choice.Value.Options);
+        Assert.Null(PermissionText.SingleChoice(JsonNode.Parse("""{"requestedSchema":{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}}}}""")));
+    }
 }
