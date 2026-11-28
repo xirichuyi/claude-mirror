@@ -84,6 +84,7 @@ jobs:
         with:
           toolchain: '1.96.0'
       - run: cargo test --locked --manifest-path vendor/winc-preview/Cargo.toml -p winc-preview
+      - run: brew install zig && cargo install cargo-zigbuild --locked
       - run: sh macos/scripts/build-dmg.sh
       - name: Verify bundled Winc preview bridge
         run: WINC_PREVIEW_HELPER="$PWD/macos/dist/Tether.app/Contents/MacOS/WincPreview" python3 macos/Helpers/WincPreview/tests/smoke.py

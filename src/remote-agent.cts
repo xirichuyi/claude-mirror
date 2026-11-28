@@ -1535,6 +1535,7 @@ function serve() {
       return operation(request);
     },
     task: taskOperation,
+    quic: quicOperation,
     watchDirectories: request => watcher.set(Array.isArray(request.directories) ? request.directories : []),
     taskWatch: (request, token) => {
       void watchTask(request.taskId, packet => send({ sub: request.subscription, packet }), token).then(
@@ -1610,6 +1611,7 @@ function serve() {
   process.stdout.on('error', closed);
   send({ rcc: 'ready', pid: process.pid });
   void tuneNetwork().catch(() => {});
+  void openQuicPorts().catch(() => {});
 }
 
 // Long-distance links drop packets and cubic then crawls on a long-lived SSH connection; BBR is several
@@ -1659,3 +1661,59 @@ if (require.main === module) {
 
 module.exports = { fileOperations, historyOperations, historyScope, accountHistory, taskOperation, watchTask, finalizeTask, ownerAlive, stateDelta, createDirectoryWatcher, matchScore,
   processCommand, persistenceWarning, workerCommand, parseAuthStatus, shrinkPNG };
+
+// ---------------------------------------------------------------- QUIC file channel (quic/)
+
+// The app uploads tether-quic once per version; `serve` pipes each authenticated QUIC stream into a new agent like this one.
+const QUIC_PORTS = '47000-47099';
+let quicServer: Promise<object> | null = null;
+
+async function quicOperation(request) {
+  const arch = process.platform === 'linux' ? { arm64: 'arm64', x64: 'x64' }[process.arch] : undefined;
+  const digest = arch && request.binaries?.[arch];
+  if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) throw new Error('QUIC 不支持此服务器');
+  const binary = path.join(HOME, '.local/share/remotecc/quic', digest, 'tether-quic');
+  if (!fs.existsSync(binary)) return { install: binary, arch };
+  quicServer ??= startQuic(binary).catch(error => { quicServer = null; throw error; });
+  return quicServer;
+}
+
+function startQuic(binary) {
+  return new Promise<object>((done, fail) => {
+    const child = spawn(binary, ['serve', '--ports', QUIC_PORTS, '--', process.execPath, process.argv[1]], { stdio: ['pipe', 'pipe', 'ignore'] });
+    // Its stdin stays open while this agent lives; the agent exiting closes it and stops the server.
+    let text = '';
+    const timer = setTimeout(() => { child.kill(); fail(new Error('QUIC 启动超时')); }, 5000);
+    child.on('error', error => { clearTimeout(timer); fail(error); });
+    child.on('exit', () => { clearTimeout(timer); quicServer = null; fail(new Error('QUIC 已退出')); });
+    child.stdout.on('data', chunk => {
+      if (text.includes('\n')) return;
+      text += chunk;
+      if (!text.includes('\n')) return;
+      clearTimeout(timer);
+      try {
+        const { port, fingerprint, token } = JSON.parse(text.split('\n')[0]);
+        done({ port, fingerprint, token });
+      } catch { child.kill(); fail(new Error('QUIC 启动失败')); }
+    });
+  });
+}
+
+// Root logins open the QUIC ports in ufw or firewalld once; the marker keeps an administrator's later removal.
+async function openQuicPorts() {
+  if (process.platform !== 'linux' || process.getuid?.() !== 0) return;
+  const marker = '/var/lib/tether/quic-firewall';
+  if (await fsp.stat(marker).then(() => true, () => false)) return;
+  const run = (command, args) => new Promise<string | null>(done =>
+    execFile(command, args, { timeout: 15_000 }, (error, stdout) => done(error ? null : String(stdout))));
+  let opened = true;
+  if ((await run('ufw', ['status']))?.startsWith('Status: active')) {
+    opened = (await run('ufw', ['allow', QUIC_PORTS.replace('-', ':') + '/udp', 'comment', 'Tether files'])) !== null;
+  } else if ((await run('firewall-cmd', ['--state']))?.trim() === 'running') {
+    opened = (await run('firewall-cmd', ['--add-port=' + QUIC_PORTS + '/udp'])) !== null
+      && (await run('firewall-cmd', ['--permanent', '--add-port=' + QUIC_PORTS + '/udp'])) !== null;
+  }
+  if (!opened) return;
+  await fsp.mkdir(path.dirname(marker), { recursive: true });
+  await fsp.writeFile(marker, '');
+}

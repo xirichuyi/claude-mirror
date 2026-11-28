@@ -344,7 +344,7 @@ public final class RemoteFiles: @unchecked Sendable {
     }
 }
 
-private func attachmentDigest(_ file: URL) throws -> String {
+func attachmentDigest(_ file: URL) throws -> String {
 #if canImport(CryptoKit)
     let input = try FileHandle(forReadingFrom: file)
     defer { try? input.close() }

@@ -32,6 +32,9 @@ fn provider() -> Arc<CryptoProvider> { Arc::new(ring::default_provider()) }
 
 #[tokio::main]
 async fn main() {
+    if let Ok(filter) = std::env::var("TETHER_QUIC_LOG") {
+        tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("serve") => serve(&args[1..]).await,
@@ -82,7 +85,7 @@ async fn serve(args: &[String]) -> Result<(), Failure> {
             incoming = endpoint.accept() => {
                 let Some(incoming) = incoming else { return Ok(()) };
                 let (token, command) = (token.clone(), command.clone());
-                tokio::spawn(async move { let _ = session(incoming, &token, &command).await; });
+                tokio::spawn(async move { if let Err(error) = session(incoming, &token, &command).await { eprintln!("tether-quic: {error}"); } });
             }
         }
     }
